@@ -2,7 +2,43 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {validatePublicStage,endpointId,endpointRevision} from '../dist/packages/server/public-facts/validation.js';
 import {validatePublicResolution} from '../dist/packages/server/public-facts/contracts.js';
-import {publicStage} from './public-facts-fixture.mjs';
+import {publicStage,textHash} from './public-facts-fixture.mjs';
+
+function withDocumentText(value) {
+ const input=publicStage();input.texts[0].normalizedText=value;
+ if(typeof value==='string'){
+  input.envelope.documents[0].contentDigest=textHash(value);
+  input.envelope.normalized.records[0].contentDigest=textHash(value);
+ }
+ return input;
+}
+
+test('normalized documents accept ASCII beyond metadata cap through the exact 1MiB byte boundary',()=>{
+ const prefix=publicStage().texts[0].normalizedText;
+ for(const bytes of [8193,64*1024,1024*1024]){
+  const text=prefix.padEnd(bytes,'x');assert.equal(Buffer.byteLength(text),bytes);
+  assert.equal(validatePublicStage(withDocumentText(text)).texts[0].normalizedText,text);
+ }
+ assert.throws(()=>validatePublicStage(withDocumentText(prefix.padEnd(1024*1024+1,'x'))),{path:'$.texts[0].normalizedText'});
+});
+test('normalized document limit counts multibyte UTF8 rather than UTF16 characters',()=>{
+ const prefix=publicStage().texts[0].normalizedText,remaining=1024*1024-Buffer.byteLength(prefix);
+ const exact=prefix+'😀'.repeat(Math.floor(remaining/4))+'x'.repeat(remaining%4);
+ assert.equal(Buffer.byteLength(exact),1024*1024);assert.ok(exact.length<1024*1024);
+ assert.equal(validatePublicStage(withDocumentText(exact)).texts[0].normalizedText,exact);
+ for(const suffix of ['x','😀'])assert.throws(()=>validatePublicStage(withDocumentText(exact+suffix)),{path:'$.texts[0].normalizedText'});
+});
+test('document validator retains string/nonblank/control checks and does not widen metadata or quote limits',()=>{
+ const prefix=publicStage().texts[0].normalizedText;
+ for(const value of [null,1,[],{},'', ' \t\r\n',...['\u0000','\u0008','\u000b','\u000c','\u001f'].map(c=>prefix+c)]){
+  assert.throws(()=>validatePublicStage(withDocumentText(value)),{path:'$.texts[0].normalizedText'});
+ }
+ assert.doesNotThrow(()=>validatePublicStage(withDocumentText(prefix+'\t\r\n')));
+ const metadata=withDocumentText(prefix.padEnd(64*1024,'x'));metadata.envelope.documents[0].title='x'.repeat(501);
+ assert.throws(()=>validatePublicStage(metadata),{path:'$.envelope.documents[0].title'});
+ const quote=withDocumentText(prefix.padEnd(64*1024,'x'));quote.envelope.citations[0].supportingExcerpt='x'.repeat(2001);
+ assert.throws(()=>validatePublicStage(quote),{path:'$.envelope.citations[0].supportingExcerpt'});
+});
 
 test('public stage binds exact text, quote offsets, source records and identity evidence without scoring defaults',()=>{
  const input=publicStage(),validated=validatePublicStage(input);

@@ -55,6 +55,15 @@ describe('private public-citation staging and explicit intermediate identity rev
   assert.equal((await api.stage(a.token,input)).duplicate,true);assert.equal(await count(a,'public_fact_batches'),'1');
   await rejectsCode(()=>api.stage(a.token,{...input,idempotencyKey:'changed-key'}),'VERSION_CONFLICT');
  });
+ it('stages and retains a 64KiB document beyond the shared metadata string cap',async()=>{
+  const a=await owner(),input=stageInput(a),text=input.texts[0].normalizedText.padEnd(64*1024,'x');
+  input.texts[0].normalizedText=text;input.envelope.documents[0].contentDigest=textHash(text);input.envelope.normalized.records[0].contentDigest=textHash(text);
+  const result=await api.stage(a.token,input);assert.equal(result.graphVersion,'2');
+  const stored=(await pool.query("SELECT payload FROM public_fact_resources WHERE owner_user_id=$1 AND kind='DOCUMENT'",[a.user.userId])).rows[0].payload;
+  assert.equal(Buffer.byteLength(stored.normalizedText),64*1024);assert.equal(stored.normalizedText,text);assert.equal(stored.document.contentDigest,textHash(text));
+  const visible=await review(a,result);assert.equal(visible.citations[0].supportingExcerpt,'1');assert.equal(JSON.stringify(visible).includes('normalizedText'),false);
+  assert.equal((await graph(a)).people.length,1);assert.equal((await graph(a)).searchEdges.length,0);
+ });
  it('explicitly creates previously unknown intermediate people with citations and no social claims or fuzzy merge',async()=>{
   const a=await owner(),input=stageInput(a);input.envelope.proposals[0].object.mention='1';input.envelope.proposals[0].object.identityEvidenceIds=['i1_v1'];
   const batch=await api.stage(a.token,input),r=await review(a,batch),before=await graph(a),request=resolution(a,r);

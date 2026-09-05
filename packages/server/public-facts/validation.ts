@@ -9,6 +9,11 @@ import type {StagePublicFactsRequest} from './contracts.js';
 
 const require = (ok: unknown, rule: string) => {if (!ok) s.fail('$', rule);};
 const text = (max: number): s.Check => (v, p) => {s.string(v, p); if ((v as string).length > max) s.fail(p, 'bounded text');};
+/** Document bodies have a UTF-8 byte budget, independent of the shared metadata string cap. */
+const normalizedDocumentText: s.Check = (v, p) => {
+  if (typeof v !== 'string' || !v.trim() || Buffer.byteLength(v, 'utf8') > 1024 * 1024
+    || /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(v)) s.fail(p, 'nonempty document text within UTF-8 byte limit');
+};
 const nullableText = s.nullable(text(2000));
 const url: s.Check = (v, p) => {try {publicUrl(v);} catch {s.fail(p, 'public URL');}};
 const dateValue: s.Check = (v, p) => {
@@ -50,7 +55,7 @@ export function validatePublicStage(value: unknown): StagePublicFactsRequest {
   s.object({expectedGraphVersion: s.id, idempotencyKey: s.id,
     envelope: s.object({schemaVersion: s.literal(1), normalized: s.normalizedImport,
       documents: s.array(document, 1, 5), citations: s.array(citation, 1, 100), proposals: s.array(proposal, 1, 50)}),
-    texts: s.array(s.object({documentId: s.id, documentRevision: s.id, normalizedText: text(1024 * 1024)}), 1, 5)})(value, '$');
+    texts: s.array(s.object({documentId: s.id, documentRevision: s.id, normalizedText: normalizedDocumentText}), 1, 5)})(value, '$');
   const request = structuredClone(value as StagePublicFactsRequest), e = request.envelope;
   e.normalized = normalizeImportShape(e.normalized);
   const n = e.normalized, b = n.batch;
