@@ -1,6 +1,7 @@
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { createServer, type IncomingMessage, type RequestListener, type ServerResponse } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { BackendService, ServiceError, apiFailure, type AuthPort } from './service.js';
+import type { GoogleLoginPort } from './auth/google.js';
 import * as schema from '../../contracts/schema.js';
 
 /** Matches src/auth/session.ts; credentials and optional email are deliberately not returned here. */
@@ -9,7 +10,7 @@ export interface HttpAuthPort extends AuthPort {
   displaySession(userId:string):Promise<SessionView>;
   revokeSession(credential:unknown):Promise<void>;
 }
-export interface HttpDependencies { service:BackendService;auth:HttpAuthPort;browserOrigin:string }
+export interface HttpDependencies { service:BackendService;auth:HttpAuthPort;browserOrigin:string;oauth?:Pick<GoogleLoginPort,'start'|'callback'|'clearTransactionCookie'> }
 const sessionShape = schema.object({actor:schema.object({id:schema.id,displayName:schema.string}),scopes:schema.array(schema.object({id:schema.id,label:schema.string}))});
 const cookieName='projekt1_session';
 const bodyLimit=16*1024;
@@ -30,9 +31,9 @@ async function readJson(request:IncomingMessage):Promise<unknown> {
   for await(const chunk of request){length+=chunk.length;if(length>bodyLimit)throw new ServiceError('INVALID_INPUT',413);chunks.push(Buffer.from(chunk));}
   try{return JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{throw new ServiceError('INVALID_INPUT',400);}
 }
-export function createApiServer(deps:HttpDependencies) {
+export function createApiHandler(deps:HttpDependencies):RequestListener {
   const expectedOrigin=new URL(deps.browserOrigin).origin;
-  return createServer(async(request,response)=>{
+  return async(request,response)=>{
     const requestId=randomUUID();
     response.setHeader('Cache-Control','no-store');
     response.setHeader('X-Content-Type-Options','nosniff');
@@ -48,9 +49,20 @@ export function createApiServer(deps:HttpDependencies) {
         try {sessionShape(view,'$');if(view.actor.id!==actor.userId || new Set(view.scopes.map(s=>s.id)).size!==view.scopes.length)throw new Error();}catch{throw new ServiceError('INTERNAL',500);}
         json(response,200,view);return;
       }
-      if(method==='GET' && (url.pathname==='/api/auth/google/start'||url.pathname==='/api/auth/google/callback')) {
-        // A verified OAuth client, callback validation and durable account/session adapter are prerequisites.
-        throw new ServiceError('SOURCE_UNAVAILABLE',502);
+      if(method==='GET' && url.pathname==='/api/auth/google/start') {
+        if(!deps.oauth)throw new ServiceError('SOURCE_UNAVAILABLE',502);
+        const redirect=await deps.oauth.start();
+        response.setHeader('Set-Cookie',redirect.cookies);
+        response.writeHead(302,{Location:redirect.location});response.end();return;
+      }
+      if(method==='GET' && url.pathname==='/api/auth/google/callback') {
+        if(!deps.oauth)throw new ServiceError('SOURCE_UNAVAILABLE',502);
+        try {
+          // Preserve duplicate query parameters and the full raw cookie header for auth validation.
+          const redirect=await deps.oauth.callback(url.searchParams,request.headers.cookie);
+          response.setHeader('Set-Cookie',redirect.cookies);
+          response.writeHead(302,{Location:redirect.location});response.end();return;
+        }catch(error){response.setHeader('Set-Cookie',deps.oauth.clearTransactionCookie());throw error;}
       }
       if(method==='POST' && url.pathname==='/api/auth/logout') {
         await deps.auth.revokeSession(token);
@@ -68,5 +80,6 @@ export function createApiServer(deps:HttpDependencies) {
     }catch(error){
       if(!response.headersSent){const failure=apiFailure(error,requestId);json(response,failure.status,failure.body);}else response.end();
     }
-  });
+  };
 }
+export function createApiServer(deps:HttpDependencies) { return createServer(createApiHandler(deps)); }

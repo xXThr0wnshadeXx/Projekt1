@@ -1,15 +1,17 @@
-import { BackendService, ServiceError } from './service.js';
-import { createApiServer, type HttpAuthPort } from './http.js';
+import {createApplication,openPostgresStorage} from './application.js';
 
-// Explicitly unavailable ports: no fabricated account, session, graph, or search engine.
-const auth:HttpAuthPort={
-  resolveSession:async()=>null,
-  displaySession:async()=>{throw new ServiceError('UNAUTHENTICATED',401);},
-  revokeSession:async()=>{}, // No session store exists in this unconfigured composition.
-};
-const service=new BackendService({auth,reads:{authorizePrivateScope:async()=>null,readSnapshot:async()=>null}});
-const server=createApiServer({service,auth,browserOrigin:'http://127.0.0.1:5173'});
-server.requestTimeout=10000;server.headersTimeout=10000;
-server.listen(3001,'127.0.0.1',()=>console.log('API: http://127.0.0.1:3001 (auth/storage/search unconfigured)'));
-server.on('error',()=>{console.error('API could not bind its local port.');process.exitCode=1;});
-for(const signal of ['SIGINT','SIGTERM'] as const)process.on(signal,()=>server.close(()=>process.exit(0)));
+try {
+ const app=await createApplication({openStorage:openPostgresStorage});
+ app.server.on('error',()=>{console.error('Application could not listen.');void app.close().finally(()=>process.exit(1));});
+ app.server.listen(app.config.port,app.config.host,()=>{
+  console.log(`Application listening on port ${app.config.port}; auth=${app.configured.auth?'configured':'unavailable'}, storage=${app.configured.storage?'configured':'unavailable'}, search=${app.configured.search?'configured':'unavailable'}.`);
+ });
+ let stopping=false;
+ for(const signal of ['SIGINT','SIGTERM'] as const)process.on(signal,()=>{
+  if(stopping)return;stopping=true;void app.close().finally(()=>process.exit(0));
+ });
+}catch{
+ // Never serialize errors from providers, configuration URLs, migrations, or database drivers.
+ console.error('Application startup unavailable; verify private configuration and database migration.');
+ process.exitCode=1;
+}
