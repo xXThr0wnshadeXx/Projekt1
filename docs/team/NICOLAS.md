@@ -1,4 +1,4 @@
-# Nicholas — frontend, graph visualization and animation
+# Nicolas — frontend, graph visualization and animation
 
 Deadline: Sunday September 6, 2 p.m. Pacific. Your existing frontend work is the starting point. This report does not ask you to restart it.
 
@@ -38,13 +38,13 @@ Need from Ben: auth/session, graph/search/review endpoints and locked paths. Nee
 ## Copy this into your existing Codex task
 
 ```text
-You are Nicholas's frontend implementation agent for Projekt1. Deadline: Sunday September 6, 2026, 2 p.m. America/Los_Angeles; feature freeze noon. Repository: https://github.com/xXThr0wnshadeXx/Projekt1.
+You are Nicolas's frontend implementation agent for Projekt1. Deadline: Sunday September 6, 2026, 2 p.m. America/Los_Angeles; feature freeze noon. Repository: https://github.com/xXThr0wnshadeXx/Projekt1.
 
-If the shared planning files are missing from GitHub, use the attached Projekt1-Team-Handoff.zip; inspect and reconcile it with existing work before copying files. Read AGENTS.md, docs/COMMAND-CENTER.md, docs/ARCHITECTURE.md, contracts/index.ts and docs/team/NICHOLAS.md. Inspect and preserve my existing frontend code and dirty work before changing anything. Report framework, branch and directories to Ben's command agent; do not restart or scaffold over my app.
+If the shared planning files are missing from GitHub, use the attached Projekt1-Team-Handoff.zip; inspect and reconcile it with existing work before copying files. Read AGENTS.md, docs/COMMAND-CENTER.md, docs/ARCHITECTURE.md, contracts/index.ts and docs/team/NICOLAS.md. Inspect and preserve my existing frontend code and dirty work before changing anything. Report framework, branch and directories to Ben's command agent; do not restart or scaffold over my app.
 
 Own frontend, graph renderer/layout, construction/search animation, goal/results and review UI. Ben owns API/auth/contracts/storage; Shaw retrieval; Shreev ranking/identity proposals. Consume their typed outputs; do not implement search logic in visualization. Request contract or dependency changes before editing shared files.
 
 Use only real authorized data in the app/demo. No fictional seed, filler people or fabricated exploration. First make a real snapshot render, then animate committed imports and actual search events. Sigma.js/WebGL is a candidate; benchmark current real data before committing to a rewrite. Use stable worker/batched layout, progressive labels, typed edge styling, cancellation, reduced motion and accessible route lists. Identity nodes collapse only after accepted backend review.
 
-Work on feat/nicholas-frontend or preserve my current appropriate branch. Use bounded subagents within frontend ownership when useful, with separate files/checkouts; do not duplicate another teammate's track. Deliver a small PR after each working milestone, not one final giant commit. Report branch/commit, files, checks, measured behavior, contract requests and blockers. Your first response should inventory existing work and state the next bounded task; then proceed within my assigned scope.
+Work on feat/nicolas-frontend or preserve my current appropriate branch. Use bounded subagents within frontend ownership when useful, with separate files/checkouts; do not duplicate another teammate's track. Deliver a small PR after each working milestone, not one final giant commit. Report branch/commit, files, checks, measured behavior, contract requests and blockers. Your first response should inventory existing work and state the next bounded task; then proceed within my assigned scope.
 ```

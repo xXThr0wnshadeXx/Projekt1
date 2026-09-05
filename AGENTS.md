@@ -2,7 +2,7 @@
 
 Read docs/COMMAND-CENTER.md, docs/ARCHITECTURE.md, contracts/index.ts, and your named brief in docs/team before changing application code.
 
-- Ben owns shared contracts, backend/auth/persistence, integration, dependencies, and deployment. Nicholas owns frontend/rendering. Shaw owns retrieval/adapters. Shreev owns graph/AI.
+- Ben owns shared contracts, backend/auth/persistence, integration, dependencies, and deployment. Nicolas owns frontend/rendering. Shaw owns retrieval/adapters. Shreev owns graph/AI.
 - Preserve teammates' existing work. Inspect the current branch and working tree before edits; never reset, overwrite, or scaffold over another person's checkout.
 - Real product/demo data only. No fictional seed, filler nodes or fabricated paths. Anonymous algorithm unit tests must stay tests and never populate the app. Never commit personal imports, credentials or tokens to this public repository.
 - Separate observed contacts/follows, identity proposals, and supported introduction relationships. An LLM does not establish truth by assertion. No silent fuzzy identity merge.
