@@ -14,7 +14,7 @@ function safeSelectedPathIds(result: SearchResult, snapshot: GraphSnapshot): str
   const selected: string[] = [];
   for (let index = 0; index < result.events.length; index += 1) {
     const event = result.events[index] as Partial<SearchEvent>;
-    if (event.scopeId !== result.scopeId || event.graphVersion !== result.graphVersion || event.searchId !== result.searchId || event.seq !== index + 1 || !isSafeEvent(event)) return null;
+    if (event.scopeId !== result.scopeId || event.graphVersion !== result.graphVersion || event.searchId !== result.searchId || event.seq !== index || !isSafeEvent(event)) return null;
     if (event.type === 'PATH_SELECTED') {
       const pathId = (event as Extract<SearchEvent, { type: 'PATH_SELECTED' }>).pathId;
       if (typeof pathId !== 'string' || !resultPathIds.has(pathId) || selected.includes(pathId)) return null;
