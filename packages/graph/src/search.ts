@@ -71,7 +71,7 @@ export class BoundedRouteSearch implements SearchEngine {
       const stats: SearchStats = {
         expansions: 0,
         elapsedMs: Date.now() - startedAt,
-        stop: 'NO_TARGETS',
+        stop: targets.length === 0 ? 'NO_TARGETS' : 'EXHAUSTED_WITHIN_HOP_LIMIT',
         optimalWithinHopLimit: true,
         traceTruncated: false,
         omittedTraceEvents: 0,
