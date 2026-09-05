@@ -1,15 +1,15 @@
-# Optional Blueprint: choose this file explicitly in Render; manual setup is in docs/DEPLOYMENT.md.
-# Do not apply until main includes production/auth/storage composition and passes the release gate.
-# Both compute plans are free. No paid services, previews or automatic deploys are requested.
+# Optional service-only Blueprint. Observer owns applying it after integration review.
+# Existing warmpath-db stays separately managed; supply its INTERNAL URL privately.
+# Do not also create a manual web service. Creation can trigger an initial deploy.
 services:
   - type: web
-    name: projekt1-web
+    name: warmpath-web
     runtime: node
     plan: free
     region: oregon
     repo: https://github.com/xXThr0wnshadeXx/Projekt1
-    branch: main
-    autoDeployTrigger: off
+    branch: feat/ben-integration
+    autoDeployTrigger: "off"
     buildCommand: npm ci --include=dev && npm run build
     startCommand: node dist/packages/server/main.js
     healthCheckPath: /api/ready
@@ -30,15 +30,9 @@ services:
         sync: false
       - key: GOOGLE_CLIENT_SECRET
         sync: false
+      - key: GOOGLE_CONTACTS_REDIRECT_URI
+        sync: false
+      - key: PROVIDER_TOKEN_ENCRYPTION_KEY
+        sync: false
       - key: DATABASE_URL
-        fromDatabase:
-          name: projekt1-private
-          property: connectionString
-databases:
-  - name: projekt1-private
-    plan: free
-    region: oregon
-    databaseName: projekt1
-    user: projekt1
-    postgresMajorVersion: "16"
-    ipAllowList: []
+        sync: false

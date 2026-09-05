@@ -1,78 +1,87 @@
-# Production deployment handoff
+# WarmPath production deployment
 
-This milestone prepares a single Node service for Vite assets and the existing API. It does not deploy the app or create accounts. It adds `packages/server/deployment/runtime.ts`, a portable Dockerfile, optional `deploy/render.yaml`, and HTTP tests. Ben's integration owner must make the small composition changes below; auth, database migrations and search remain their respective adapters' responsibility. Do not claim readiness from an unconfigured process.
+Audited from integrated commit `5996b12b503dd01f124681f866b380e665cb8659` on September 5, 2026. This is a configuration and local verification handoff, not a deployed-release claim. The observer owns account setup, reviewed integration publication and actual deployment. Keep PR #6 draft until remaining acceptance gates are resolved; no automatic main merge.
 
-## Host choice and account steps
+## Existing resources and concrete free service settings
 
-No existing host configuration or compatible connected deployment tool was found. Docker, Render, Railway, Fly and Vercel CLIs are absent locally. The available Sites connector is not a compatible Node/Postgres deployment target without changing the application architecture. Use **Render Free web service + Free PostgreSQL in the same region** for the hackathon, with no paid resource creation. The account owner has confirmed there is no existing host or Google project.
+The observer reports an AVAILABLE **warmpath-db**, ID `dpg-daea208n74is73cvmjhg-a`, **Free ($0/month)**, **Oregon**, **PostgreSQL 18**, database `warmpath`, user `warmpath_app`, expiring **October 5, 2026**. The observer is disabling external DB traffic. Reuse this database and existing Google project/Web OAuth client/People API. Profile and separately consented Contacts readonly scopes are approved; card verification is complete. Paid resources are not authorized. These account facts were supplied by the observer, not independently inspected by the deployment task.
 
-1. Ben signs in at Render and authorizes the Projekt1 GitHub repository. Use manual **New → PostgreSQL**, choose **Free**, region **Oregon**, database `projekt1`, user `projekt1`. Record the internal connection URL privately. Disable external connections in the database access settings; the web service connects privately from the same region.
-2. Create **New → Web Service** from the same repository. Choose **Node**, **Free**, **Oregon**, the coordinator's reviewed integration branch/commit, and repository root. Build: `npm ci --include=dev && npm run build`. Start: `node dist/packages/server/main.js`. Auto-deploy: **Off** until the integrated release gate is green. Health check: `/api/ready`. Creating a service can trigger a first build; wait to create it until the composition is integrated.
-3. Set server environment `NODE_VERSION=22.19.0`, `NODE_ENV=production`, `HOST=0.0.0.0`, `PORT=10000`, and the non-secret browser build setting `VITE_AUTH_MODE=http`. Add `DATABASE_URL` using the private connection and `APP_ORIGIN=https://<actual-assigned-host>.onrender.com` with no trailing slash. Add `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` only in the private service environment. Nothing secret belongs in a `VITE_` setting, GitHub, browser bundle or chat.
-4. Ben creates a Google Cloud project and OAuth **Web application** client with the real application name and participating test users. Authorized production redirect: **the exact APP_ORIGIN followed by `/api/auth/google/callback`**. Local redirect remains `http://127.0.0.1:5173/api/auth/google/callback`. The helper derives that callback; if `GOOGLE_REDIRECT_URI` is supplied, it must match exactly. Initial sign-in requests identity/profile only; Google Contacts needs separate consent and People API setup.
-5. The integration runtime must validate config, connect the database, run reviewed idempotent migrations and install real adapters before its readiness probe can pass. Storage's exact entrypoint is `migratePrivateStorage(pool, resolve('migrations/001_private_storage.sql'))` from `packages/server/storage/migrate.ts`; call it before listening. Free Render services do not provide SSH/one-off jobs, so startup migration is required for this path. A failed migration must leave the new instance unavailable. Do not publish an administrative migration HTTP route.
+Create/configure one Render **Web Service**, not a Static Site:
 
-The optional Blueprint at `deploy/render.yaml` describes the same two free resources, uses a private DB connection, disables external DB access, and turns off automatic web deploys. Select its path explicitly when creating a Blueprint; it is not a root-level automatically selected file. It targets `main`, so use it only after the coordinator has merged and verified the integrated runtime. Manual setup is preferred while the host URL and Google client are being configured. Do not apply both workflows and create duplicate resources. [Render web services](https://render.com/docs/web-services), [Postgres connections](https://render.com/docs/postgresql-creating-connecting), [Blueprint specification](https://render.com/docs/blueprint-spec).
+- Name: `warmpath-web` (the assigned public hostname must be verified separately).
+- Repository: `https://github.com/xXThr0wnshadeXx/Projekt1`; branch: `feat/ben-integration`; root directory: repository root.
+- Runtime: **Node**; instance: **Free**; region: **Oregon**.
+- Build command: `npm ci --include=dev && npm run build`.
+- Start command: `node dist/packages/server/main.js`.
+- Auto-deploy: **Off**; health check: `/api/ready`; no disk, worker, preview or paid pre-deploy job.
+- Deploy only the exact reviewed integration SHA selected by the observer. Branch selection alone does not pin a release to a reviewed SHA. Confirm the deployed commit in Render before acceptance.
 
-Render's free plan is adequate for tomorrow's modest demo, subject to account eligibility. Web services sleep after 15 idle minutes and can take about a minute to wake; open the actual app before rehearsal. The database is limited to 1 GB and expires 30 days after creation, with no managed backups. Local files disappear on restart/redeploy: all retained real data and sessions must be in Postgres. The docs describe operation without a payment method, with suspension when included usage is exhausted. They do not guarantee an account will never face card verification. If signup requests billing/card verification, Ben handles that decision; these instructions authorize no payment or upgrade. Export any retained real data privately before database expiry. [Free plan limitations](https://render.com/docs/free).
+[deploy/render.yaml](../deploy/render.yaml) is an optional **service-only** Blueprint matching these settings. Select that path explicitly if using a Blueprint. It neither creates nor manages the existing database: enter its internal `DATABASE_URL` privately. Use either manual setup or this Blueprint, avoiding duplicate services. `sync: false` prompts for configuration; it does not provide values. Auto-deploy off does not prevent the initial service creation from building/deploying. [Render Web Services](https://render.com/docs/web-services), [Blueprint reference](https://render.com/docs/blueprint-spec).
 
-## Exact composition changes for integration owner
+## Exact environment and OAuth settings
 
-`http.ts`: extract the existing `createServer(async (request,response) => { ... })` callback into exported `createApiHandler(deps: HttpDependencies): RequestListener`. Keep `createApiServer(deps)` as `createServer(createApiHandler(deps))` for existing tests and Vite development. Keep every authentication, origin, body limit and error check in that handler unchanged. This helper adds no alternate auth path.
+Set these literal nonsecret values:
 
-`main.ts`: read `readRuntimeConfig(process.env)` once, use `config.browserOrigin` for the API and verified OAuth client, and choose the production handler when `config.production` is true. The structure is:
-
-```ts
-import { createServer } from 'node:http';
-import { createApiHandler } from './http.js';
-import { createProductionHandler, readRuntimeConfig } from './deployment/runtime.js';
-
-const config = readRuntimeConfig();
-// Integration supplies verified auth, service, storage and migrations here.
-const apiHandler = createApiHandler({ service, auth, browserOrigin: config.browserOrigin });
-const handler = config.production
-  ? await createProductionHandler({
-      apiHandler,
-      webRoot: config.webRoot,
-      readiness: async signal => {
-        // Actual bounded storage query + migrations/required-adapter readiness.
-        // Respect abort, pool connection timeout and query timeout.
-        return await checkApplicationReadiness(signal);
-      },
-    })
-  : apiHandler;
-const server = createServer(handler);
-server.requestTimeout = 10_000;
-server.headersTimeout = 10_000;
-server.listen(config.port, config.host);
+```text
+NODE_VERSION=22.19.0
+NODE_ENV=production
+HOST=0.0.0.0
+PORT=10000
+VITE_AUTH_MODE=http
 ```
 
-`service`, `auth` and `checkApplicationReadiness` above are composition placeholders, not provided fake implementations. Missing readiness always returns 503. The function should return true only after migrations, storage, real session/OAuth adapter configuration and the graph engine are installed. Do not call Google on every health probe. Do not return raw errors or credentials. Add bounded shutdown: stop accepting requests on SIGTERM, close idle connections and DB pool, allow active requests a short grace period, then exit. Integration owns the implementation and associated lifecycle tests.
+Set the following account-specific values in Render's private environment UI:
 
-The helper defaults production to `0.0.0.0:10000`; `PORT` and `HOST` are validated. It requires canonical HTTPS `APP_ORIGIN` in production. Render terminates TLS before forwarding HTTP, so cookies must derive `Secure` from configured public origin, not the internal socket or untrusted `Host`/`X-Forwarded-*` values. Do not widen CORS or allow arbitrary post-login redirect destinations. Production frontend uses relative `/api` routes on the same host. [Render port/TLS behavior](https://render.com/docs/web-services).
+- `APP_ORIGIN`: the **actual assigned HTTPS origin**, e.g. `https://<assigned-host>.onrender.com`, with no trailing slash, path, credentials or query. Do not assume the requested service name is the hostname.
+- `DATABASE_URL`: existing `warmpath-db` **internal connection URL**, supplied by the account owner; do not reconstruct it from an ID or use the external URL. Same account and Oregon region are required for the private connection. External access restrictions do not block same-region internal connections. [Render Postgres connections](https://render.com/docs/postgresql-creating-connecting).
+- `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`: the existing Google Web application client. These are server configuration, never `VITE_` variables.
+- `GOOGLE_CONTACTS_REDIRECT_URI`: exact `APP_ORIGIN` plus `/api/auth/google/contacts/callback`. This setting is **required** for Contacts and is not inferred.
+- `PROVIDER_TOKEN_ENCRYPTION_KEY`: existing securely retained Contacts key. The runtime requires exactly **32 bytes encoded as canonical unpadded base64url (43 characters)**. It uses AES-256-GCM with owner/scope/source/Google-subject/token-kind binding. Keep the same key across restarts/deploys; replacing or losing it makes existing encrypted grants unreadable. Do not regenerate it for a deploy or use the smoke fixture key. Rotation/re-encryption is not implemented.
 
-## Runtime behavior and checks
+`GOOGLE_REDIRECT_URI` is optional: runtime derives `APP_ORIGIN` plus `/api/auth/google/callback`. If set, it must match exactly or startup fails. Configure **both** resulting full HTTPS callback URLs on the existing Google OAuth Web client. Retain existing local callbacks separately. Render terminates public TLS; Node listens on internal HTTP. Secure cookies and OAuth/origin checks use configured `APP_ORIGIN`, not a forwarded header or internal listener URL. [Render port and TLS behavior](https://render.com/docs/web-services).
 
-- `/api/health`: process liveness only, GET/HEAD 200. It says nothing about login, database or usable demo data.
-- `/api/ready`: GET/HEAD 200 only on a successful supplied readiness check; missing, thrown or timed-out probes return 503 with a generic status. Concurrent probes share one in-flight check. The default deadline is 1.5 seconds; the database adapter must enforce cancellation/timeouts too. Render's release health check uses this route. [Health check guidance](https://render.com/docs/health-checks).
-- Other `/api` paths always reach the authenticated API, including unknown API paths. They can never receive SPA HTML.
-- Static GET/HEAD serves only allowed web asset types under the real built web root. Dotfiles, path traversal, escaped symlinks, source maps and malformed URL paths are refused. Assets missing from `/assets` are 404. Extensionless HTML navigations fall back to `index.html`; JSON fetches and unsupported methods do not. HTML is no-store, hash-named assets immutable, other assets revalidate. The built asset directory must stay immutable and contain no personal data.
+There is no `SESSION_SECRET`, provider-token key alias, AI API key, or environment flag that installs retrieval in this checkpoint. Session tokens are hashed in Postgres. Vite embeds build-time `VITE_` values into public assets, so only `VITE_AUTH_MODE=http` belongs there. The integration owner maintains the private env-file runner; this handoff does not add a competing runner or read/copy `private-data/server.env`.
 
-Verified in this worktree on Node 22.19.0: server compilation, full web/server production build, and 5 deployment tests covering configuration, real HTTP navigation/assets/API separation, traversal/symlinks, HEAD, readiness failure and timeout. Socket tests require loopback permission under the Codex sandbox. Run:
+## Actual runtime and migration behavior
+
+The existing `main.ts` already composes Node HTTP, the real PostgreSQL store, Google identity/Contacts adapters, the evidence-backed goal resolver and bounded graph search. `createApplication` mounts `dist/web` and `/api` on the same origin in production. No composition patch remains to be applied from the old deployment milestone.
+
+Startup opens a pool (maximum 10 connections), applies **001_private_storage.sql followed by 002_contacts_grants.sql**, prunes expired auth transactions, verifies the built web entrypoint, then allows listening. Both SQL files must ship in `migrations/`; TypeScript compilation does not copy them. Each migration has its own transaction, advisory lock and SHA-256 entry in `app_migrations`. Restart skips unchanged applied migrations. A checksum mismatch or SQL/connection failure prevents the process from listening and logs a generic startup failure. Migration 001 remains committed if 002 fails; after fixing the cause, replay resumes at 002. Never edit applied SQL or clear migration history to bypass the check. No public migration endpoint is provided.
+
+The migrations use ordinary tables, composite unique/foreign-key constraints, JSONB `->>` checks, regular expressions, bigint and timestamptz; they require no extension or superuser. The local smoke executes both as a non-superuser database/schema owner, verifies their digests, and replays them through a process restart. PostgreSQL 18 documentation supports these constructs; no SQL syntax incompatibility was found by inspection. **Execution was on local PostgreSQL 12.15, not PostgreSQL 18.** PostgreSQL 18 startup/schema privileges remain a host verification gate. `warmpath_app` must have ownership/CREATE rights in the target schema plus normal table access; the deployment task has not inspected or changed live grants. [PostgreSQL 18 CREATE TABLE](https://www.postgresql.org/docs/18/sql-createtable.html), [JSON operators](https://www.postgresql.org/docs/18/functions-json.html).
+
+Native Render deployment retains SQL in the checkout and runs from its root. Startup migration also avoids reliance on shell access or one-off jobs, unavailable on Free. The portable Dockerfile copies the built Node/browser artifacts and both migrations, prunes development dependencies and runs as `node`. Its health check uses `/api/ready`. **Docker is unavailable locally; no image was built or run.** Native Node is the tested deployment recipe. If Docker is selected later, build/run verification is a separate gate. There is currently no `public/` directory; revisit explicit Docker build-stage copies if frontend assets/layout change.
+
+## Readiness means infrastructure, not demo acceptance
+
+- `/api/health`: GET/HEAD 200 for process liveness, even during a DB outage.
+- `/api/ready`: GET/HEAD 200 when storage, configured identity OAuth and search adapters exist and a bounded database `SELECT 1` succeeds. Missing adapters, connection failure, thrown checks or the 1.5-second probe deadline produce generic 503. Probes share concurrent work; pool connection acquisition is limited to one second. No Google call occurs per probe. Render uses this endpoint to gate traffic. [Render health checks](https://render.com/docs/health-checks).
+- Missing/malformed Contacts callback or encryption key is caught by composition and disables **Contacts only**. Login and readiness may still succeed. A valid-looking but incorrect client secret likewise is not verified with Google by readiness.
+- At the audited SHA, `main.ts` does **not inject a retriever**. Authenticated `POST /api/imports/google` returns `502 SOURCE_UNAVAILABLE` while readiness can return 200. No Render environment value can supply missing code. Shaw/Ben must integrate and verify the reviewed adapter. Readiness also does not prove People API permissions, an active consent grant, usable real data, an evidenced route, browser event playback or Contacts race fixes.
+- Unknown `/api` routes stay JSON 404. Signed-out graph/search return 401 with valid request shape/origin. SPA fallback applies to extensionless HTML navigation, not JSON fetches or missing assets. Static routing refuses dotfiles, traversal, escaped symlinks and disallowed file types including source maps. HTML is no-store; hashed assets are immutable. Never place personal files in `dist/web`.
+
+## Repeatable local production smoke
+
+From an isolated checkout, build with the lockfile, then run:
 
 ```sh
-npm ci
-npm run build
-node --test tests/deployment-runtime.test.mjs
+npm ci --include=dev
+VITE_AUTH_MODE=http npm run build
+PG_BIN=/absolute/path/to/postgresql/bin node deploy/smoke-production.mjs
+node --test tests/deployment-runtime.test.mjs tests/application.test.mjs
 ```
 
-The test worktree temporarily reused the existing integration `node_modules` through a local symlink, removed before commit; no dependency manifest was changed. Docker itself is not installed, so an actual container build/run remains unverified. The current Dockerfile copies only application source/build dependencies into the build stage and uses a non-root runtime stage. It requires the storage milestone's `migrations/` directory, absent from this baseline, and copies it into the final image. After integration, validate with:
+On the verification machine `PG_BIN=/Library/PostgreSQL/12/bin`. PostgreSQL binaries must already exist; the script installs nothing. Loopback permission is required. This is a dedicated gate, not part of root npm scripts. It **accepts no database URL or env file**, strips inherited provider/DB/Node options from child environments, creates its own temporary loopback-only cluster and non-superuser test database, and deletes it after stopping its processes. It runs actual `dist/packages/server/main.js` with production mode and a reserved HTTPS `.invalid` origin, using two anonymous test accounts/sessions solely in that cluster. Authorization URLs are inspected without following them; no live Google callback or provider retrieval is attempted.
 
-```sh
-docker build -t projekt1-demo .
-docker run --rm --env-file /absolute/private/path/projekt1-production.env -p 10000:10000 projekt1-demo
-```
+The gate checks built Vite assets/navigation/HEAD/cache behavior, static/API isolation, real 001/002 startup and replay, signed-out and other-owner rejection, origin enforcement, actual search's honest no-target result, configured callback/Secure-cookie attributes, unavailable retrieval despite readiness, restart persistence, logout and DB-outage 503 versus liveness 200. It checks HTTP headers on loopback, not browser TLS/cookie delivery. Existing deployment tests additionally exercise traversal, symlinks and readiness timeout. This does not seed product data or prove a successful real import.
 
-The env file must be outside the repository. This serves plain HTTP at the internal listener; use an HTTPS reverse proxy matching `APP_ORIGIN` for actual OAuth. The native Render recipe avoids any local Docker requirement. Startup migration loads `/app/migrations/001_private_storage.sql` in the container; TypeScript compilation alone does not copy SQL. If the frontend later adds a `public/` directory, add an explicit build-stage copy before building Vite; the current baseline has none. The coordinator must verify the complete artifact when integrating teammates' output.
+Observed September 5: Node 22.19.0 production build passed; production smoke passed against PostgreSQL 12.15; all **14** selected deployment/application tests passed, zero skips. Build used existing integration dependencies via a temporary local `node_modules` symlink, not a fresh `npm ci`; no package or lockfile changes. Initial sandbox-only socket runs failed with EPERM, then passed with authorized loopback execution. Full integration tests and clean installation remain the integration owner's gate on the final combined SHA.
 
-Release gate: integrated typechecks/tests/build pass; actual deployed `/api/ready` returns 200; signed-out graph/search remain 401; real Google callback and logout work; one owner's import survives restart and is inaccessible to another account; Nicolas's UI renders real committed nodes and Shreev's search results; refresh on the actual graph route works. Deployment is not complete until these checks run against the live assigned URL.
+## Remaining release and rehearsal gate
+
+1. Integration owner resolves/reviews the two Contacts findings in OBSERVER-HANDOFF.md, injects Shaw's reviewed retriever, resolves the frontend/server event sequence mismatch, and supplies explicit supported relationship/current-affiliation review and search projection. Reconcile those historical findings against the **final** integration SHA; this audit does not claim fixes absent from its baseline. Run clean install, integrated typechecks/tests/build and this production smoke on that SHA.
+2. Observer confirms exact nonsecret settings, existing key/client values, both production callback registrations, external DB access disabled, and free plans. Publish the reviewed integration commit and manually deploy that exact commit. Verify PostgreSQL 18 startup/migrations and actual HTTPS `/api/ready` 200; a healthy probe alone cannot approve the demo.
+3. On the assigned HTTPS URL, a consenting participant completes real identity login, separate Contacts consent, retrieval, private review/commit, graph rendering, supported goal/ranked path and actual event playback. Confirm no fabricated route when evidence is insufficient. Verify Secure-cookie delivery, browser refresh and logout, retained imported records after restart, signed-out API rejection and another account's inability to read/search the owner's scope. Keep records/tokens out of public logs and handoffs.
+4. Rehearse on the presenting account/device by September 6 at 1 p.m. Pacific; deadline is 2 p.m. Open the app before rehearsal: Free services sleep after 15 idle minutes and may need about a minute to wake. Free local files are ephemeral; the DB has 1 GB capacity, a 30-day lifetime and no managed backups. Arrange any authorized private export before the reported October 5 expiry; no paid upgrade is implied. Account verification does not remove usage limits or guarantee availability. [Render Free limitations](https://render.com/docs/free).
+
+Until these gates pass, report **production configuration/local smoke verified; live provider, PostgreSQL 18 and end-to-end release acceptance pending**. No deployment or main merge was performed by this task.

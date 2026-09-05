@@ -7,7 +7,7 @@ COPY tsconfig*.json vite.config.ts index.html ./
 COPY contracts ./contracts
 COPY packages ./packages
 COPY src ./src
-# Supplied by Ben's private-storage milestone; needed by startup migration loader.
+# Both reviewed SQL files are loaded by application startup before listening.
 COPY migrations ./migrations
 ENV VITE_AUTH_MODE=http
 RUN npm run build && npm prune --omit=dev
@@ -21,7 +21,6 @@ COPY --from=build --chown=node:node /app/dist ./dist
 COPY --from=build --chown=node:node /app/migrations ./migrations
 USER node
 EXPOSE 10000
-# Liveness only. Hosting deploy gate should use /api/ready.
-HEALTHCHECK --interval=30s --timeout=3s --start-period=20s --retries=3 CMD node -e "fetch('http://127.0.0.1:'+process.env.PORT+'/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
-# Requires the main.ts composition change described in docs/DEPLOYMENT.md.
+# Infrastructure readiness only; live provider/demo acceptance is a separate gate.
+HEALTHCHECK --interval=30s --timeout=3s --start-period=20s --retries=3 CMD node -e "fetch('http://127.0.0.1:'+process.env.PORT+'/api/ready',{signal:AbortSignal.timeout(2500)}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
 CMD ["node", "dist/packages/server/main.js"]
