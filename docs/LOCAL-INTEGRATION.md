@@ -150,3 +150,12 @@ Precise remaining gaps for the next observer:
 - Keep private-data files out of publication. No deployment or real-provider access has been performed by this task.
 
 No further implementation work is scheduled here. Root/new observer owns continuation and publication.
+
+### Additional Contacts review follow-up
+
+Command reports that the observer automation is paused. The independent Contacts review is at `/Users/benjamindemayo/Documents/GitHub/work/projekt1-contacts-review.md`. It reports two reproduced P2 findings on `5c7f80a`, which the next observer must verify against the current implementation and route for fixes:
+
+- The callback can commit a Contacts grant after logout because session validity is not rechecked transactionally at grant commit.
+- Early refresh rejects an access token that is still valid during its final 60 seconds when no usable refresh token exists.
+
+These findings are carried forward from the independent review; this stopping task has not independently reverified or fixed them. Passing integration tests does not resolve either finding. No fixes or new validation were started, and continuation remains with the next observer.
