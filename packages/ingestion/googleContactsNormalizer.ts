@@ -1,4 +1,4 @@
-import type { CandidateBatch, Evidence, Id, IngestionAdapter } from '../../contracts/index';
+import type { CandidateBatch, Evidence, Id, IngestionAdapter } from '../../contracts/index.js';
 
 /**
  * The narrow, provider-shaped subset read from People API connections.list.
