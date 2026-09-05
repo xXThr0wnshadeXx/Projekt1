@@ -11,7 +11,7 @@ export type ReviewState = 'PENDING' | 'CONFIRMED' | 'REJECTED';
 export interface SnapshotKey { scopeId: Id; graphVersion: Version }
 /** scopeId is authorized server-side for the authenticated actor. It is not an authorization token. */
 export interface SourceSummary {
-  id: Id; provider: 'GOOGLE_CONTACTS' | 'LINKEDIN_EXPORT' | 'INSTAGRAM_EXPORT' | 'MANUAL' | 'PUBLIC_PROFILE';
+  id: Id; provider: 'GOOGLE_CONTACTS' | 'LINKEDIN_EXPORT' | 'INSTAGRAM_EXPORT' | 'MANUAL' | 'PUBLIC_PROFILE' | 'PUBLIC_ARTICLE';
   label: string; origin: Origin; importedAt: ISODateTime;
 }
 /** Display-safe evidence only. Raw imports, email addresses and tokens are not part of graph responses. */

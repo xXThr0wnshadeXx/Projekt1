@@ -28,7 +28,7 @@ export const state = literal('PENDING','CONFIRMED','REJECTED');
 export const supported = (value: Check) => object({value,confidence:score,evidenceIds,state});
 export const relationshipKind = literal('FAMILY','PARENT_OF','CLOSE_FRIEND','FRIEND','PROFESSOR_STUDENT','COWORKER','FORMER_COWORKER','CLASSMATE','ACQUAINTANCE','UNKNOWN');
 export const observedKind = literal('CONTACT_SAVED','FOLLOWS','CONNECTED_ON_PLATFORM','CO_PARTICIPANT');
-export const source = object({id,provider:literal('GOOGLE_CONTACTS','LINKEDIN_EXPORT','INSTAGRAM_EXPORT','MANUAL','PUBLIC_PROFILE'),label:string,origin:literal('USER_PROVIDED','AUTHORIZED_API','PUBLIC_SOURCE'),importedAt:date});
+export const source = object({id,provider:literal('GOOGLE_CONTACTS','LINKEDIN_EXPORT','INSTAGRAM_EXPORT','MANUAL','PUBLIC_PROFILE','PUBLIC_ARTICLE'),label:string,origin:literal('USER_PROVIDED','AUTHORIZED_API','PUBLIC_SOURCE'),importedAt:date});
 export const evidence = object({id,sourceId:id,summary:string,observedAt:date,confidence:score,publicUrl:optional(url),claimKind:literal('IDENTITY','RELATIONSHIP','AFFILIATION')});
 export const organization = object({id,name:string,industry:optional(string)});
 export const person = object({id,displayName:string,aliases:strings,identityIds:ids,affiliations:array(object({organizationId:id,role:optional(string),current:nullable(boolean),support:supported(boolean)})),location:optional(supported(string)),identityConfidence:score,updatedAt:date});
