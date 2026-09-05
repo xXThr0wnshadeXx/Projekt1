@@ -19,7 +19,9 @@
     "build:web": "npm run typecheck:web && vite build",
     "preview": "vite preview",
     "test": "npm run build:server && node --test tests/*.test.mjs",
-    "check:integration": "npm run typecheck && npm run typecheck:graph && npm test"
+    "check:integration": "npm run typecheck && npm run typecheck:graph && npm test",
+    "dev:private": "npm run build:server && node scripts/private-env.mjs dev",
+    "start:private": "node scripts/private-env.mjs start"
   },
   "dependencies": {
     "google-auth-library": "11.0.2",
