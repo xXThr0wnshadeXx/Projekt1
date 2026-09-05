@@ -2,8 +2,10 @@ import {createServer,type Server} from 'node:http';
 import {Pool} from 'pg';
 import {resolve} from 'node:path';
 import {PgStore} from './storage/postgres.js';
-import {migratePrivateStorage} from './storage/migrate.js';
+import {migratePrivateStorage,migrateContactsStorage} from './storage/migrate.js';
 import type {AuthStore} from './auth/ports.js';
+import {GoogleContacts,readGoogleContactsConfig} from './auth/contacts.js';
+import type {ContactsStore} from './auth/contacts-ports.js';
 import {GoogleAuth,readGoogleAuthConfig} from './auth/google.js';
 import {createApiHandler,type HttpAuthPort} from './http.js';
 import {BackendService,ServiceError,type ReadPort,type ImportPort,type GoalPort} from './service.js';
@@ -11,7 +13,7 @@ import type {SearchEngine} from '../../contracts/index.js';
 import {createProductionHandler,readRuntimeConfig,type RuntimeConfig} from './deployment/runtime.js';
 
 export interface ApplicationStorage {
- store:AuthStore & ReadPort & ImportPort;
+ store:AuthStore & ReadPort & ImportPort & ContactsStore;
  migrate():Promise<void>;
  probe(signal:AbortSignal):Promise<boolean>;
  close():Promise<void>;
@@ -37,12 +39,21 @@ export async function createApplication(options:ApplicationOptions={}) {
   }
   const oauth=storage && googleConfig?new GoogleAuth(storage.store,googleConfig):undefined;
   const auth=oauth??unavailableAuth;
+  // Contacts is independently optional: incomplete/invalid consent settings must not disable login.
+  let contactsConfig:ReturnType<typeof readGoogleContactsConfig>=null;
+  try{contactsConfig=readGoogleContactsConfig(googleConfig,env);}catch{contactsConfig=null;}
+  const contacts=storage&&oauth&&contactsConfig?new GoogleContacts(auth,storage.store,storage.store,contactsConfig):undefined;
+  // In-process retrieval only. This secret-returning method is never installed as an HTTP route.
+  const contactsAccess:Pick<GoogleContacts,'getFreshAccessToken'>={getFreshAccessToken:(credential,sourceId)=>{
+   if(!contacts)throw new ServiceError('SOURCE_UNAVAILABLE',502);
+   return contacts.getFreshAccessToken(credential,sourceId);
+  }};
   const service=new BackendService({auth,reads:storage?.store??{authorizePrivateScope:async()=>null,readSnapshot:async()=>null},...(storage?{imports:storage.store}:{}),...(options.search??{})});
   const ready=async(signal:AbortSignal)=>Boolean(storage&&oauth&&options.search)&&!signal.aborted&&await storage!.probe(signal);
-  const api=createApiHandler({auth,service,browserOrigin:config.browserOrigin,...(oauth?{oauth}:{})});
+  const api=createApiHandler({auth,service,browserOrigin:config.browserOrigin,...(oauth?{oauth}:{}),...(contacts?{contacts}:{})});
   const handler=config.production?await createProductionHandler({apiHandler:api,webRoot:config.webRoot,readiness:ready}):api;
   const server=createServer(handler);server.requestTimeout=25000;server.headersTimeout=10000;
-  return {server,config,readiness:ready,close:()=>closeApplication(server,storage),configured:{storage:Boolean(storage),auth:Boolean(oauth),search:Boolean(options.search)}};
+  return {server,config,contactsAccess,readiness:ready,close:()=>closeApplication(server,storage),configured:{storage:Boolean(storage),auth:Boolean(oauth),contacts:Boolean(contacts),search:Boolean(options.search)}};
  }catch(error){await storage?.close();throw error;}
 }
 /** Stop acceptance immediately, then bound active request and database shutdown time. */
@@ -60,7 +71,7 @@ export async function openPostgresStorage(databaseUrl:string):Promise<Applicatio
  const store=new PgStore(pool);
  return {
   store,
-  migrate:async()=>{await migratePrivateStorage(pool,resolve('migrations/001_private_storage.sql'));await store.pruneExpiredAuth(Date.now());},
+  migrate:async()=>{await migratePrivateStorage(pool,resolve('migrations/001_private_storage.sql'));await migrateContactsStorage(pool,resolve('migrations/002_contacts_grants.sql'));await store.pruneExpiredAuth(Date.now());await store.pruneExpiredContactsTransactions(Date.now());},
   close:()=>pool.end(),
   probe:async(signal)=>{
    if(signal.aborted)return false;

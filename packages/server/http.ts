@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type RequestListener, type ServerResponse } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { BackendService, ServiceError, apiFailure, type AuthPort } from './service.js';
+import type { GoogleContacts } from './auth/contacts.js';
 import type { GoogleLoginPort } from './auth/google.js';
 import * as schema from '../../contracts/schema.js';
 
@@ -10,7 +11,7 @@ export interface HttpAuthPort extends AuthPort {
   displaySession(userId:string):Promise<SessionView>;
   revokeSession(credential:unknown):Promise<void>;
 }
-export interface HttpDependencies { service:BackendService;auth:HttpAuthPort;browserOrigin:string;oauth?:Pick<GoogleLoginPort,'start'|'callback'|'clearTransactionCookie'> }
+export interface HttpDependencies { service:BackendService;auth:HttpAuthPort;browserOrigin:string;oauth?:Pick<GoogleLoginPort,'start'|'callback'|'clearTransactionCookie'>;contacts?:Pick<GoogleContacts,'start'|'callback'|'clearTransactionCookie'> }
 const sessionShape = schema.object({actor:schema.object({id:schema.id,displayName:schema.string}),scopes:schema.array(schema.object({id:schema.id,label:schema.string}))});
 const cookieName='projekt1_session';
 const bodyLimit=16*1024;
@@ -63,6 +64,25 @@ export function createApiHandler(deps:HttpDependencies):RequestListener {
           response.setHeader('Set-Cookie',redirect.cookies);
           response.writeHead(302,{Location:redirect.location});response.end();return;
         }catch(error){response.setHeader('Set-Cookie',deps.oauth.clearTransactionCookie());throw error;}
+      }
+      if(method==='POST' && url.pathname==='/api/auth/google/contacts/start') {
+        const input=await readJson(request);schema.object({scopeId:schema.id})(input,'$');
+        if(!deps.contacts)throw new ServiceError('SOURCE_UNAVAILABLE',502);
+        const redirect=await deps.contacts.start(token,(input as {scopeId:string}).scopeId);
+        response.setHeader('Set-Cookie',redirect.cookies);
+        json(response,200,{authorizationUrl:redirect.location});return;
+      }
+      if(method==='GET' && url.pathname==='/api/auth/google/contacts/callback') {
+        try {
+          if(!deps.contacts)throw new ServiceError('SOURCE_UNAVAILABLE',502);
+          const redirect=await deps.contacts.callback(url.searchParams,request.headers.cookie);
+          if(redirect.location!==`${expectedOrigin}/`)throw new ServiceError('INTERNAL',500);
+          response.setHeader('Set-Cookie',redirect.cookies);
+          response.writeHead(303,{Location:redirect.location});response.end();return;
+        }catch(error){
+          response.setHeader('Set-Cookie',deps.contacts?.clearTransactionCookie()??`projekt1_contacts_oauth=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${expectedOrigin.startsWith('https:')?'; Secure':''}`);
+          throw error;
+        }
       }
       if(method==='POST' && url.pathname==='/api/auth/logout') {
         await deps.auth.revokeSession(token);

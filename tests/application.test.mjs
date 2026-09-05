@@ -45,3 +45,15 @@ test('composition derives omitted OAuth callback and rejects conflicting explici
  await assert.rejects(createApplication({env:{...env,GOOGLE_REDIRECT_URI:'https://other.example/api/auth/google/callback'},openStorage:async()=>{opened=true;return db;}}),/GOOGLE_REDIRECT_URI/);
  assert.equal(opened,false);
 });
+test('missing or invalid Contacts configuration does not break configured identity login',async()=>{
+ for(const contactsEnv of [{},{GOOGLE_CONTACTS_REDIRECT_URI:env.APP_ORIGIN+'/api/auth/google/contacts/callback'},{PROVIDER_TOKEN_ENCRYPTION_KEY:'invalid'},{GOOGLE_CONTACTS_REDIRECT_URI:'https://other.example/callback',PROVIDER_TOKEN_ENCRYPTION_KEY:Buffer.alloc(32,1).toString('base64url')}]){
+  const app=await createApplication({env:{...env,...contactsEnv},openStorage:async()=>storage([])});
+  assert.equal(app.configured.auth,true);assert.equal(app.configured.contacts,false);
+  assert.throws(()=>app.contactsAccess.getFreshAccessToken('unused','s0'),error=>error.code==='SOURCE_UNAVAILABLE');await app.close();
+ }
+});
+test('complete Contacts config exposes only a bound server-side credential access facade',async()=>{
+ const app=await createApplication({env:{...env,GOOGLE_CONTACTS_REDIRECT_URI:env.APP_ORIGIN+'/api/auth/google/contacts/callback',PROVIDER_TOKEN_ENCRYPTION_KEY:Buffer.alloc(32,1).toString('base64url')},openStorage:async()=>storage([])});
+ assert.equal(app.configured.contacts,true);assert.deepEqual(Object.keys(app.contactsAccess),['getFreshAccessToken']);
+ await assert.rejects(app.contactsAccess.getFreshAccessToken(null,'s0'),error=>error.code==='UNAUTHENTICATED');await app.close();
+});
