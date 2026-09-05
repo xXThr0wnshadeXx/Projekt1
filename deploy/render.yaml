@@ -1,0 +1,44 @@
+# Optional Blueprint: choose this file explicitly in Render; manual setup is in docs/DEPLOYMENT.md.
+# Do not apply until main includes production/auth/storage composition and passes the release gate.
+# Both compute plans are free. No paid services, previews or automatic deploys are requested.
+services:
+  - type: web
+    name: projekt1-web
+    runtime: node
+    plan: free
+    region: oregon
+    repo: https://github.com/xXThr0wnshadeXx/Projekt1
+    branch: main
+    autoDeployTrigger: off
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: node dist/packages/server/main.js
+    healthCheckPath: /api/ready
+    envVars:
+      - key: NODE_VERSION
+        value: 22.19.0
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: PORT
+        value: "10000"
+      - key: VITE_AUTH_MODE
+        value: http
+      - key: APP_ORIGIN
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: DATABASE_URL
+        fromDatabase:
+          name: projekt1-private
+          property: connectionString
+databases:
+  - name: projekt1-private
+    plan: free
+    region: oregon
+    databaseName: projekt1
+    user: projekt1
+    postgresMajorVersion: "16"
+    ipAllowList: []
