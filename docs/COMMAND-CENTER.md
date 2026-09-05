@@ -2,7 +2,20 @@
 
 **Deadline: Sunday, September 6, 2026, 2:00 p.m. Pacific. Feature freeze noon; rehearsal 1 p.m.**
 
-This is the shared coordination entry point. Ben's existing Codex task is the command/planning agent. Teammates keep their own Codex tasks, accounts and existing code. No application implementation agent has been dispatched by this planning handoff; two bounded planning reviewers checked data access and graph contracts.
+This is the shared coordination entry point. The active observer owns integration and release; the previous planning task is stopped. Preserve teammates’ existing code and use bounded tasks with isolated worktrees. Current implementation and acceptance state below supersedes the original launch plan.
+
+## Current checkpoint — September 5, 2026
+
+Published integration `9e96543e581094e8851e6454bb5471b7f35e2297` updates draft PR #6. It includes main `e80cc4d`, Shreev’s graph/goal relay, private Google identity/Contacts composition, import review/approval, Shaw’s latest parser and the exact zero-based playback fix. Strict server/browser build and 24 focused tests passed for the latest milestone; prior full integration checkpoint passed 209 tests against disposable PostgreSQL. These are code checks, not real-user acceptance.
+
+- Existing backend task now owns a bounded provider-retrieval relay after Shaw’s capacity handoff, reusing his parser. Provider retrieval remains absent from production until reviewed and injected.
+- Contacts P2 fixes are committed separately at `315548e`; independent PostgreSQL review is active. They are not yet integrated or accepted for live use.
+- New real-fact backend task owns explicit owner assertions anchored to canonical saved-contact observations and exact affiliation review. The small confirmed-only persistence projector does not alter Shreev’s ranking/target engine. Contract and provenance gates are coordinator-owned; no automatic friendship or willingness inference.
+- Nicolas retains frontend/import/review/animation ownership. LinkedIn export is a separate proposed authorized source; Google remains the current integrated source path.
+- New deployment-readiness task owns deployment artifacts and disposable production smoke checks. Observer owns actual account configuration and release.
+- Ben explicitly approved profile sign-in plus separately consented read-only Contacts. Google saved those scopes. Ben completed Render verification; free `warmpath-db` is available in Oregon with external traffic disabled and expires October 5. No paid plan is authorized.
+
+**Still unverified:** real login/Contacts callback, provider retrieval/import, confirmed positive route, browser construction/search playback, restart persistence and deployed flow. Existing preview processes predate the latest code and must be restarted deliberately. Keep PR #6 draft; no automatic main merge. Every actual push/pull gets an exact-commit handoff in issue #2.
 
 ## Assignment map
 
@@ -13,9 +26,9 @@ This is the shared coordination entry point. Ben's existing Codex task is the co
 
 ## What the command agent does
 
-Maintain architecture, contract version, task board and integration gate. Review module handoffs against contracts, identify blockers, and prepare precise prompts for the responsible agent. Do not independently recreate another teammate's feature. Do not assume access to another person's Codex session; teammates post branch/commit and reports here or in their PR. No monitoring automation is created by this pack.
+Maintain architecture, contract version, task board and integration gate. Review module handoffs against contracts, identify blockers, and prepare precise prompts for the responsible agent. Do not independently recreate another teammate's feature. Do not assume access to another person's Codex session; teammates post branch/commit and reports here or in their PR. The existing observer heartbeat is active on the new observer task through the deadline; unchanged status stays quiet.
 
-## Immediate launch sequence
+## Original launch sequence (historical)
 
 1. Each teammate gives their agent the repository link and their brief's kickoff prompt. Use the existing Nicolas/Shaw task where possible so its local context is retained.
 2. Each agent inspects current repo/local work and reports branch, framework, files owned and next bounded deliverable. Do not pull over conflicting dirty files or reset them; preserve on a branch first.

@@ -1,40 +1,46 @@
-# Projekt1 task board — real-data plan
+# Projekt1 task board — evidence-based checkpoint
 
-Only planning work is complete at handoff. Existing Nicolas/Shaw implementation is underway but not inspected. No application completion is implied by the architecture or contracts.
+Updated September 5, 2026. Deadline September 6 at 2 p.m. Pacific; feature freeze noon, rehearsal 1 p.m. Main remains separate from draft integration PR #6. Code-complete and real-user acceptance are distinct.
 
-## Complete in command task
-- [x] Confirm Nicolas frontend / Shaw retrieval ownership.
-- [x] Reinspect shared main: license only; preserve paused local prototype without publishing it.
-- [x] Draft revised real-data architecture, typed wire contracts, four briefs and kickoff prompts.
-- [x] Review source access and graph design with two bounded planning reviewers.
+## Implemented and checked in integration
 
-## P0 — first integrated real graph
-- [ ] Ben B0: collect branch/path/framework inventory and freeze contract v1/runtime schemas.
-- [ ] Shaw W1: prove one participating owner's actual source; capability/count report; deliver CandidateBatch.
-- [ ] Ben B1: auth + private storage + import transaction + graph version; depends W1 for actual records.
-- [ ] Nicolas N1: real snapshot renderer and measured layout; controls/empty states can proceed before W1.
-- [ ] Nicolas N2: play committed GraphBuildEvents, not fabricated construction; depends B1 for integration.
-- [ ] Shreev S1: projection policy and evidence-supported targets; pure work independent of APIs.
-- [ ] Shreev S2/S3: bounded weighted top-K + score breakdown + oracle tests.
-- [ ] Ben B3: search API over authorized snapshot; depends B1 + S2.
-- [ ] Nicolas N3/N4: real search playback, cancellation and ranked path UI; depends events contract immediately, B3 only at integration.
+- [x] Existing Vite/React frontend preserved; modular Node backend and runtime contracts established.
+- [x] Google identity/session, private PostgreSQL storage and separate encrypted Contacts composition.
+- [x] Authorized graph/search with Shreev’s weighted engine and supported current-affiliation targets.
+- [x] Private Contacts import staging, safe review and explicit observation approval HTTP routes.
+- [x] Shaw parser integrated with NodeNext compatibility and structural validation.
+- [x] Exact zero-based search playback compatibility fix integrated.
+- [x] Private environment dev/start runner prepared; browser subprocess excludes server secrets.
 
-## P1 — cross-site evidence and reviewed identities
-- [ ] Shaw W2/W3: reliable pagination/reimport/cancellation/provenance.
-- [ ] Shaw W5: second actual source or export; preserve source semantics.
-- [ ] Shreev S5: identity proposal signals, no automatic fuzzy merges.
-- [ ] Ben B4: versioned review accept/reject + reversible link ledger.
-- [ ] Nicolas N5: review cards + accepted identity collapse/undo state.
-- [ ] Shreev S6: structured text extraction after core route/identity work, with timeout/invalid-output fallback.
+Latest published integration `9e96543`: server/browser build and 24 focused tests passed. Earlier complete integration checkpoint passed 209 tests with disposable PostgreSQL. Neither establishes a real import or route.
 
-## Release gates
-- [ ] Ben: clean integrated run/type/test/build and endpoint checks.
-- [ ] Ben + Shreev: unauthorized edges absent from paths, targets, evidence and events.
-- [ ] Shaw + Ben: source failure, duplicate import and deletion/revocation behavior.
-- [ ] Nicolas: actual browser interactions, reduced motion and real-data scale measurements.
-- [ ] Ben: 1 p.m. rehearsal, local real-data fallback, submission requirements verified.
+## Active bounded implementation/review
 
-## Deferred unless proven early
-Gmail metadata, LinkedIn partner API, arbitrary Instagram mutual lookup, automatic broad enrichment, 3D, unconstrained large-graph search and unrestricted shared network pooling. No fictional-data fallback.
+- [ ] Contacts P2 fixes `315548e`: independent immutable-commit review, then integration. Fix agent reports 96 focused checks passing; not yet independently accepted.
+- [ ] Backend task: bounded People API retriever/pagination relay after Shaw’s capacity handoff, reusing his parser; transport review and injection follow.
+- [ ] Real-fact backend task: explicit versioned relationship/current-affiliation decisions, private attestation ledger, opt-in confirmed directed search projection. No inferred relationships from contacts.
+- [ ] Nicolas: Contacts connect/import/review controls and actual committed construction playback; fact forms use the agreed narrow contract.
+- [ ] Deployment task: reconcile current production artifacts and run disposable production smoke checks; observer handles release.
+- [ ] Shreev: confirm resumed ownership and review projection semantics; existing engine/goal work already integrated, do not duplicate.
 
-Statuses should be updated by the owner with a branch/commit and evidence of completion. Break a large item into a small PR instead of changing ownership informally.
+## Account preparation
+
+- [x] Existing Google project/client/People API retained; profile/openid and separately consented Contacts readonly approved and saved.
+- [x] Ben completed Render verification. Free PostgreSQL available, private network only; expires October 5.
+- [ ] Free web service, private server settings, production HTTPS callbacks and deployed acceptance. Paid plans are not approved.
+
+## Required real-data acceptance
+
+- [ ] Restart latest reviewed app with existing private config and database; migrations/readiness verified.
+- [ ] Real owner sign-in, separate Contacts consent, source retrieval and private staged review/approval.
+- [ ] Real saved contacts render without promoting observations into friendships.
+- [ ] Explicit truthful relationship/current-affiliation confirmation yields one supported positive route; unknown willingness/openings remain unknown.
+- [ ] Actual graph construction/search playback, reduced motion, version consistency and reload behavior.
+- [ ] Cross-user isolation and private persistence after restart.
+- [ ] Deployed flow and local real-data fallback rehearsed on presenting account/device.
+
+## Deferred unless independently proven
+
+LinkedIn user export is a separate source proposal; do not assume availability or silently switch source scope. Gmail, unrestricted crawling, broad enrichment, automatic fuzzy identity merges, invented networks and pooled private graphs are excluded. No extra source or AI extraction should delay the first supported route.
+
+Owners report exact commit, checks, limitations and next action. Observer posts issue #2 after every actual push/pull; no force push, dirty overwrite or automatic main merge.

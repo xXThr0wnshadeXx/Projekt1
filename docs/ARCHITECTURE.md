@@ -1,5 +1,7 @@
 # Projekt1 — real-network architecture v1
 
+Implementation status: the original design below includes historical planning assumptions. The app now uses the preserved Vite + React frontend, Node/TypeScript backend and PostgreSQL snapshot persistence. Runtime validation, auth, import review and search are implemented; current verified state and outstanding acceptance gates are in COMMAND-CENTER.md and BACKLOG.md. Do not interpret the original license-only inventory or framework defaults below as current state.
+
 Decision date: Saturday, September 5, 2026. Deadline: Sunday, September 6, 2:00 p.m. America/Los_Angeles. Owner: Ben, with the command/planning Codex task coordinating.
 
 **This plan supersedes the previous fictional-data prototype plan. Only real, supported information belongs in the product or demo.** Application implementation is delegated to the four named owners; this handoff adds documentation and typed contracts only.
