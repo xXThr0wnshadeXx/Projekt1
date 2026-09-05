@@ -7,12 +7,8 @@ import type { CandidateBatch, Evidence, Id, IngestionAdapter } from '../../contr
  */
 export interface GooglePeopleConnection {
   resourceName?: unknown;
-  names?: Array<{ displayName?: unknown }>;
-  organizations?: Array<{
-    name?: unknown;
-    title?: unknown;
-    current?: unknown;
-  }>;
+  names?: unknown;
+  organizations?: unknown;
 }
 
 export interface GoogleContactsPayload {
@@ -29,6 +25,19 @@ export interface GoogleContactsNormalizationContext {
   sourceId: Id;
   batchId: Id;
 }
+
+/**
+ * `current` is part of Ben's pending shared-contract update. Keeping it on
+ * the adapter output now avoids losing provider-supplied tenure state while
+ * this branch is reviewed against the current main contract.
+ */
+export type GoogleContactsCandidateBatch = Omit<CandidateBatch, 'affiliations'> & {
+  affiliations: Array<
+    CandidateBatch['affiliations'][number] & {
+      current?: boolean | null;
+    }
+  >;
+};
 
 const GOOGLE_PLATFORM = 'GOOGLE_CONTACTS';
 const ISO_UTC_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/;
@@ -60,6 +69,30 @@ function nonEmptyString(value: unknown): string | undefined {
 
 function isUtcIsoDate(value: unknown): value is string {
   return typeof value === 'string' && ISO_UTC_PATTERN.test(value) && !Number.isNaN(Date.parse(value));
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function arrayField(value: unknown, warning: string, warnings: string[]): unknown[] {
+  if (value === undefined) return [];
+  if (Array.isArray(value)) return value;
+
+  warnings.push(warning);
+  return [];
+}
+
+function currentStatus(value: unknown, warnings: string[]): boolean | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value === 'boolean') return value;
+
+  warnings.push('GOOGLE_CONTACTS_ORGANIZATION_INVALID_CURRENT');
+  return null;
 }
 
 function ownerRef(input: GoogleContactsPayload): string | undefined {
@@ -95,11 +128,11 @@ function evidence(
 export function normalizeGoogleContacts(
   input: GoogleContactsPayload,
   context: GoogleContactsNormalizationContext,
-): CandidateBatch {
+): GoogleContactsCandidateBatch {
   const warnings: string[] = [];
   const people: CandidateBatch['people'] = [];
   const observedLinks: CandidateBatch['observedLinks'] = [];
-  const affiliations: CandidateBatch['affiliations'] = [];
+  const affiliations: GoogleContactsCandidateBatch['affiliations'] = [];
   const allEvidence: Evidence[] = [];
   const seenResourceNames = new Set<string>();
 
@@ -144,8 +177,13 @@ export function normalizeGoogleContacts(
     }
     seenResourceNames.add(resourceName);
 
-    const namedDisplay = connection.names
-      ?.map((name) => nonEmptyString(name?.displayName))
+    const names = arrayField(
+      connection.names,
+      'GOOGLE_CONTACTS_NAMES_NOT_ARRAY',
+      warnings,
+    );
+    const namedDisplay = names
+      .map((name) => nonEmptyString(asRecord(name)?.displayName))
       .find((name): name is string => Boolean(name));
     // A saved Google contact can legitimately have no usable name. Keep it as
     // a distinct record with an opaque source handle; do not invent a name.
@@ -176,21 +214,42 @@ export function normalizeGoogleContacts(
     });
     allEvidence.push(identityEvidence, contactEvidence);
 
-    for (const organization of connection.organizations ?? []) {
-      const organizationName = nonEmptyString(organization?.name);
+    const organizationKeys = new Set<string>();
+    const organizations = arrayField(
+      connection.organizations,
+      'GOOGLE_CONTACTS_ORGANIZATIONS_NOT_ARRAY',
+      warnings,
+    );
+    for (const organizationValue of organizations) {
+      const organization = asRecord(organizationValue);
+      if (!organization) {
+        warnings.push('GOOGLE_CONTACTS_MALFORMED_ORGANIZATION');
+        continue;
+      }
+
+      const organizationName = nonEmptyString(organization.name);
       if (!organizationName) continue;
 
+      const role = nonEmptyString(organization.title);
+      const current = currentStatus(organization.current, warnings);
+      const affiliationKey = JSON.stringify([organizationName, role ?? null, current]);
+      if (organizationKeys.has(affiliationKey)) {
+        warnings.push('GOOGLE_CONTACTS_DUPLICATE_AFFILIATION_SKIPPED');
+        continue;
+      }
+      organizationKeys.add(affiliationKey);
       const affiliationEvidence = evidence(
         'AFFILIATION',
         context.sourceId,
-        `${resourceName}\u001f${organizationName}\u001f${nonEmptyString(organization?.title) ?? ''}`,
+        `${resourceName}\u001f${organizationName}\u001f${role ?? ''}\u001f${current}`,
         input.retrievedAt,
         'Google Contacts organization field observed.',
       );
       affiliations.push({
         personRef: tempId,
         organizationName,
-        role: nonEmptyString(organization?.title),
+        ...(role ? { role } : {}),
+        current,
         evidenceIds: [affiliationEvidence.id],
       });
       allEvidence.push(affiliationEvidence);
