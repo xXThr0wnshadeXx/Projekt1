@@ -4,7 +4,7 @@ Deadline: Sunday September 6, 2 p.m. Pacific. This existing Codex task stays the
 
 ## Your outcome
 
-Keep one working application assembled from Nicholas's frontend, Shaw's real sources and Shreev's engine. Own the demo's truthfulness, private data boundaries, deployment and final submission. You need not implement teammates' features to coordinate them.
+Keep one working application assembled from Nicolas's frontend, Shaw's real sources and Shreev's engine. Own the demo's truthfulness, private data boundaries, deployment and final submission. You need not implement teammates' features to coordinate them.
 
 ## You own
 
@@ -12,11 +12,11 @@ contracts/index.ts and runtime validators; packages/server; app API routes; auth
 
 ## First hour
 
-1. Collect Nicholas/Shaw branch links and current frameworks. Get Shreev online with his prompt.
+1. Collect Nicolas/Shaw branch links and current frameworks. Get Shreev online with his prompt.
 2. Lock the app path, package manager, API base and contract version. Default modular TypeScript; preserve a working frontend stack.
 3. Configure one private development database and Google test OAuth client with exact local/deployed callback URLs. Use account-owner sign-in; don't pass tokens between teammates or paste secrets into chat/Git.
 4. Implement runtime validators for the type pack, authenticated scope resolution, and an empty private GraphSnapshot. Agree with Shaw on an owner-scoped SourceContext.
-5. Receive Shaw's first actual CandidateBatch, validate/persist it and emit a committed construction event Nicholas can consume.
+5. Receive Shaw's first actual CandidateBatch, validate/persist it and emit a committed construction event Nicolas can consume.
 
 ## Ordered integration tasks
 
@@ -28,7 +28,7 @@ contracts/index.ts and runtime validators; packages/server; app API routes; auth
 
 ## What to ask teammates for
 
-Nicholas: renderer/UI branch, current API adapter, frame-time/interaction results and screenshots through private channel. Shaw: source access evidence, counts/field coverage and private sample reference. Shreev: pure engine interface, score policy, tests, event sample and measured search limits. Each report should include commit, verified behavior, blockers and next handoff.
+Nicolas: renderer/UI branch, current API adapter, frame-time/interaction results and screenshots through private channel. Shaw: source access evidence, counts/field coverage and private sample reference. Shreev: pure engine interface, score policy, tests, event sample and measured search limits. Each report should include commit, verified behavior, blockers and next handoff.
 
 ## Merge and release gates
 
@@ -39,11 +39,11 @@ Noon Sunday is feature freeze. Retain a real supported route, honest empty resul
 ## Copy this into a separate backend/integration Codex task
 
 ```text
-You are Ben's backend/integration implementation agent for Projekt1. Our existing command/planning task owns coordination; do not recreate Nicholas's frontend, Shaw's ingestion or Shreev's graph engine. Deadline: Sunday September 6, 2026, 2 p.m. Pacific; feature freeze noon. Repository: https://github.com/xXThr0wnshadeXx/Projekt1.
+You are Ben's backend/integration implementation agent for Projekt1. Our existing command/planning task owns coordination; do not recreate Nicolas's frontend, Shaw's ingestion or Shreev's graph engine. Deadline: Sunday September 6, 2026, 2 p.m. Pacific; feature freeze noon. Repository: https://github.com/xXThr0wnshadeXx/Projekt1.
 
 If the shared planning files are missing from GitHub, use the attached Projekt1-Team-Handoff.zip; inspect and reconcile it with existing work before copying files. Read AGENTS.md, docs/COMMAND-CENTER.md, docs/ARCHITECTURE.md, contracts/index.ts and docs/team/BEN.md. Inspect existing teammate work and preserve dirty files. First inventory branches/frameworks and lock the actual paths/package manager with the command agent. The earlier fictional prototype is not our shared baseline.
 
-Own contracts/runtime validation, backend routes, authentication, private data scopes, database, source credential handling, transactional import/review/identity undo, graph versions, dependencies and deployment. Use the simplest modular TypeScript implementation compatible with Nicholas's existing app. Build a private empty graph/session first; integrate Shaw's actual normalized batch, then Shreev's engine and Nicholas's event consumer. No fictional seed or fallback graph, invented identities or silent fuzzy merges.
+Own contracts/runtime validation, backend routes, authentication, private data scopes, database, source credential handling, transactional import/review/identity undo, graph versions, dependencies and deployment. Use the simplest modular TypeScript implementation compatible with Nicolas's existing app. Build a private empty graph/session first; integrate Shaw's actual normalized batch, then Shreev's engine and Nicolas's event consumer. No fictional seed or fallback graph, invented identities or silent fuzzy merges.
 
 Authorize scope before storage/query/search/events; never trust client actor/root IDs. Keep raw exports and credentials server-side, outside Git/logs. Separate import permission from selected-record sharing; check source restrictions before pooling. Validate payload size, IDs, confidence, provenance, idempotency and optimistic versions. Implement reversible identity link decisions only after the first real-data route works.
 

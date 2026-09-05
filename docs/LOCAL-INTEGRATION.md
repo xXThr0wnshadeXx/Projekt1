@@ -1,6 +1,6 @@
 # Local frontend and API integration
 
-Ben's feature branch reconciles main `7e4aef46e268247622934f284c396325824354bd` with backend correction `3873a0f83425b7136ec6c4b0d34777d72863f352`. Nicholas's `src/` and Shreev's graph implementation are preserved without edits. No public deployment or account creation is included.
+Ben's feature branch reconciles main `7e4aef46e268247622934f284c396325824354bd` with backend correction `3873a0f83425b7136ec6c4b0d34777d72863f352`. Nicolas's `src/` and Shreev's graph implementation are preserved without edits. No public deployment or account creation is included.
 
 ## Run
 
@@ -17,10 +17,10 @@ Open **http://127.0.0.1:5173/**. The API listens only on **127.0.0.1:3001**; Vit
 
 ## Actual endpoint boundary
 
-- `GET /api/session`: exact frontend-compatible actor/scopes response when a verified adapter exists; currently 401, which Nicholas's HTTP gateway treats as signed out.
+- `GET /api/session`: exact frontend-compatible actor/scopes response when a verified adapter exists; currently 401, which Nicolas's HTTP gateway treats as signed out.
 - `GET /api/auth/google/start`: full-page browser navigation, currently 502 `SOURCE_UNAVAILABLE`. There is no simulated redirect or Google session. Reserved `GET /api/auth/google/callback` also fails explicitly until implemented.
 - `POST /api/auth/logout`: same-origin request, calls the revocation port and clears the HttpOnly, SameSite=Lax cookie; current composition has no persisted sessions and returns 204. Actual durable revocation remains an adapter requirement.
-- `GET /api/graph?scopeId=...` and `POST /api/search`: route through `BackendService`, preserving actor/scope checks, runtime validation, graph versions, search-input binding and caps. Without verified auth they return 401. The current UI still passes `snapshot={null}` to GraphViewport; authenticated graph fetching/playback remains Nicholas's integration handoff.
+- `GET /api/graph?scopeId=...` and `POST /api/search`: route through `BackendService`, preserving actor/scope checks, runtime validation, graph versions, search-input binding and caps. Without verified auth they return 401. The current UI still passes `snapshot={null}` to GraphViewport; authenticated graph fetching/playback remains Nicolas's integration handoff.
 - `GET /api/health`: process availability only. It does not claim database, OAuth or engine readiness.
 
 POST requests require the configured browser Origin. Search accepts bounded JSON (16 KiB), rejects unsupported content types and malformed requests, and never accepts client actor/root overrides. Responses are no-store; errors never serialize exception details. Session cookies are opaque and tokens/raw imports are not returned. This local server is not a hardened production host: real rate limiting, durable sessions, OAuth callback protection and database access need their own integration gate.
@@ -42,8 +42,18 @@ The selected host for this milestone is local Vite + Node, not a cloud provider.
 3. Supply a private PostgreSQL connection through the local secret environment, with a dedicated application role/database (loopback access for local PostgreSQL; TLS for an approved remote database). Ben must add migrations for verified users, opaque hashed expiring sessions, private scopes/source ownership and atomic import receipts before first real import. No database was selected, created, connected to, or migrated here.
 4. Implement server authorization-code handling with state/nonce checks, ID-token verification, server-only credentials, and durable session issuance/revocation. Use Google subject identity rather than email as the stable account key. Initial sign-in requests identity/profile only; contacts require a separate later consent flow. [Google OpenID Connect documentation](https://developers.google.com/identity/openid-connect/openid-connect)
 
-Coordinator owns any cloud host choice, deployment, actual user setup request and publication. Remaining owner handoffs: Nicholas authenticated graph loading and errors; Shreev corrected engine + strict contract integration; Shaw normalized provenance envelope; Ben verified OAuth/private storage adapters.
+Coordinator owns any cloud host choice, deployment, actual user setup request and publication. Remaining owner handoffs: Nicolas authenticated graph loading and errors; Shreev corrected engine + strict contract integration; Shaw normalized provenance envelope; Ben verified OAuth/private storage adapters.
 
 ## Issue #2-ready status
 
-Ben: main frontend `7e4aef4` reconciled on `feat/ben-integration`; Vite/React preserved. Local UI + Node API run with `npm ci` then `npm run dev` at http://127.0.0.1:5173/. Browser/server checks and 98 tests pass. Main's graph check still fails separately; owner fix is pending integration. OAuth/DB remain explicitly unavailable (session 401, Google start 502); no fake graph/session or public deployment. Actual API routes match Nicholas's code: GET session, GET auth/google/start, POST auth/logout. Setup instructions are in docs/LOCAL-INTEGRATION.md. Commit supplied in the final handoff; publication remains with command.
+Ben: main frontend `7e4aef4` reconciled on `feat/ben-integration`; Vite/React preserved. Local UI + Node API run with `npm ci` then `npm run dev` at http://127.0.0.1:5173/. Browser/server checks and 98 tests pass. Main's graph check still fails separately; owner fix is pending integration. OAuth/DB remain explicitly unavailable (session 401, Google start 502); no fake graph/session or public deployment. Actual API routes match Nicolas's code: GET session, GET auth/google/start, POST auth/logout. Setup instructions are in docs/LOCAL-INTEGRATION.md. Commit supplied in the final handoff; publication remains with command.
+
+## PR #6 reconciliation with main c728c55
+
+Merged main `c728c55` into the existing feature history without rebasing or changing main. Preserved `src/vite-env.d.ts`, the renamed `docs/team/NICOLAS.md`, all upstream name corrections, and `*.tsbuildinfo` alongside private-data/secret ignore rules. Nicolas's UI and graph implementation match main exactly. The existing Vite proxy/loopback config and split browser/server compiler targets remain intact.
+
+Resolved the add/add lockfile conflict by regenerating against the feature package's exact pins: TypeScript 5.9.3, Vite 7.3.6, React plugin 5.2.0, React/ReactDOM 19.2.8, React types 19.2.18/19.2.7 and Node types 22.20.1. Main's new lock selected TypeScript 7.0.2/Vite 8.2.2/plugin 6.1.1 from `latest` ranges; this reconciliation deliberately avoids an unrelated major toolchain migration while retaining the same React packages and declared Node 22.19+ runtime. `npm ci` succeeded from the regenerated lock.
+
+Verification: browser/server typechecks and production build pass; all 98 tests pass. `npm run check:integration` fails at the unchanged graph compiler errors (tests were also run independently). `npm run dev` restarted successfully on ports 5173/3001; live proxy smoke checks returned frontend 200, session 401, Google start 502 and logout 204. No actual OAuth, private database or search-engine composition is enabled.
+
+Observer publication handoff for issue #2: publish the reconciliation merge commit reported in the task, update existing draft PR #6, and post one PULL COMPLETE / PR READY update. Main `c728c55` is incorporated; frontend/name/type additions are preserved; install/build/98 tests pass; graph gate remains blocked awaiting approved PR #3 integration. Ben's human next action is to select the Google project/test users and private database access described above. No teammate should blindly pull the feature branch into an active checkout; publication and merge decisions remain with the observer.

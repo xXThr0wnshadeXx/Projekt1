@@ -6,7 +6,7 @@ This is the shared coordination entry point. Ben's existing Codex task is the co
 
 ## Assignment map
 
-- **Nicholas — frontend, large graph and animation.** [Brief + kickoff prompt](team/NICHOLAS.md). Own the graph renderer, layout worker, construction/search playback, goal/results and review UI. Already underway; preserve current frontend.
+- **Nicolas — frontend, large graph and animation.** [Brief + kickoff prompt](team/NICOLAS.md). Own the graph renderer, layout worker, construction/search playback, goal/results and review UI. Already underway; preserve current frontend.
 - **Shaw — real-data retrieval and normalization.** [Brief + kickoff prompt](team/SHAW.md). Own Google Contacts adapter, real export parsers, provenance, progress and source feasibility. Already underway; preserve current retrieval.
 - **Shreev — graph engine and identity proposals.** [Brief + kickoff prompt](team/SHREEV.md). Own search projection, supported targets, weighted top-K, scores, events; identity/extraction second milestone.
 - **Ben — backend, integration, release; command agent support.** [Brief + kickoff prompt](team/BEN.md). Own auth, private storage, contracts/validation, APIs, review/undo transactions, dependency coordination and deployment. Use a separate implementation task if this task should remain strictly the command room.
@@ -17,20 +17,20 @@ Maintain architecture, contract version, task board and integration gate. Review
 
 ## Immediate launch sequence
 
-1. Each teammate gives their agent the repository link and their brief's kickoff prompt. Use the existing Nicholas/Shaw task where possible so its local context is retained.
+1. Each teammate gives their agent the repository link and their brief's kickoff prompt. Use the existing Nicolas/Shaw task where possible so its local context is retained.
 2. Each agent inspects current repo/local work and reports branch, framework, files owned and next bounded deliverable. Do not pull over conflicting dirty files or reset them; preserve on a branch first.
 3. Ben collects those reports, locks the app path/framework/package manager, and posts the ownership/path mapping. Defaults in ARCHITECTURE.md are conditional on existing work.
 4. Shaw proves one source with a participating owner's real records; request exports now rather than assuming instant downloads.
-5. Ben implements/validates contracts and gives each teammate the same version. Nicholas and Shreev receive an authorized private sample or can work on empty states/isolated mathematical tests until one exists.
+5. Ben implements/validates contracts and gives each teammate the same version. Nicolas and Shreev receive an authorized private sample or can work on empty states/isolated mathematical tests until one exists.
 6. Integrate the smallest real import -> graph -> search -> visual result before adding a second difficult connector.
 
 ## Saturday checkpoints
 
-**By 3 p.m.: baseline + access proof.** Nicholas/Shaw publish or report existing branch paths. Ben locks shared contracts and auth/storage setup. Shaw reports source status/counts/field availability. Shreev agrees on search projection and scoring. If source access is blocked, use a participating user's actual export/manual facts; no fictional seed.
+**By 3 p.m.: baseline + access proof.** Nicolas/Shaw publish or report existing branch paths. Ben locks shared contracts and auth/storage setup. Shaw reports source status/counts/field availability. Shreev agrees on search projection and scoring. If source access is blocked, use a participating user's actual export/manual facts; no fictional seed.
 
-**By 5 p.m.: first real graph.** Ben persists a small real import privately. Nicholas renders actual nodes/observations and animates committed changes. Shreev can consume the same authorized snapshot. Counts need not be impressive yet; semantics and integration must work.
+**By 5 p.m.: first real graph.** Ben persists a small real import privately. Nicolas renders actual nodes/observations and animates committed changes. Shreev can consume the same authorized snapshot. Counts need not be impressive yet; semantics and integration must work.
 
-**By 8 p.m.: supported path.** A real goal with evidenced target yields a route or honest missing-data result. Scores/events arrive from Shreev through Ben's API; Nicholas highlights them. Identify a genuinely supported demo route from the participants' data, without inventing missing relationships.
+**By 8 p.m.: supported path.** A real goal with evidenced target yields a route or honest missing-data result. Scores/events arrive from Shreev through Ben's API; Nicolas highlights them. Identify a genuinely supported demo route from the participants' data, without inventing missing relationships.
 
 **By 10 p.m.: integrated checkpoint.** Merge working tracks, deploy a private test preview if available, record run instructions and blockers. This is a checkpoint, not a requirement to keep everybody working all night.
 
@@ -47,10 +47,10 @@ Maintain architecture, contract version, task board and integration gate. Review
 ## Handoff objects
 
 - Shaw -> Ben: CandidateBatch, source capability report, field coverage, private sample reference. Do not send provider tokens or raw exports in public PRs.
-- Ben -> Nicholas: authorized GraphSnapshot, GraphBuildEvent stream/poll endpoint, review decision API and error format.
+- Ben -> Nicolas: authorized GraphSnapshot, GraphBuildEvent stream/poll endpoint, review decision API and error format.
 - Ben -> Shreev: validated actor-filtered snapshot, graph version and runtime caps.
-- Shreev -> Ben + Nicholas: SearchResult and exact SearchEvents, score policy and timing; identity proposals later.
-- Nicholas -> Ben: routes/screens, API adapter and event playback; measured performance and browser checks.
+- Shreev -> Ben + Nicolas: SearchResult and exact SearchEvents, score policy and timing; identity proposals later.
+- Nicolas -> Ben: routes/screens, API adapter and event playback; measured performance and browser checks.
 
 Shared contract owner is Ben. Freeze names and semantics first; improve internals independently. Breaking change proposal must identify producer, consumer, migration and test updates. Ben accepts/rejects or versions it before merge.
 

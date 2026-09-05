@@ -6,7 +6,7 @@ Decision date: Saturday, September 5, 2026. Deadline: Sunday, September 6, 2:00 
 
 ## 1. What exists and what is still uncertain
 
-GitHub main was rechecked on September 5: commit `55a0414ac2ccd5c542ac96f5a69b58fad5452e00` contains only GPL v3 LICENSE. Preserve it. Nicholas is already working on frontend; Shaw on retrieval. Their local work has not been inspected and must be preserved. First coordination task: get their branch links, frameworks, file ownership and current status.
+GitHub main was rechecked on September 5: commit `55a0414ac2ccd5c542ac96f5a69b58fad5452e00` contains only GPL v3 LICENSE. Preserve it. Nicolas is already working on frontend; Shaw on retrieval. Their local work has not been inspected and must be preserved. First coordination task: get their branch links, frameworks, file ownership and current status.
 
 An earlier local, uncommitted Vinext/Cytoscape fictional prototype exists only in the planning workspace. It is paused, its preview has been stopped, and it is not the approved shared baseline. Do not copy its seed, 200-node caps, dependency tree or architectural assumptions into teammates' work. No shared application release or real provider access is established by these documents.
 
@@ -37,7 +37,7 @@ Goal -> supported target discovery -> weighted bounded top-K engine
                                             |                 |
                                          paths            SearchEvents
                                             |                 |
-                              Nicholas: results + graph playback
+                              Nicolas: results + graph playback
 
 Committed import batches -> GraphBuildEvents -> graph construction animation
 ```
@@ -46,8 +46,8 @@ The LLM is never the database. A profile match, a platform connection and willin
 
 ## 3. Technology and deployment decisions
 
-- **Language/backend:** TypeScript modular monolith. Default is Next.js App Router with route handlers and React. If Nicholas already has a working React/Vite app, preserve it and expose the same JSON API through one small TypeScript server. Ben locks this choice after inventory; do not make Nicholas restart for framework consistency. FastAPI adds another runtime and schema translation with no current benefit.
-- **Renderer:** Sigma.js/Graphology is the leading candidate for a large WebGL network. Nicholas owns a measured spike on available real records, labels, edge styling and interactions. Cytoscape is a fallback if it already meets the actual scale and animation needs. React Flow is less aligned with dense social graphs. Do not equate a renderer's maximum-node claim with acceptable layout or search performance. [Sigma docs](https://www.sigmajs.org/docs/), [Cytoscape docs](https://js.cytoscape.org/), [React Flow layouts](https://reactflow.dev/learn/layouting/layouting).
+- **Language/backend:** TypeScript modular monolith. Default is Next.js App Router with route handlers and React. If Nicolas already has a working React/Vite app, preserve it and expose the same JSON API through one small TypeScript server. Ben locks this choice after inventory; do not make Nicolas restart for framework consistency. FastAPI adds another runtime and schema translation with no current benefit.
+- **Renderer:** Sigma.js/Graphology is the leading candidate for a large WebGL network. Nicolas owns a measured spike on available real records, labels, edge styling and interactions. Cytoscape is a fallback if it already meets the actual scale and animation needs. React Flow is less aligned with dense social graphs. Do not equate a renderer's maximum-node claim with acceptable layout or search performance. [Sigma docs](https://www.sigmajs.org/docs/), [Cytoscape docs](https://js.cytoscape.org/), [React Flow layouts](https://reactflow.dev/learn/layouting/layouting).
 - **Layout:** compute force layout in a worker or use a cached stable layout. Never recalculate the full layout per animation frame. Cluster by evidence-backed affiliations and graph communities, not invented family categories. Store positions by graph version; progressively reveal labels and hide low-priority edges at distant zoom. Names missing from data stay source handles, not generated names.
 - **Database:** managed PostgreSQL for the shared real-data build; canonical relational tables plus application-memory graph projection. Neo4j adds a service and does not solve custom willingness scoring. SQLite is acceptable for a single-machine fallback, not an ephemeral deployment pretending to persist. If the team already selected Sites, its D1 adapter is an alternate storage implementation, not a reason to rewrite frontend. [Postgres queries](https://www.postgresql.org/docs/current/queries-with.html), [Neo4j deployment choices](https://neo4j.com/deployment-center/).
 - **AI:** provider-independent typed structured outputs; runtime schema validation plus referential validation. Configure provider/model through server environment. Explain from actual path evidence; deterministic text fallback. No live AI prerequisite for first real-data search. [Structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs).
@@ -85,7 +85,7 @@ Start with k=3 (max 5), 5 hops (max 6), 10,000 expansions, 25,000 frontier state
 
 ## 7. API boundary and animation semantics
 
-Ben owns HTTP/session storage; Shaw owns normalization; Shreev owns pure engine functions; Nicholas owns rendering/reducers.
+Ben owns HTTP/session storage; Shaw owns normalization; Shreev owns pure engine functions; Nicolas owns rendering/reducers.
 
 - `GET /api/session`: authenticated actor and authorized scopes, no tokens.
 - `POST /api/sources/google/connect`: begin contacts authorization; callback server-side.
@@ -108,7 +108,7 @@ Target layout (adapt the existing app path once, then document it):
 
 ```text
 contracts/                  Ben: shared wire types + validation contract
-apps/web/                   Nicholas: page/components/styles/rendering
+apps/web/                   Nicolas: page/components/styles/rendering
 apps/web/app/api/           Ben: API routes (reserved even inside frontend tree)
 packages/ingestion/         Shaw: adapters, source access, provenance normalization
 packages/graph/             Shreev: projection, targets, search, score tests
@@ -126,11 +126,11 @@ Single package manager/lockfile owner: Ben. Do not run scaffolders over someone 
 Contracts + teammate inventory
    |-- Shaw: real source record -> candidate batch --|
    |-- Ben: auth + private persistence ------------|--> first real graph
-   |-- Nicholas: renderer + event consumer --------|
+   |-- Nicolas: renderer + event consumer --------|
    |-- Shreev: projection/search/identity ----------|--> ranked real path
 ```
 
-Shaw can normalize local owner-provided exports before OAuth is finished. Nicholas can build empty/loading controls and consume approved actual samples before full ingestion. Shreev can write pure algorithms and unit cases before provider access. No fictional people/network appears in app/demo; anonymous structural unit-test cases are algorithm tests only, never product data. User data fixtures stay local/ignored; teammates exchange schema summaries and authorized samples through suitable private channels, not this public repo.
+Shaw can normalize local owner-provided exports before OAuth is finished. Nicolas can build empty/loading controls and consume approved actual samples before full ingestion. Shreev can write pure algorithms and unit cases before provider access. No fictional people/network appears in app/demo; anonymous structural unit-test cases are algorithm tests only, never product data. User data fixtures stay local/ignored; teammates exchange schema summaries and authorized samples through suitable private channels, not this public repo.
 
 MVP: authenticated user imports real contacts/export -> real nodes/observed links -> confirms a few meaningful relationships -> enters a goal with an evidenced target -> ranked actual path -> visible construction/search. An honest no-route/insufficient-data result is required. Do not invent a missing bridge to make a demo succeed.
 

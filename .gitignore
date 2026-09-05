@@ -8,3 +8,4 @@ private-data/
 *.sqlite-*
 *.db
 .DS_Store
+*.tsbuildinfo
