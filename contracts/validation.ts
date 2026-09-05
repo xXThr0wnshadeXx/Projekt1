@@ -1,11 +1,11 @@
 import type { CandidateBatch, GraphSnapshot, SearchRequest, SearchResult, OpportunityPath, Target, InferenceResult, IdentityProposal, GraphBuildEvent, ReviewDecision, Goal } from './index.js';
 import * as s from './schema.js';
+import { canonicalJson as canonical } from './canonical.js';
 export { ContractError } from './schema.js';
 const require = (ok: unknown, rule: string): void => { if (!ok) s.fail('$',rule); };
 const unique = (xs: string[]) => require(new Set(xs).size === xs.length,'unique identifiers');
 const refs = (xs: string[], allowed: Set<string>) => { unique(xs); xs.forEach(x=>require(allowed.has(x),'authorized reference')); };
 const set = (xs: {id:string}[]) => { unique(xs.map(x=>x.id)); return new Set(xs.map(x=>x.id)); };
-const canonical = (value: unknown): string => JSON.stringify(value, (_key,v) => v && typeof v==='object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([a],[b])=>a.localeCompare(b))) : v);
 const close = (a: number,b: number) => require(Math.abs(a-b) < 1e-10,'consistent score factors');
 export interface GraphAuthority { scopeId: string; rootPersonId: string; sourceIds: ReadonlySet<string> }
 /** Authority must be resolved server-side; DTO scope strings alone do not authorize records. */
@@ -92,7 +92,15 @@ export function validateGraphBuildEvent(value: unknown, context: {jobId:string;s
  if(e.type==='REVIEW_REQUIRED'){refs(e.candidateIds,new Set(context.candidateIds));refs(e.proposalIds,new Set(context.proposalIds));}
  if(e.type==='BATCH_COMMITTED'){
  require(e.baseGraphVersion===context.before.graphVersion && e.graphVersion===context.after.graphVersion && e.baseGraphVersion!==e.graphVersion,'committed version transition');
- for(const key of ['people','identities','organizations','observedLinks','relationships','searchEdges','evidence','sources'] as const){unique(e[key].map(x=>x.id));e[key].forEach(x=>require(context.after[key].some(y=>y.id===x.id && canonical(x)===canonical(y)),'delta agrees with authorized committed snapshot'));}
+ require(context.before.rootPersonId===context.after.rootPersonId && canonical(context.before.coverage)===canonical(context.after.coverage) && context.before.schemaVersion===context.after.schemaVersion,'root/coverage/schema changes require snapshot invalidation');
+ for(const key of ['people','identities','organizations','observedLinks','relationships','searchEdges','evidence','sources'] as const){
+  unique(e[key].map(x=>x.id));
+  const removed=key==='people'?e.removedPersonIds:['observedLinks','relationships','searchEdges'].includes(key)?e.removedEdgeIds:[];
+  const reconstructed=new Map<string,{id:string}>(context.before[key].map(x=>[x.id,x]));
+  removed.forEach(id=>reconstructed.delete(id));
+  e[key].forEach(x=>{require(!removed.includes(x.id),'upsert and removal cannot overlap');reconstructed.set(x.id,x);});
+  require(reconstructed.size===context.after[key].length && context.after[key].every(x=>canonical(reconstructed.get(x.id))===canonical(x)),'delta must reconstruct complete collection; unsupported deletions require snapshot invalidation');
+ }
  refs(e.removedPersonIds,new Set(context.before.people.map(x=>x.id)));e.removedPersonIds.forEach(id=>require(!context.after.people.some(x=>x.id===id),'removed person'));
  refs(e.removedEdgeIds,new Set([...context.before.observedLinks,...context.before.relationships,...context.before.searchEdges].map(x=>x.id)));e.removedEdgeIds.forEach(id=>require(![...context.after.observedLinks,...context.after.relationships,...context.after.searchEdges].some(x=>x.id===id),'removed edge'));
  }return e;
@@ -104,7 +112,7 @@ export interface ImportAuthority extends BatchAuthority {
  existingIdentities: ReadonlyArray<{platform:string;externalId:string;personId:string|null}>;
 }
 export function validateNormalizedImport(value:unknown,authority:ImportAuthority): import('./index.js').NormalizedImportEnvelope {
- s.normalizedImport(value,'$');const n=structuredClone(value) as import('./index.js').NormalizedImportEnvelope;
+ const n=normalizeImportShape(value);
  const c=n.context;require(c.scopeId===authority.scopeId && c.ownerUserId===authority.ownerUserId && c.sourceId===authority.sourceId && c.batchId===authority.batchId && c.sourcePolicyVersion===authority.sourcePolicyVersion && c.sharingDecisionId===null,'private import authority');
  validateCandidateBatch(n.batch,authority);n.batch.affiliations.forEach(a=>{a.current ??= null;});
  const recordIds=set(n.records);unique(n.records.map(r=>r.externalRecordId));
@@ -112,12 +120,14 @@ export function validateNormalizedImport(value:unknown,authority:ImportAuthority
  unique(n.evidenceRecords.map(e=>e.evidenceId));require(n.evidenceRecords.length===n.batch.evidence.length,'all evidence has record provenance');
  const evidenceIds=new Set(n.batch.evidence.map(e=>e.id));n.evidenceRecords.forEach(e=>{require(evidenceIds.has(e.evidenceId) && recordIds.has(e.sourceRecordId),'evidence record binding');});
  const key=(i:import('./index.js').SourceIdentityRef)=>JSON.stringify([i.platform,i.externalId]);
+ const aliases=new Map(n.batch.people.map(p=>[p.tempId,p.existingPersonId??p.tempId]));
+ const canonicalPerson=(ref:string)=>aliases.get(ref)??ref;
  const endpoints=new Map(authority.existingIdentities.map(i=>[key(i),i.personId]));
- n.batch.people.forEach(p=>p.identities.forEach(i=>{const previous=endpoints.get(key(i));require(previous===undefined || previous===null || previous===p.existingPersonId,'reimport cannot silently reassign identity');endpoints.set(key(i),p.tempId);}));
- const endpoint=(i:import('./index.js').SourceIdentityRef,ref:string)=>require(endpoints.get(key(i))===ref,'source identity endpoint provenance');
+ n.batch.people.forEach(p=>p.identities.forEach(i=>{const previous=endpoints.get(key(i));require(previous===undefined || previous===null || previous===p.existingPersonId,'reimport cannot silently reassign identity');endpoints.set(key(i),canonicalPerson(p.tempId));}));
+ const endpoint=(i:import('./index.js').SourceIdentityRef,ref:string)=>require(endpoints.get(key(i))===canonicalPerson(ref),'source identity endpoint provenance');
  unique(n.facts.map(f=>f.factKey));unique(n.facts.map(f=>`${f.kind}:${f.candidateIndex}`));
  require(n.facts.length===n.batch.observedLinks.length+n.batch.relationships.length+n.batch.affiliations.length,'complete fact provenance');
- n.facts.forEach(f=>{require(recordIds.has(f.sourceRecordId),'fact record binding');if(f.kind==='AFFILIATION'){const a=n.batch.affiliations[f.candidateIndex];require(a,'affiliation index');endpoint(f.personIdentity,a!.personRef);}else {const link=(f.kind==='OBSERVED_LINK'?n.batch.observedLinks:n.batch.relationships)[f.candidateIndex];require(link,'link index');endpoint(f.fromIdentity,link!.fromRef);endpoint(f.toIdentity,link!.toRef);}});
+ n.facts.forEach(f=>{require(recordIds.has(f.sourceRecordId),'fact record binding');if(f.kind==='AFFILIATION'){const a=n.batch.affiliations[f.candidateIndex];require(a,'affiliation index');endpoint(f.personIdentity,a!.personRef);}else {const link=(f.kind==='OBSERVED_LINK'?n.batch.observedLinks:n.batch.relationships)[f.candidateIndex];require(link,'link index');endpoint(f.fromIdentity,link!.fromRef);endpoint(f.toIdentity,link!.toRef);require(canonicalPerson(link!.fromRef)!==canonicalPerson(link!.toRef),'distinct canonical endpoints');}});
  return n;
 }
 export function validateIdentityLinkRequest(value:unknown,g:GraphSnapshot):import('./index.js').IdentityLinkRequest {
@@ -126,4 +136,10 @@ export function validateIdentityLinkRequest(value:unknown,g:GraphSnapshot):impor
 }
 export function validateIdentityRevertRequest(value:unknown,scopeId:string,version:string,decisionIds:ReadonlySet<string>):import('./index.js').IdentityRevertRequest {
  s.identityRevertRequest(value,'$');const r=value as import('./index.js').IdentityRevertRequest;require(r.scopeId===scopeId && r.expectedGraphVersion===version && decisionIds.has(r.decisionId),'authorized versioned reversal');return r;
+}
+
+/** Snapshot-independent shape normalization, also used to identify previously successful retries. */
+export function normalizeImportShape(value:unknown):import('./index.js').NormalizedImportEnvelope {
+ s.normalizedImport(value,'$');const n=structuredClone(value) as import('./index.js').NormalizedImportEnvelope;
+ n.batch.affiliations.forEach(a=>{a.current ??= null;});return n;
 }

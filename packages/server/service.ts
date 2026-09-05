@@ -1,5 +1,7 @@
-import type { ApiError, CandidateBatch, Goal, GraphSnapshot, SearchEngine, SearchOptions, SearchResult, SourceContext, Target, NormalizedImportEnvelope } from '../../contracts/index.js';
-import { ContractError, validateCandidateBatch, validateGoal, validateGraphSnapshot, validateSearchRequest, validateSearchResult, validateTarget, validateNormalizedImport } from '../../contracts/validation.js';
+import type { ApiError, Goal, GraphSnapshot, SearchEngine, SearchOptions, SearchResult, SourceContext, Target, NormalizedImportEnvelope } from '../../contracts/index.js';
+import { ContractError, validateGoal, validateGraphSnapshot, validateSearchRequest, validateSearchResult, validateTarget, validateNormalizedImport, normalizeImportShape } from '../../contracts/validation.js';
+
+import { canonicalJson } from '../../contracts/canonical.js';
 
 export class ServiceError extends Error {
  constructor(readonly code:ApiError['error']['code'],readonly status:number) {super(code);}
@@ -17,12 +19,20 @@ export interface ReadPort {
  readSnapshot(scope:PrivateScope):Promise<unknown|null>;
 }
 export interface GoalPort { resolve(text:string,snapshot:GraphSnapshot):Promise<{goal:Goal;targets:Target[]}> }
-/** Atomic staging transaction: lock scope/version, check immutable source ownership and policy, then
- * deduplicate by (scopeId,sourceId,batchId). Same key/different content must conflict.
- * Persist the private batch and provenance together. It does NOT confirm inference or publish graph events.
+export interface ImportOutcome { jobId:string;status:'PENDING_REVIEW';duplicate:boolean }
+export interface ImportRetryKey { actorUserId:string;context:SourceContext }
+export interface ImportReceipt { payloadDigest:string;outcome:ImportOutcome }
+/** Both methods must check CURRENT actor/source ownership, access and source policy in storage.
+ * lookupRetry resolves (scopeId,sourceId,batchId), before graph-version/reference checks.
+ * stage atomically locks that key and rechecks its receipt FIRST: equal digest returns the prior
+ * outcome with duplicate:true, different digest returns VERSION_CONFLICT. Only a new key checks
+ * expectedGraphVersion, reference integrity and policy, then commits pending data + receipt together.
+ * A concurrent stage must serialize on the key; no receipt may be published before durable success.
+ * Digest is SHA-256 of canonical normalized envelope JSON, excluding expectedGraphVersion.
  */
 export interface ImportPort {
- stage(input:{actorUserId:string;context:SourceContext;expectedGraphVersion:string;envelope:NormalizedImportEnvelope}):Promise<{jobId:string;status:'PENDING_REVIEW';duplicate:boolean}>;
+ lookupRetry(input:ImportRetryKey):Promise<ImportReceipt|null>;
+ stage(input:ImportRetryKey & {expectedGraphVersion:string;payloadDigest:string;envelope:NormalizedImportEnvelope}):Promise<ImportOutcome>;
 }
 export interface BackendPorts { auth:AuthPort; reads:ReadPort; goals?:GoalPort; engine?:SearchEngine; imports?:ImportPort }
 export class BackendService {
@@ -46,7 +56,11 @@ export class BackendService {
   try {
    const resolved=await this.ports.goals.resolve(request.goalText,structuredClone(snapshot));
    const goal=validateGoal(resolved.goal,snapshot),targets=resolved.targets.map(t=>validateTarget(t,snapshot));
+   if(new Set(targets.map(t=>t.personId)).size!==targets.length)throw new ServiceError('INTERNAL',500);
+   const expectedGoal=canonicalJson(goal),expectedTargets=canonicalJson(targets);
    const result=validateSearchResult(this.ports.engine.findBestPaths(structuredClone(snapshot),structuredClone(goal),structuredClone(targets),options),snapshot);
+   // Targets preserve resolver order exactly; engines rank paths, not the target input list.
+   if(canonicalJson(result.goal)!==expectedGoal || canonicalJson(result.targets)!==expectedTargets)throw new ServiceError('INTERNAL',500);
    if(result.paths.length>options.k || result.paths.some(p=>p.edgeIds.length>options.maxHops) || result.events.length>options.maxTraceEvents)throw new ServiceError('INTERNAL',500);
    return structuredClone(result);
   }catch{throw new ServiceError('INTERNAL',500);}
@@ -55,10 +69,28 @@ export class BackendService {
  async stageImport(credential:unknown,context:SourceContext,expectedGraphVersion:string,input:unknown) {
   const scope=await this.scope(credential,context.scopeId);
   if(context.ownerUserId!==scope.ownerUserId || !scope.sourceIds.has(context.sourceId) || context.sharingDecisionId!==null)throw new ServiceError('FORBIDDEN',403);
-  const snapshot=await this.snapshot(scope);if(snapshot.graphVersion!==expectedGraphVersion)throw new ServiceError('VERSION_CONFLICT',409);
-  const envelope=validateNormalizedImport(input,{...context,existingIdentities:snapshot.identities.filter(i=>i.sourceId===context.sourceId),existingPersonIds:new Set(snapshot.people.map(p=>p.id)),existingEvidenceIds:new Set(snapshot.evidence.filter(e=>e.sourceId===context.sourceId).map(e=>e.id))});
-  if(!this.ports.imports)throw new ServiceError('SOURCE_UNAVAILABLE',502);
-  return this.ports.imports.stage({actorUserId:scope.ownerUserId,context:structuredClone(context),expectedGraphVersion,envelope});
+  const envelopeInput=normalizeImportShape(input);
+  if(canonicalJson(envelopeInput.context)!==canonicalJson(context) || envelopeInput.batch.sourceId!==context.sourceId || envelopeInput.batch.batchId!==context.batchId)throw new ServiceError('INVALID_INPUT',400);
+  const imports=this.ports.imports;if(!imports)throw new ServiceError('SOURCE_UNAVAILABLE',502);
+  const retryKey={actorUserId:scope.ownerUserId,context:structuredClone(context)};
+  const bytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(canonicalJson(envelopeInput)));
+  const payloadDigest=Array.from(new Uint8Array(bytes),b=>b.toString(16).padStart(2,'0')).join('');
+  const retry=async():Promise<ImportOutcome|null>=>{
+   const receipt=await imports.lookupRetry(retryKey);if(!receipt)return null;
+   if(receipt.payloadDigest!==payloadDigest)throw new ServiceError('VERSION_CONFLICT',409);
+   return {...structuredClone(receipt.outcome),duplicate:true};
+  };
+  const prior=await retry();if(prior)return prior;
+  let envelope:NormalizedImportEnvelope;
+  try {
+   const snapshot=await this.snapshot(scope);if(snapshot.graphVersion!==expectedGraphVersion)throw new ServiceError('VERSION_CONFLICT',409);
+   envelope=validateNormalizedImport(envelopeInput,{...retryKey.context,existingIdentities:snapshot.identities.filter(i=>i.sourceId===context.sourceId),existingPersonIds:new Set(snapshot.people.map(p=>p.id)),existingEvidenceIds:new Set(snapshot.evidence.filter(e=>e.sourceId===context.sourceId).map(e=>e.id))});
+  }catch(error){
+   // A concurrent successful stage can make this preflight stale after the first lookup.
+   const raced=await retry();if(raced)return raced;throw error;
+  }
+  // Adapter repeats receipt lookup under its transaction lock before checking version/references.
+  return imports.stage({...retryKey,expectedGraphVersion,payloadDigest,envelope});
  }
 }
 /** Use at HTTP boundary. Never serialize thrown exception text, provider messages, or raw input. */
