@@ -57,8 +57,14 @@ export class BoundedRouteSearch implements SearchEngine {
 
     const searchId = searchId(snapshot, goal);
     emit({ type: 'SEARCH_STARTED', rootPersonId: snapshot.rootPersonId });
-    const validPeople = new Map(snapshot.people.map((person) => [person.id, person]));
-    const targetsByPerson = new Map(targets.map((target) => [target.personId, target]));
+    // The API validator owns schema rejection. Keep this pure boundary defensive too:
+    // an invalid score must never create a route or poison heap ordering with NaN.
+    const validPeople = new Map(snapshot.people
+      .filter((person) => isUnitScore(person.identityConfidence))
+      .map((person) => [person.id, person]));
+    const targetsByPerson = new Map(targets
+      .filter((target) => isUnitScore(target.relevance))
+      .map((target) => [target.personId, target]));
     const adjacency = buildAdjacency(snapshot.searchEdges, validPeople);
     const initial: PathState = {
       personIds: [snapshot.rootPersonId], edgeIds: [], edges: [], relationshipQuality: 1, identityQuality: 1,
@@ -89,7 +95,12 @@ export class BoundedRouteSearch implements SearchEngine {
           emit({ type: 'PATH_CANDIDATE', path });
         }
       }
-      if (state.edgeIds.length >= options.maxHops) continue;
+      if (state.edgeIds.length >= options.maxHops) {
+        if ((adjacency.get(currentPersonId) ?? []).length > 0) {
+          emit({ type: 'PATH_PRUNED', prefixPersonIds: state.personIds, reason: 'HOP_LIMIT' });
+        }
+        continue;
+      }
 
       for (const edge of adjacency.get(currentPersonId) ?? []) {
         if (expansions >= options.maxExpansions || Date.now() - startedAt >= options.deadlineMs) {
@@ -156,7 +167,7 @@ function buildAdjacency(edges: SearchEdge[], people: Map<string, unknown>): Map<
   const adjacency = new Map<string, SearchEdge[]>();
   for (const edge of edges) {
     if (!people.has(edge.fromPersonId) || !people.has(edge.toPersonId)) continue;
-    if (edge.strength < 0 || edge.confidence < 0 || edge.recencyFactor < 0) continue;
+    if (!isUnitScore(edge.strength) || !isUnitScore(edge.confidence) || !isUnitScore(edge.recencyFactor)) continue;
     const entries = adjacency.get(edge.fromPersonId) ?? [];
     entries.push(edge);
     adjacency.set(edge.fromPersonId, entries);
@@ -211,6 +222,10 @@ function clampOptions(options: SearchOptions): SearchOptions {
 
 function clampInteger(value: number, min: number, fallback: number, max: number): number {
   return Number.isInteger(value) && value >= min ? Math.min(value, max) : fallback;
+}
+
+function isUnitScore(value: number): boolean {
+  return Number.isFinite(value) && value >= 0 && value <= 1;
 }
 
 function searchId(snapshot: GraphSnapshot, goal: Goal): string {
