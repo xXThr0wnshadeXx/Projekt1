@@ -1,6 +1,8 @@
 import {createServer,type Server} from 'node:http';
 import {Pool} from 'pg';
 import {resolve} from 'node:path';
+import {GoogleImportBridge} from './imports/bridge.js';
+import type {RetrieveAndNormalizeGoogleContacts} from './imports/contracts.js';
 import {PgStore} from './storage/postgres.js';
 import {migratePrivateStorage,migrateContactsStorage} from './storage/migrate.js';
 import type {AuthStore} from './auth/ports.js';
@@ -14,6 +16,7 @@ import {createProductionHandler,readRuntimeConfig,type RuntimeConfig} from './de
 
 export interface ApplicationStorage {
  store:AuthStore & ReadPort & ImportPort & ContactsStore;
+ importStore?:PgStore;
  migrate():Promise<void>;
  probe(signal:AbortSignal):Promise<boolean>;
  close():Promise<void>;
@@ -23,6 +26,7 @@ export interface ApplicationOptions {
  config?:RuntimeConfig;
  openStorage?:(databaseUrl:string)=>Promise<ApplicationStorage>;
  search?:{goals:GoalPort;engine:SearchEngine};
+ retrieveAndNormalize?:RetrieveAndNormalizeGoogleContacts;
 }
 const unavailableAuth:HttpAuthPort={resolveSession:async()=>null,displaySession:async()=>{throw new ServiceError('UNAUTHENTICATED',401);},revokeSession:async()=>{}};
 /** Config and migrations complete before the caller can listen. No substitute persistence/session exists. */
@@ -49,11 +53,20 @@ export async function createApplication(options:ApplicationOptions={}) {
    return contacts.getFreshAccessToken(credential,sourceId);
   }};
   const service=new BackendService({auth,reads:storage?.store??{authorizePrivateScope:async()=>null,readSnapshot:async()=>null},...(storage?{imports:storage.store}:{}),...(options.search??{})});
+  const bridge=oauth&&storage?.importStore?new GoogleImportBridge({auth,store:storage.importStore,contacts:contactsAccess,retrieveAndNormalize:options.retrieveAndNormalize??(async()=>{throw new ServiceError('SOURCE_UNAVAILABLE',502);})}):undefined;
+  const imports=bridge?{
+   start:async(credential:unknown,input:unknown)=>{
+    if(!options.retrieveAndNormalize){if(!await auth.resolveSession(credential))throw new ServiceError('UNAUTHENTICATED',401);throw new ServiceError('SOURCE_UNAVAILABLE',502);}
+    return bridge.start(credential,input);
+   },
+   review:(credential:unknown,input:unknown)=>bridge.review(credential,input),
+   approve:(credential:unknown,input:unknown)=>bridge.approve(credential,input),
+  }:undefined;
   const ready=async(signal:AbortSignal)=>Boolean(storage&&oauth&&options.search)&&!signal.aborted&&await storage!.probe(signal);
-  const api=createApiHandler({auth,service,browserOrigin:config.browserOrigin,...(oauth?{oauth}:{}),...(contacts?{contacts}:{})});
+  const api=createApiHandler({auth,service,browserOrigin:config.browserOrigin,...(oauth?{oauth}:{}),...(contacts?{contacts}:{}),...(imports?{imports}:{})});
   const handler=config.production?await createProductionHandler({apiHandler:api,webRoot:config.webRoot,readiness:ready}):api;
   const server=createServer(handler);server.requestTimeout=25000;server.headersTimeout=10000;
-  return {server,config,contactsAccess,readiness:ready,close:()=>closeApplication(server,storage),configured:{storage:Boolean(storage),auth:Boolean(oauth),contacts:Boolean(contacts),search:Boolean(options.search)}};
+  return {server,config,contactsAccess,readiness:ready,close:()=>closeApplication(server,storage),configured:{storage:Boolean(storage),auth:Boolean(oauth),contacts:Boolean(contacts),retrieval:Boolean(imports&&options.retrieveAndNormalize),search:Boolean(options.search)}};
  }catch(error){await storage?.close();throw error;}
 }
 /** Stop acceptance immediately, then bound active request and database shutdown time. */
@@ -71,6 +84,7 @@ export async function openPostgresStorage(databaseUrl:string):Promise<Applicatio
  const store=new PgStore(pool);
  return {
   store,
+  importStore:store,
   migrate:async()=>{await migratePrivateStorage(pool,resolve('migrations/001_private_storage.sql'));await migrateContactsStorage(pool,resolve('migrations/002_contacts_grants.sql'));await store.pruneExpiredAuth(Date.now());await store.pruneExpiredContactsTransactions(Date.now());},
   close:()=>pool.end(),
   probe:async(signal)=>{

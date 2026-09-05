@@ -113,3 +113,22 @@ Merged origin/main `e80cc4d` (including `a5dd486` authorized graph/search API cl
 Known owner issue remains explicit: `src/main.tsx` in this upstream frontend checks delivered event sequence against `index + 1`, while the backend contract delivers zero-based contiguous sequences. That will reject valid search playback. Nicolas's reviewed sequence-fix handoff/PR #7 remains required; no frontend fix was silently included in this merge. This build pass does not prove real event playback or a live user flow.
 
 Root should publish the frontend merge commit reported by the task after the preceding graph milestone, and post its exact SHA/checks in issue #2. Import bridge/API composition follows as a separate bounded commit.
+
+## Google import HTTP composition
+
+Frontend merge is `08b75c8e69026b9cbe9ad64d403dcd0590323814`. Cherry-picked the stable import bridge `18bce73cccf6bbcae5e8b55e26f73a2eb8f639e5` as `ad8f305`; owner bridge/storage implementations are preserved.
+
+The application now injects `RetrieveAndNormalizeGoogleContacts` into `GoogleImportBridge` through `createApplication` options. Production has no retriever installed yet: authenticated import starts return `SOURCE_UNAVAILABLE` (502) before any token refresh/provider call. Root can connect Shaw's reviewed entrypoint through this seam. Existing staged jobs can still be reviewed and approved when login and durable storage are configured.
+
+Thin HTTP routes are available:
+
+- `GET /api/sources?scopeId=...` returns `{scopeId,graphVersion,sources}` from the owned persisted graph snapshot's source summaries.
+- Same-origin `POST /api/imports/google` accepts exactly `{scopeId,sourceId,expectedGraphVersion,idempotencyKey}` and returns the bridge job receipt with status 202.
+- `GET /api/imports/:jobId?scopeId=...` returns the bridge's safe review DTO.
+- Same-origin `POST /api/imports/:jobId/approve` accepts exactly `{scopeId,expectedGraphVersion,idempotencyKey,confirm:true}` and returns the approval receipt. Job identity comes only from the route; client actor IDs and person assignments are rejected.
+
+The routes pass the extracted opaque session token to the authorized bridge, preserve bounded JSON validation and sanitized failures, and expose no raw normalized records or credentials. Import review/explicit approval remains distinct from search-edge creation.
+
+Verification: full `npm run check:integration` passed with 209 tests, zero failures and zero skips using the authorized disposable PostgreSQL test database. Production server/browser build passed. Added route boundary tests and a real PostgreSQL application regression for persisted sources and missing retrieval. No live provider retrieval, real-user consent or deployment was performed. Nicolas's upstream event-sequence issue remains pending its owner fix.
+
+Root publication handoff: publish the frontend merge, bridge cherry-pick and final import HTTP composition commit reported by this task; update PR #6 and issue #2 once. This worktree has not pushed or modified main. Next action is to connect Shaw's exact reviewed retriever and integrate Nicolas's sequence fix through root.
