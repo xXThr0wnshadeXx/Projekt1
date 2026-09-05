@@ -31,7 +31,7 @@ export function resolveEvidenceBackedTargets(snapshot: GraphSnapshot, goal: Goal
       const criteria = [
         ...goal.organizationIds.map((organizationId) => ({
           name: `organization:${organizationId}`,
-          status: (matchedOrganizationIds.has(organizationId) ? 'MATCHED' : 'UNKNOWN') as const,
+          status: matchedOrganizationIds.has(organizationId) ? ('MATCHED' as const) : ('UNKNOWN' as const),
         })),
         ...unknownCriteria('role', goal.roles),
         ...unknownCriteria('location', goal.locations),
