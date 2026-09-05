@@ -106,7 +106,7 @@ export class BoundedRouteSearch implements SearchEngine {
         break;
       }
       const state = frontier.pop()!;
-      const currentPersonId = state.personIds[state.personIds.length - 1];
+      const currentPersonId = state.personIds[state.personIds.length - 1]!;
       emit({ type: 'NODE_VISITED', personId: currentPersonId, prefixPersonIds: state.personIds });
 
       const target = targetsByPerson.get(currentPersonId);
@@ -220,7 +220,7 @@ function makePath(snapshot: GraphSnapshot, goal: Goal, target: Target, state: Pa
     id: makeOpaqueId('path', [...state.personIds, ...state.edgeIds, target.personId]),
     personIds: state.personIds, edgeIds: state.edgeIds, target, score,
     explanation: { summary: `Evidence-backed route for: ${goal.text}`, evidenceIds,
-      uncertainties: ['Route score is a relative heuristic, not a probability of help.'], suggestedFirstContactId: state.personIds[1] },
+      uncertainties: ['Route score is a relative heuristic, not a probability of help.'], suggestedFirstContactId: state.personIds[1]! },
   };
 }
 
