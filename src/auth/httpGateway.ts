@@ -23,6 +23,9 @@ export function createHttpAuthGateway(apiBase = defaultApiBase): AuthGateway {
       const response = await fetch(apiUrl('/session', apiBase), { credentials: 'include' });
       if (response.status === 401) return null;
       if (!response.ok) throw new AuthGatewayError(await readError(response));
+      if (!response.headers.get('content-type')?.includes('application/json')) {
+        throw new AuthGatewayError('The secure sign-in service is not running in this frontend preview.');
+      }
       return response.json() as Promise<AuthSession>;
     },
     async beginGoogleSignIn() {

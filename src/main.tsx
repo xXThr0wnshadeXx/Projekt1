@@ -1,10 +1,44 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createAuthGateway, type AuthSession } from './auth';
 import { GraphViewport } from './components/GraphViewport';
+import { GraphApiError, loadGraph, searchGraph } from './api/graphClient';
+import type { GraphSnapshot, OpportunityPath, SearchEvent, SearchResult } from '../contracts/index';
 import './styles.css';
 
 const auth = createAuthGateway();
+
+function safeSelectedPathIds(result: SearchResult, snapshot: GraphSnapshot): string[] | null {
+  if (result.scopeId !== snapshot.scopeId || result.graphVersion !== snapshot.graphVersion || !Array.isArray(result.events)) return null;
+  const resultPathIds = new Set(result.paths.map((path) => path.id));
+  const selected: string[] = [];
+  for (let index = 0; index < result.events.length; index += 1) {
+    const event = result.events[index] as Partial<SearchEvent>;
+    if (event.scopeId !== result.scopeId || event.graphVersion !== result.graphVersion || event.searchId !== result.searchId || event.seq !== index + 1 || !isSafeEvent(event)) return null;
+    if (event.type === 'PATH_SELECTED') {
+      const pathId = (event as Extract<SearchEvent, { type: 'PATH_SELECTED' }>).pathId;
+      if (typeof pathId !== 'string' || !resultPathIds.has(pathId) || selected.includes(pathId)) return null;
+      selected.push(pathId);
+    }
+  }
+  return selected;
+}
+
+function isSafeEvent(event: Partial<SearchEvent>): boolean {
+  if (!event.type || !['SEARCH_STARTED', 'NODE_VISITED', 'EDGE_EXPLORED', 'PATH_PRUNED', 'TARGET_FOUND', 'PATH_CANDIDATE', 'PATH_SELECTED', 'SEARCH_COMPLETED', 'SEARCH_FAILED'].includes(event.type)) return false;
+  if (event.type === 'NODE_VISITED' || event.type === 'PATH_PRUNED') return Array.isArray(event.prefixPersonIds) && event.prefixPersonIds.every((id) => typeof id === 'string');
+  if (event.type === 'EDGE_EXPLORED') return typeof event.fromPersonId === 'string' && typeof event.toPersonId === 'string' && typeof event.edgeId === 'string';
+  if (event.type === 'TARGET_FOUND') return typeof event.personId === 'string';
+  if (event.type === 'PATH_SELECTED') return typeof event.pathId === 'string';
+  return true;
+}
+
+function peopleForEvent(event: SearchEvent): string[] {
+  if (event.type === 'NODE_VISITED' || event.type === 'PATH_PRUNED') return event.prefixPersonIds;
+  if (event.type === 'EDGE_EXPLORED') return [event.fromPersonId, event.toPersonId];
+  if (event.type === 'TARGET_FOUND') return [event.personId];
+  return [];
+}
 
 function App() {
   const [session, setSession] = useState<AuthSession | null>(null);
@@ -13,6 +47,17 @@ function App() {
   const [notice, setNotice] = useState('');
   const [authLoading, setAuthLoading] = useState(true);
   const [authError, setAuthError] = useState('');
+  const [scopeId, setScopeId] = useState('');
+  const [snapshot, setSnapshot] = useState<GraphSnapshot | null>(null);
+  const [graphLoading, setGraphLoading] = useState(false);
+  const [graphError, setGraphError] = useState('');
+  const [goalText, setGoalText] = useState('');
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState('');
+  const [searchResult, setSearchResult] = useState<SearchResult | null>(null);
+  const [selectedPaths, setSelectedPaths] = useState<OpportunityPath[]>([]);
+  const [activePersonIds, setActivePersonIds] = useState<string[]>([]);
+  const replayTimer = useRef<number | null>(null);
 
   useEffect(() => {
     void auth.currentSession()
@@ -20,6 +65,27 @@ function App() {
       .catch((error: unknown) => setAuthError(error instanceof Error ? error.message : 'We could not check your session.'))
       .finally(() => setAuthLoading(false));
   }, []);
+  useEffect(() => {
+    const firstScope = session?.scopes[0]?.id ?? '';
+    setScopeId(firstScope);
+    setSnapshot(null);
+    setSelectedPaths([]);
+    setSearchResult(null);
+    setGraphError('');
+  }, [session]);
+  useEffect(() => {
+    if (!session || !scopeId) return;
+    let cancelled = false;
+    setGraphLoading(true);
+    setGraphError('');
+    void loadGraph(scopeId).then((next) => {
+      if (!cancelled) setSnapshot(next);
+    }).catch((error: unknown) => {
+      if (!cancelled) setGraphError(error instanceof Error ? error.message : 'We could not load this graph.');
+    }).finally(() => { if (!cancelled) setGraphLoading(false); });
+    return () => { cancelled = true; };
+  }, [session, scopeId]);
+  useEffect(() => () => { if (replayTimer.current !== null) window.clearTimeout(replayTimer.current); }, []);
   const initials = useMemo(() => session?.actor.displayName.split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase(), [session]);
 
   async function signOut() {
@@ -32,6 +98,38 @@ function App() {
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : 'We could not sign you out.');
     } finally { setBusy(false); }
+  }
+  function replay(result: SearchResult, pathIds: string[]) {
+    if (replayTimer.current !== null) window.clearTimeout(replayTimer.current);
+    const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    const paths = pathIds.map((id) => result.paths.find((path) => path.id === id)).filter((path): path is OpportunityPath => Boolean(path));
+    setSelectedPaths([]);
+    setActivePersonIds([]);
+    if (reducedMotion || result.events.length === 0) { setSelectedPaths(paths); return; }
+    let index = 0;
+    const next = () => {
+      const event = result.events[index++];
+      if (!event) return;
+      setActivePersonIds(peopleForEvent(event));
+      if (event.type === 'PATH_SELECTED') setSelectedPaths((current) => [...current, paths.find((path) => path.id === event.pathId)!].filter(Boolean));
+      replayTimer.current = window.setTimeout(next, 350);
+    };
+    next();
+  }
+  async function submitSearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!session || !scopeId || !snapshot || !goalText.trim()) return;
+    setSearching(true); setSearchError(''); setSearchResult(null); setSelectedPaths([]);
+    try {
+      const result = await searchGraph({ scopeId, expectedGraphVersion: snapshot.graphVersion, goalText: goalText.trim() });
+      const pathIds = safeSelectedPathIds(result, snapshot);
+      if (pathIds === null) throw new Error('The search response could not be safely replayed. Reload the graph and try again.');
+      setSearchResult(result);
+      replay(result, pathIds);
+    } catch (error) {
+      const message = error instanceof GraphApiError && error.code === 'VERSION_CONFLICT' ? 'Your graph changed. Reload it and run the search again.' : error instanceof Error ? error.message : 'We could not search this graph.';
+      setSearchError(message);
+    } finally { setSearching(false); }
   }
   async function google() {
     setBusy(true);
@@ -75,7 +173,18 @@ function App() {
         </div>
         <p className="privacy-note">✦ Your network stays private. You choose what to connect.</p>
       </div>
-      <GraphViewport snapshot={null} />
+      <GraphViewport snapshot={snapshot} loading={graphLoading} error={graphError} selectedPaths={selectedPaths} activePersonIds={activePersonIds} />
+    </section>
+
+    <section className="search-panel" aria-labelledby="search-title">
+      <div><p className="eyebrow"><i /> INTRODUCTION SEARCH</p><h2 id="search-title">Search a real, authorized path.</h2><p>The server resolves the goal and selects routes. WarmPath only displays the returned graph facts and selected paths.</p></div>
+      {session && session.scopes.length > 0 ? <form onSubmit={(event) => void submitSearch(event)}>
+        <label>Authorized graph scope<select value={scopeId} onChange={(event) => setScopeId(event.target.value)}>{session.scopes.map((scope) => <option key={scope.id} value={scope.id}>{scope.label}</option>)}</select></label>
+        <label>Your goal<input value={goalText} onChange={(event) => setGoalText(event.target.value)} placeholder="e.g. PayPal early talent recruiter" required /></label>
+        <button className="primary" disabled={searching || graphLoading || !snapshot}>{searching ? 'Finding paths…' : 'Find authorized paths'} <span>→</span></button>
+      </form> : <p className="search-disabled" role="status">Sign in and connect at least one authorized scope before searching. This app will not search a graph it cannot access.</p>}
+      {searchError && <p className="search-error" role="alert">{searchError}</p>}
+      {searchResult && <SearchSummary result={searchResult} selectedPaths={selectedPaths} snapshot={snapshot} />}
     </section>
 
     <section id="how-it-works" className="steps">
@@ -105,6 +214,13 @@ function App() {
       </section>
     </div>}
   </main>;
+}
+
+function SearchSummary({ result, selectedPaths, snapshot }: { result: SearchResult; selectedPaths: OpportunityPath[]; snapshot: GraphSnapshot | null }) {
+  const name = (id: string) => snapshot?.people.find((person) => person.id === id)?.displayName ?? 'Unknown person';
+  return <section className="search-summary" aria-live="polite"><p><strong>Server search:</strong> {result.stats.expansions} expansions in {result.stats.elapsedMs}ms · {result.stats.stop.replaceAll('_', ' ').toLowerCase()}.</p>
+    {selectedPaths.length > 0 ? <><h3>Selected server routes</h3><ol>{selectedPaths.map((path) => <li key={path.id}><strong>{path.personIds.map(name).join(' → ')}</strong><span>{path.explanation.summary}</span>{path.explanation.uncertainties.length > 0 && <small>Uncertainties: {path.explanation.uncertainties.join(' ')}</small>}</li>)}</ol></> : <p>No route has been selected by the server yet.</p>}
+    {[...result.warnings, ...(result.stats.traceTruncated ? [`Search trace omitted ${result.stats.omittedTraceEvents} events.`] : [])].map((warning, index) => <p className="search-warning" key={`${warning}-${index}`}>{warning}</p>)}</section>;
 }
 
 createRoot(document.getElementById('root')!).render(<App />);
