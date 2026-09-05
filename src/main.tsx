@@ -82,6 +82,7 @@ function App() {
     setSelectedPaths([]);
     setSearchResult(null);
     setGraphError('');
+    setIntentStatus('');
   }, [session]);
   useEffect(() => {
     if (!session || !scopeId) return;
@@ -191,7 +192,7 @@ function App() {
       <div className="scroll-reveal scroll-reveal--right"><GraphViewport snapshot={snapshot} loading={graphLoading} error={graphError} selectedPaths={selectedPaths} activePersonIds={activePersonIds} /></div>
     </section>
 
-    <DiscoveryIntentForm signedIn={Boolean(session)} onSignIn={() => setShowAuth(true)} onSave={saveIntent} status={intentStatus} />
+    <DiscoveryIntentForm signedIn={Boolean(session)} resetKey={`${session?.actor.id ?? 'signed-out'}:${scopeId}`} onSignIn={() => setShowAuth(true)} onSave={saveIntent} onClear={() => setIntentStatus('')} status={intentStatus} />
 
     <section className="search-panel scroll-reveal scroll-reveal--rise" aria-labelledby="search-title">
       <div><p className="eyebrow"><i /> ROUTE SEARCH</p><h2 id="search-title">Explore a supported path.</h2><p>Once discovery has returned an authorized graph, the server resolves your goal and selects routes. WarmPath only displays returned facts and paths.</p></div>
@@ -233,10 +234,23 @@ function App() {
   </main>;
 }
 
-function DiscoveryIntentForm({ signedIn, onSignIn, onSave, status }: { signedIn: boolean; onSignIn: () => void; onSave: (intent: DiscoveryIntent) => void; status: string }) {
-  const [intent, setIntent] = useState<DiscoveryIntent>({ company: '', recruiter: '', location: '', field: '', linkedinUrl: '', instagramUrl: '' });
-  const change = (field: keyof DiscoveryIntent) => (event: ChangeEvent<HTMLInputElement>) => setIntent((current) => ({ ...current, [field]: event.target.value }));
-  function submit(event: FormEvent<HTMLFormElement>) { event.preventDefault(); onSave(intent); }
+function DiscoveryIntentForm({ signedIn, resetKey, onSignIn, onSave, onClear, status }: { signedIn: boolean; resetKey: string; onSignIn: () => void; onSave: (intent: DiscoveryIntent) => void; onClear: () => void; status: string }) {
+  const emptyIntent = (): DiscoveryIntent => ({ company: '', recruiter: '', location: '', field: '', linkedinUrl: '', instagramUrl: '' });
+  const [intent, setIntent] = useState<DiscoveryIntent>(emptyIntent);
+  const [errors, setErrors] = useState<string[]>([]);
+  useEffect(() => { setIntent(emptyIntent()); setErrors([]); }, [resetKey]);
+  const change = (field: keyof DiscoveryIntent) => (event: ChangeEvent<HTMLInputElement>) => {
+    setIntent((current) => ({ ...current, [field]: event.target.value }));
+    setErrors([]);
+    onClear();
+  };
+  function clear() { setIntent(emptyIntent()); setErrors([]); onClear(); }
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const nextErrors = validateDiscoveryIntent(intent);
+    if (nextErrors.length > 0) { setErrors(nextErrors); return; }
+    onSave(intent);
+  }
   return <section className="intent-panel scroll-reveal scroll-reveal--rise" aria-labelledby="intent-title">
     <div className="intent-heading"><p className="eyebrow"><i /> START A CONNECTION QUEST</p><h2 id="intent-title">What do you want to do?</h2><p>Tell us who or what you want to get closer to. We will only look for evidence the secure service is authorized to use.</p></div>
     <form className="intent-form" onSubmit={(event) => void submit(event)}>
@@ -246,10 +260,33 @@ function DiscoveryIntentForm({ signedIn, onSignIn, onSave, status }: { signedIn:
       <label>Field or role<input value={intent.field} onChange={change('field')} placeholder="e.g. product design internship" /></label>
       <fieldset className="profile-links"><legend>Optional public profile links</legend><label>LinkedIn profile<input value={intent.linkedinUrl} onChange={change('linkedinUrl')} type="url" placeholder="https://linkedin.com/in/..." /></label><label>Instagram profile<input value={intent.instagramUrl} onChange={change('instagramUrl')} type="url" placeholder="https://instagram.com/..." /></label></fieldset>
       {signedIn ? <button className="primary intent-submit">Save this connection goal <span>→</span></button> : <button type="button" className="primary intent-submit" onClick={onSignIn}>Sign in to start <span>→</span></button>}
-      <p className="intent-privacy">Profile links are optional. We do not scrape private networks or keep this draft in your browser.</p>
+      <button type="button" className="text-button intent-clear" onClick={clear}>Clear this goal</button>
+      <p className="intent-privacy">Profile links are optional while drafting. Running discovery will require both profile links and a company or person target. Location and role are not sent as discovery filters yet. We do not scrape private networks or keep this draft in your browser.</p>
+      {errors.length > 0 && <div className="intent-errors" role="alert"><strong>Before discovery can start:</strong><ul>{errors.map((error) => <li key={error}>{error}</li>)}</ul></div>}
       {status && <p className="intent-status" role="status">{status}</p>}
     </form>
   </section>;
+}
+
+function validateDiscoveryIntent(intent: DiscoveryIntent): string[] {
+  const errors: string[] = [];
+  const targetProvided = Boolean(intent.company.trim() || intent.recruiter.trim());
+  if (!targetProvided) errors.push('Add a company or recruiter/person target.');
+  const linkedinError = profileUrlError(intent.linkedinUrl, 'linkedin.com', 'LinkedIn');
+  const instagramError = profileUrlError(intent.instagramUrl, 'instagram.com', 'Instagram');
+  if (linkedinError) errors.push(linkedinError);
+  if (instagramError) errors.push(instagramError);
+  return errors;
+}
+
+function profileUrlError(value: string, domain: string, label: string): string | null {
+  if (!value.trim()) return `Add your ${label} profile URL.`;
+  try {
+    const url = new URL(value);
+    const validHost = url.hostname === domain || url.hostname.endsWith(`.${domain}`);
+    const hasProfilePath = url.pathname.split('/').filter(Boolean).length > 0;
+    return url.protocol === 'https:' && validHost && hasProfilePath ? null : `Use a complete https ${label} profile URL.`;
+  } catch { return `Use a complete https ${label} profile URL.`; }
 }
 
 function useScrollReveal() {
