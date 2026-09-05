@@ -116,7 +116,7 @@ export interface CandidateBatch {
   schemaVersion: 1; batchId: Id; sourceId: Id;
   people: PersonCandidate[]; relationships: RelationshipCandidate[];
   observedLinks: Array<{ fromRef: Id; toRef: Id; kind: ObservedLink['kind']; evidenceIds: Id[] }>;
-  affiliations: Array<{ personRef: Id; organizationName: string; role?: string; evidenceIds: Id[] }>;
+  affiliations: Array<{ personRef: Id; organizationName: string; role?: string; current?: boolean | null; evidenceIds: Id[] }>;
   evidence: Evidence[]; warnings: string[];
 }
 export interface InferenceResult<T> {
@@ -135,13 +135,14 @@ export interface ReviewDecision {
   decision: 'ACCEPT' | 'REJECT'; idempotencyKey: string;
 }
 export interface IdentityLinkDecision {
-  id: Id; identityId: Id; previousPersonId: Id | null; nextPersonId: Id;
+  id: Id; identityId: Id; previousPersonId: Id | null; nextPersonId: Id | null;
   actorUserId: Id; decidedAt: ISODateTime; graphVersion: Version; revertedByDecisionId?: Id;
 }
 /** Persisted batches, sanitized to actor visibility, drive construction animation. */
 export type GraphBuildEvent = {
   schemaVersion: 1; jobId: Id; scopeId: Id; seq: number;
 } & (
+  | { type: 'SNAPSHOT_INVALIDATED'; baseGraphVersion: Version; graphVersion: Version; reason: 'SOURCE_REMOVED' | 'IDENTITY_CHANGED' | 'ACCESS_CHANGED'; removedSourceIds: Id[] }
   | { type: 'IMPORT_STARTED'; sourceId: Id }
   | { type: 'BATCH_COMMITTED'; operationKind: 'IMPORT' | 'REVIEW' | 'IDENTITY_LINK' | 'REVERT'; baseGraphVersion: Version; graphVersion: Version;
       people: Person[]; observedLinks: ObservedLink[]; relationships: Relationship[];
@@ -173,4 +174,31 @@ export interface SourceRecord {
 export interface StoredEvidence {
   evidence: Evidence; sourceRecordId: Id; ownerUserId: Id; scopeId: Id;
   sharingDecisionId: Id | null;
+}
+
+/** Private normalization envelope. Never return through graph/search/event endpoints.
+ * Keys are scoped by (ownerUserId, sourceId); identical keys reimport idempotently.
+ * Changed record content updates its revision; factKey survives array order changes.
+ * Endpoint provenance uses immutable source identities, never canonical person mappings.
+ */
+export interface SourceIdentityRef { platform: string; externalId: string }
+export type NormalizedFact = {
+  factKey: Id; sourceRecordId: Id;
+} & (
+  | { kind: 'OBSERVED_LINK' | 'RELATIONSHIP'; candidateIndex: number; fromIdentity: SourceIdentityRef; toIdentity: SourceIdentityRef }
+  | { kind: 'AFFILIATION'; candidateIndex: number; personIdentity: SourceIdentityRef }
+);
+export interface NormalizedImportEnvelope {
+  context: SourceContext; batch: CandidateBatch; records: SourceRecord[];
+  evidenceRecords: Array<{ evidenceId: Id; sourceRecordId: Id }>;
+  facts: NormalizedFact[];
+}
+/** Explicit reviewed assignment, including unlink. No implicit choice from candidateIds. */
+export interface IdentityLinkRequest {
+  scopeId: Id; expectedGraphVersion: Version; identityId: Id;
+  expectedPersonId: Id | null; nextPersonId: Id | null; idempotencyKey: Id;
+}
+/** Append a reversal only if no later assignment conflicts; otherwise HTTP 409. */
+export interface IdentityRevertRequest {
+  scopeId: Id; expectedGraphVersion: Version; decisionId: Id; idempotencyKey: Id;
 }
