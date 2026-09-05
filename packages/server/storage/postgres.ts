@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
+import type { ContactsStore, ContactsGrant, ContactsTransaction } from '../auth/contacts-ports.js';
+import { PgContactsPersistence } from './contacts.js';
 import { Pool, type PoolClient } from 'pg';
 import type { AuthStore, AuthUser, OAuthTransaction, StoredSession } from '../auth/ports.js';
 import type { ImportPort, ImportRetryKey, ImportReceipt, ImportOutcome, ReadPort, PrivateScope } from '../service.js';
@@ -28,8 +30,16 @@ export interface ApproveImportInput {
 }
 
 /** PostgreSQL is the authority. No ownership decision trusts a caller-supplied PrivateScope alone. */
-export class PgStore implements AuthStore, ReadPort, ImportPort {
-  constructor(readonly pool: Pool) {}
+export class PgStore implements AuthStore, ReadPort, ImportPort, ContactsStore {
+  private readonly contacts: PgContactsPersistence;
+  constructor(readonly pool: Pool) { this.contacts = new PgContactsPersistence(pool); }
+  putContactsTransaction(t: ContactsTransaction) { return this.contacts.putContactsTransaction(t); }
+  consumeContactsTransaction(input: Parameters<ContactsStore['consumeContactsTransaction']>[0]) { return this.contacts.consumeContactsTransaction(input); }
+  commitContactsGrant(grant: ContactsGrant) { return this.contacts.commitContactsGrant(grant); }
+  getContactsGrant(ownerUserId: string, sourceId: string) { return this.contacts.getContactsGrant(ownerUserId, sourceId); }
+  replaceContactsGrant(grant: ContactsGrant, expectedVersion: string) { return this.contacts.replaceContactsGrant(grant, expectedVersion); }
+  revokeContactsGrant(ownerUserId: string, sourceId: string, expectedVersion: string, now: number) { return this.contacts.revokeContactsGrant(ownerUserId, sourceId, expectedVersion, now); }
+  pruneExpiredContactsTransactions(now: number) { return this.contacts.pruneExpiredContactsTransactions(now); }
 
   private async transaction<T>(work: (client: PoolClient) => Promise<T>): Promise<T> {
     const client = await this.pool.connect();

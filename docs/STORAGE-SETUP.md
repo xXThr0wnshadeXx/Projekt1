@@ -1,21 +1,22 @@
 # Private PostgreSQL storage milestone
 
-`PgStore` implements `ReadPort`, `ImportPort`, and the agreed `AuthStore`. It persists actual verified Google account names/subjects, a private root and scope, hashed sessions, one-use OAuth transactions, sources, pending normalized imports, and the versioned canonical graph. It includes no demo data and never writes raw imports, tokens, passwords or provider responses to logs.
+`PgStore` implements `ReadPort`, `ImportPort`, and the agreed `AuthStore`/`ContactsStore`. It persists actual verified Google account names/subjects, a private root and scope, hashed sessions, one-use OAuth transactions, sources, pending normalized imports, and the versioned canonical graph. It includes no demo data and never writes raw imports, tokens, passwords or provider responses to logs.
 
 ## Integration wiring (Ben)
 
-Merge auth first: storage imports types from `packages/server/auth/ports.ts`. Add exact runtime dependency `pg@8.23.0` and dev dependency `@types/pg@8.23.1`; root package/lockfile remain the integration owner's responsibility. Import `Pool` from `pg`, `PgStore` from `packages/server/storage/postgres.js`, and `migratePrivateStorage` from `packages/server/storage/migrate.js` in the server composition.
+Merge auth first: storage imports types from `packages/server/auth/ports.ts` and `contacts-ports.ts` (Contacts auth follow-up). Add exact runtime dependency `pg@8.23.0` and dev dependency `@types/pg@8.23.1`; root package/lockfile remain the integration owner's responsibility. Import `Pool` from `pg`, `PgStore` from `packages/server/storage/postgres.js`, and `migratePrivateStorage`/`migrateContactsStorage` from `packages/server/storage/migrate.js` in the server composition.
 
 ```ts
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 10 });
 await migratePrivateStorage(pool, `${process.cwd()}/migrations/001_private_storage.sql`);
+await migrateContactsStorage(pool, `${process.cwd()}/migrations/002_contacts_grants.sql`);
 const store = new PgStore(pool);
 // Supply store to new GoogleAuth(config, store).
 // BackendService({ auth: googleAuth, reads: store, imports: store, goals, engine }).
 // Listen only after migration succeeds. On shutdown, await pool.end().
 ```
 
-Ship `migrations/001_private_storage.sql` in the deploy artifact and run from the repository root. The migration runner takes a PostgreSQL transaction advisory lock, creates an applied-migration ledger, and compares the checked-in SQL SHA256 on every startup. Concurrent replicas cannot apply it twice. An edited already-applied migration fails startup; subsequent schema changes need a new migration and runner entry. This milestone contains one migration, no speculative migration framework. Use a separate dedicated app database/user with schema CREATE permission; never run integration tests against a database holding personal data.
+Ship both SQL files under `migrations/` in the deploy artifact and run from the repository root. The migration runner takes a PostgreSQL transaction advisory lock, creates an applied-migration ledger, and compares the checked-in SQL SHA256 on every startup. Concurrent replicas cannot apply it twice. An edited already-applied migration fails startup; subsequent schema changes need a new migration and runner entry. The two explicit migration entry points cover private storage and Contacts grants, without a speculative migration framework. Always apply001 before002. Use a separate dedicated app database/user with schema CREATE permission; never run integration tests against a database holding personal data.
 
 Use the managed provider's required verified TLS configuration for external connections. Do not turn certificate verification off. Render's private internal database URL is suitable for an app in the same region; use the provider's documented settings for any external connection. No database credentials are provided by this commit. Public deployment, Google consent settings and real account login still need configuration and acceptance testing.
 
@@ -36,16 +37,28 @@ OAuth state and browser bindings are SHA256 hashes. Nonce and PKCE verifier rema
 
 `readSnapshot` rechecks owner/root and validates source references in storage; the caller-supplied scope object alone never authorizes data. Every query for jobs/sources uses owner+scope predicates. Foreign keys prevent attaching sources/jobs to a different owner. The snapshot stores only the display-safe graph, while private normalized record metadata stays inside its owner-scoped import job. Graph updates use a locked, versioned JSON document: suitable for this hackathon, with one writer per private network. Large snapshots/history, retention/source deletion, reversible identity ledger and fine-grained partial approval remain follow-ups. Do not expose arbitrary snapshot writes as an HTTP endpoint.
 
+## Additive Contacts consent storage
+
+`PgStore` implements the frozen Contacts auth port without changing its constructor. `migrateContactsStorage` adds separate `contacts_transactions` and `contacts_grants` tables; migration001 is unchanged. Login state cannot be reused for Contacts authorization. Transactions bind the exact actor, live session hash, browser, private scope, Google subject and purpose. Expired/revoked sessions cannot consume callbacks. Session deletion cascades its pending Contacts transaction rows so normal auth cleanup remains valid.
+
+`commitContactsGrant` runs only after Contacts auth verifies the consent, subject and active session. Storage independently joins current private-scope ownership and the Google account subject, then atomically provisions/enables its one Google Contacts source, creates the evidenced root source identity (`platform: google`, `externalId: verified Google subject`) and stores the **already encrypted** grant. Source policy is `google-contacts-private-v1`. The source is stable per `(owner, scope, subject)`; this operation adds no acquaintances, observations or relationship/search edges. The source summary's timestamp is the connection time, not evidence that records have been fetched.
+
+The auth adapter owns encryption and key configuration. Storage receives only ciphertext strings, never provider access/refresh tokens. Private graphs and import review responses exclude ciphertext. `getContactsGrant` checks source enabled state, current owner/scope and policy. Refresh uses expected-version compare-and-swap; an old refresh cannot overwrite newer consent or revocation. Revocation also uses compare-and-swap, erases access/refresh ciphertext, and preserves already imported evidence. `pruneExpiredContactsTransactions(now)` is available for short-lived consent state cleanup.
+
+The grant interface has no session hash: storage rechecks owner/scope/subject at commit, while the auth adapter revalidates the session immediately before it. A logout racing after that check can persist a grant, but no authenticated retrieval endpoint may use it without a fresh valid session. Do not claim that credential persistence and session validation form one transaction.
+
+New actual-PostgreSQL tests cover concurrent one-use consent, purpose/actor/browser/session isolation, expired and revoked sessions, cleanup, atomic source/root/grant creation, failed-grant rollback, cross-owner denial, missing Contacts scope, concurrent refresh, newer consent, revoked credential erasure, and source policy changes. Actual Google consent/refresh and managed key/TLS configuration still require external acceptance testing.
+
 ## Verification
 
 The included `tests/storage.postgres.test.mjs` runs against **actual PostgreSQL**, in a randomly named temporary schema removed afterward. Set `STORAGE_TEST_DATABASE_URL` to an isolated test database, then run:
 
 ```sh
 npm run build:server
-node --test tests/storage.postgres.test.mjs
+node --test tests/storage*.test.mjs
 ```
 
-Without that environment variable the suite explicitly skips; a skipped run is **not** database validation. Storage was verified on a disposable local PostgreSQL12.15 cluster with12 passing tests. Production should use a supported managed PostgreSQL release. Tests cover concurrent migrations/account creation, cross-owner/source-policy and root isolation, concurrent duplicate receipt staging/approval, conflicting digests, first-request stale versions, rollback after database-triggered failure, canonical event replay, persistent reads through a new pool, BackendService retries after graph updates, one-use browser-bound OAuth state, expiration and revocation. Strict server TypeScript build passes. Anonymous test strings stay in tests only.
+Without that environment variable the suite explicitly skips; a skipped run is **not** database validation. Storage was verified on a disposable local PostgreSQL12.15 cluster with19 passing tests (12private-storage,7Contacts-storage). Production should use a supported managed PostgreSQL release. Tests cover concurrent migrations/account creation, cross-owner/source-policy and root isolation, concurrent duplicate receipt staging/approval, conflicting digests, first-request stale versions, rollback after database-triggered failure, canonical event replay, persistent reads through a new pool, BackendService retries after graph updates, one-use browser-bound OAuth state, expiration and revocation. Strict server TypeScript build passes. Anonymous test strings stay in tests only.
 
 Not yet verified by this milestone: managed database connectivity/TLS, real Google login, actual contact retrieval or ingestion into the deployed app, browser review controls, supported introduction edges, and production operation. Node HTTP/main composition and root dependencies belong to Ben's integration branch and are deliberately untouched here.
 
