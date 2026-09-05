@@ -196,6 +196,17 @@ export class PgStore implements AuthStore, ReadPort, ImportPort, ContactsStore {
     });
   }
 
+  /** Backend-only provenance access. Never serialize this envelope from a graph/review route. */
+  async readImportEnvelopePrivate(actorUserId: string, scopeId: string, jobId: string): Promise<NormalizedImportEnvelope> {
+    return this.transaction(async c => {
+      await this.ownedScope(c, actorUserId, scopeId, true);
+      const job = (await c.query<JobRow>('SELECT * FROM import_jobs WHERE id=$1 AND scope_id=$2 AND owner_user_id=$3', [jobId, scopeId, actorUserId])).rows[0];
+      if (!job) throw forbidden();
+      await this.importAuthority(c, {actorUserId, context: job.envelope.context});
+      return job.envelope;
+    });
+  }
+
   async getImportReview(actorUserId: string, scopeId: string, jobId: string) {
     return this.transaction(async c => {
       const row = await this.ownedScope(c, actorUserId, scopeId, true);
@@ -265,7 +276,13 @@ export class PgStore implements AuthStore, ReadPort, ImportPort, ContactsStore {
       b.affiliations.forEach(a => {
         const organizationId = stableId(b.sourceId, 'organization', a.organizationName.trim().toLocaleLowerCase('en-US'));
         if (!g.organizations.some(o => o.id === organizationId)) g.organizations.push({id: organizationId, name: a.organizationName});
-        g.people.find(p => p.id === resolve(a.personRef))!.affiliations.push({organizationId, ...(a.role === undefined ? {} : {role: a.role}), current: a.current ?? null, support: {value: true, confidence: Math.min(...a.evidenceIds.map(e => g.evidence.find(x => x.id === e)!.confidence)), evidenceIds: a.evidenceIds, state: 'PENDING'}});
+        const person = g.people.find(p => p.id === resolve(a.personRef))!;
+        const same = person.affiliations.findIndex(prior => prior.organizationId === organizationId && prior.role === a.role && prior.current === (a.current ?? null));
+        const value = {organizationId, ...(a.role === undefined ? {} : {role: a.role}), current: a.current ?? null, support: {value: true, confidence: Math.min(...a.evidenceIds.map(e => g.evidence.find(x => x.id === e)!.confidence)), evidenceIds: a.evidenceIds, state: 'PENDING' as const}};
+        if (same < 0) person.affiliations.push(value);
+        else if (person.affiliations[same]!.support.state === 'PENDING') person.affiliations[same] = value;
+        // Reimport refreshes pending source metadata; never overwrites a reviewed claim.
+
       });
       // Observation approval grants visibility, not introduction suitability or employer truth.
       // No SearchEdges are synthesized. Relationship/affiliation confirmation is a later review.
