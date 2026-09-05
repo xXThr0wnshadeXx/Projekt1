@@ -1,3 +1,5 @@
+import type {FactReviewService} from './facts/service.js';
+import {validateConfirmFacts,validateFactReview} from './facts/contracts.js';
 import { createServer, type IncomingMessage, type RequestListener, type ServerResponse } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { BackendService, ServiceError, apiFailure, type AuthPort } from './service.js';
@@ -12,7 +14,7 @@ export interface HttpAuthPort extends AuthPort {
   displaySession(userId:string):Promise<SessionView>;
   revokeSession(credential:unknown):Promise<void>;
 }
-export interface HttpDependencies { service:BackendService;auth:HttpAuthPort;browserOrigin:string;oauth?:Pick<GoogleLoginPort,'start'|'callback'|'clearTransactionCookie'>;contacts?:Pick<GoogleContacts,'start'|'callback'|'clearTransactionCookie'>;imports?:Pick<GoogleImportBridge,'start'|'review'|'approve'> }
+export interface HttpDependencies { service:BackendService;auth:HttpAuthPort;browserOrigin:string;oauth?:Pick<GoogleLoginPort,'start'|'callback'|'clearTransactionCookie'>;contacts?:Pick<GoogleContacts,'start'|'callback'|'clearTransactionCookie'>;imports?:Pick<GoogleImportBridge,'start'|'review'|'approve'>;facts?:Pick<FactReviewService,'review'|'confirm'> }
 const sessionShape = schema.object({actor:schema.object({id:schema.id,displayName:schema.string}),scopes:schema.array(schema.object({id:schema.id,label:schema.string}))});
 const cookieName='projekt1_session';
 const bodyLimit=16*1024;
@@ -89,6 +91,14 @@ export function createApiHandler(deps:HttpDependencies):RequestListener {
         await deps.auth.revokeSession(token);
         response.setHeader('Set-Cookie',`${cookieName}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${expectedOrigin.startsWith('https:')?'; Secure':''}`);
         response.writeHead(204);response.end();return;
+      }
+      // Reserved for the reviewed discovery module: /api/discovery and /api/discovery/capabilities.
+      // No discovery success response is synthesized before that integration.
+      if((method==='GET'&&url.pathname==='/api/facts/review')||(method==='POST'&&url.pathname==='/api/facts/confirm')) {
+        if(!await deps.auth.resolveSession(token))throw new ServiceError('UNAUTHENTICATED',401);
+        const input=method==='GET'?validateFactReview({scopeId:url.searchParams.get('scopeId')}):validateConfirmFacts(await readJson(request));
+        if(!deps.facts)throw new ServiceError('SOURCE_UNAVAILABLE',502);
+        json(response,200,method==='GET'?await deps.facts.review(token,input):await deps.facts.confirm(token,input));return;
       }
       if(method==='GET' && url.pathname==='/api/sources') {
         const scope=url.searchParams.get('scopeId');schema.id(scope,'$.scopeId');

@@ -1,3 +1,8 @@
+import {FactReviewService} from './facts/service.js';
+import {PgFactStore} from './facts/postgres.js';
+import {migrateFactsStorage} from './facts/migrate.js';
+import {withFactWarnings} from './facts/search.js';
+import type {FactStore} from './facts/contracts.js';
 import {withGoogleRetrievalErrors} from './imports/retrieval.js';
 import {createServer,type Server} from 'node:http';
 import {Pool} from 'pg';
@@ -18,6 +23,7 @@ import {createProductionHandler,readRuntimeConfig,type RuntimeConfig} from './de
 export interface ApplicationStorage {
  store:AuthStore & ReadPort & ImportPort & ContactsStore;
  importStore?:PgStore;
+ facts?:FactStore;
  migrate():Promise<void>;
  probe(signal:AbortSignal):Promise<boolean>;
  close():Promise<void>;
@@ -53,7 +59,7 @@ export async function createApplication(options:ApplicationOptions={}) {
    if(!contacts)throw new ServiceError('SOURCE_UNAVAILABLE',502);
    return contacts.getFreshAccessToken(credential,sourceId);
   }};
-  const service=new BackendService({auth,reads:storage?.store??{authorizePrivateScope:async()=>null,readSnapshot:async()=>null},...(storage?{imports:storage.store}:{}),...(options.search??{})});
+  const service=new BackendService({auth,reads:storage?.store??{authorizePrivateScope:async()=>null,readSnapshot:async()=>null},...(storage?{imports:storage.store}:{}),...(options.search?{goals:options.search.goals,engine:withFactWarnings(options.search.engine)}:{})});
   const bridge=oauth&&storage?.importStore?new GoogleImportBridge({auth,store:storage.importStore,contacts:contactsAccess,retrieveAndNormalize:options.retrieveAndNormalize?withGoogleRetrievalErrors(options.retrieveAndNormalize):(async()=>{throw new ServiceError('SOURCE_UNAVAILABLE',502);})}):undefined;
   const imports=bridge?{
    start:async(credential:unknown,input:unknown)=>{
@@ -64,7 +70,8 @@ export async function createApplication(options:ApplicationOptions={}) {
    approve:(credential:unknown,input:unknown)=>bridge.approve(credential,input),
   }:undefined;
   const ready=async(signal:AbortSignal)=>Boolean(storage&&oauth&&options.search)&&!signal.aborted&&await storage!.probe(signal);
-  const api=createApiHandler({auth,service,browserOrigin:config.browserOrigin,...(oauth?{oauth}:{}),...(contacts?{contacts}:{}),...(imports?{imports}:{})});
+  const facts=storage?.facts?new FactReviewService({auth,facts:storage.facts}):undefined;
+  const api=createApiHandler({auth,service,browserOrigin:config.browserOrigin,...(oauth?{oauth}:{}),...(contacts?{contacts}:{}),...(imports?{imports}:{}),...(facts?{facts}:{})});
   const handler=config.production?await createProductionHandler({apiHandler:api,webRoot:config.webRoot,readiness:ready}):api;
   const server=createServer(handler);server.requestTimeout=25000;server.headersTimeout=10000;
   return {server,config,contactsAccess,readiness:ready,close:()=>closeApplication(server,storage),configured:{storage:Boolean(storage),auth:Boolean(oauth),contacts:Boolean(contacts),retrieval:Boolean(imports&&contacts&&options.retrieveAndNormalize),search:Boolean(options.search)}};
@@ -86,7 +93,8 @@ export async function openPostgresStorage(databaseUrl:string):Promise<Applicatio
  return {
   store,
   importStore:store,
-  migrate:async()=>{await migratePrivateStorage(pool,resolve('migrations/001_private_storage.sql'));await migrateContactsStorage(pool,resolve('migrations/002_contacts_grants.sql'));await store.pruneExpiredAuth(Date.now());await store.pruneExpiredContactsTransactions(Date.now());},
+  facts:new PgFactStore(pool),
+  migrate:async()=>{await migratePrivateStorage(pool,resolve('migrations/001_private_storage.sql'));await migrateContactsStorage(pool,resolve('migrations/002_contacts_grants.sql'));await migrateFactsStorage(pool,resolve('migrations/003_fact_reviews.sql'));await store.pruneExpiredAuth(Date.now());await store.pruneExpiredContactsTransactions(Date.now());},
   close:()=>pool.end(),
   probe:async(signal)=>{
    if(signal.aborted)return false;
