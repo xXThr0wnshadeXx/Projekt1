@@ -113,7 +113,7 @@ export class GoogleContacts {
       refreshTokenCiphertext: tokens.refreshToken ? cipher.encrypt(tokens.refreshToken, bindingData, 'refresh') : priorRefresh?.refreshTokenCiphertext ?? null,
       refreshExpiresAt: tokens.refreshToken ? (tokens.refreshExpiresIn === null ? null : now + tokens.refreshExpiresIn * 1000) : priorRefresh?.refreshExpiresAt ?? null,
       createdAt: existing?.createdAt ?? now, updatedAt: now, revokedAt: null, version: random() };
-    await this.store.commitContactsGrant(grant);
+    await this.store.commitContactsGrant(grant, tx.sessionHash);
     return { location: `${config.appOrigin}/`, cookies: [this.clearTransactionCookie()] };
   }
   private async grant(user: AuthUser, sourceId: string): Promise<ContactsGrant> {
@@ -145,7 +145,9 @@ export class GoogleContacts {
   }
   async getFreshAccessToken(credential: unknown, sourceId: string): Promise<FreshContactsAccess> {
     const { cipher } = this.configured(), user = await this.actor(credential); let grant = await this.grant(user, sourceId);
-    if (grant.accessExpiresAt <= this.now() + 60_000) {
+    const now = this.now(), canRefresh = grant.refreshTokenCiphertext !== null &&
+      (grant.refreshExpiresAt === null || grant.refreshExpiresAt > now);
+    if (grant.accessExpiresAt <= now + 60_000 && canRefresh) {
       const key = JSON.stringify([user.userId, sourceId]); let pending = this.refreshes.get(key);
       if (!pending) { pending = this.refresh(grant); this.refreshes.set(key, pending); }
       try { await pending; } finally { if (this.refreshes.get(key) === pending) this.refreshes.delete(key); }

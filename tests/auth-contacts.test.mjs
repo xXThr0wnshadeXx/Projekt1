@@ -25,7 +25,7 @@ function fixture() {
       const tx = transactions.get(input.stateHash); if (!tx || tx.browserBindingHash !== input.browserBindingHash || tx.sessionHash !== input.sessionHash || tx.actorUserId !== input.actorUserId || tx.expiresAt <= input.now) return null;
       transactions.delete(input.stateHash); return tx;
     },
-    async commitContactsGrant(grant) { assert.equal(grant.scopeId, `s_${grant.ownerUserId}`); assert.equal(grant.googleSubject, users.get(grant.ownerUserId).googleSubject);
+    async commitContactsGrant(grant, sessionHash) { assert.ok([...sessions].some(([token, owner]) => hash(token) === sessionHash && owner === grant.ownerUserId)); assert.equal(grant.scopeId, `s_${grant.ownerUserId}`); assert.equal(grant.googleSubject, users.get(grant.ownerUserId).googleSubject);
       grants.set(grant.sourceId, structuredClone(grant)); disabledSources.delete(grant.sourceId); },
     async getContactsGrant(ownerUserId, sourceId) { const grant = grants.get(sourceId); return grant?.ownerUserId === ownerUserId && !disabledSources.has(sourceId) ? structuredClone(grant) : null; },
     async replaceContactsGrant(grant, expectedVersion) { const old = grants.get(grant.sourceId);
@@ -114,20 +114,23 @@ test('expired access refreshes once for concurrent calls and retains refresh tok
   assert.equal(first.accessToken, 'test-fresh-access'); assert.equal(second.accessToken, first.accessToken); assert.equal(f.refreshCalls, 1);
   const cipher = new ProviderTokenCipher(key), grant = f.grants.get(a.sourceId); assert.equal(cipher.decrypt(grant.refreshTokenCiphertext, grant, 'refresh'), 'test-refresh');
 });
-test('missing and expired refresh grant require new consent', async () => {
+test('missing and expired refresh credentials allow valid access until actual expiry', async () => {
   for (const tokens of [{ refreshToken: null, refreshExpiresIn: null }, { refreshExpiresIn: 10 }]) {
-    const f = fixture(); f.setTokens(tokens); const a = await f.connect(); f.advance(3600 * 1000);
+    const f = fixture(); f.setTokens(tokens); const a = await f.connect(); f.advance(3541 * 1000);
+    assert.equal((await f.contacts.getFreshAccessToken(credential, a.sourceId)).accessToken, 'test-access');
+    assert.equal(f.refreshCalls, 0);
+    f.advance(59 * 1000);
     await rejection(f.contacts.getFreshAccessToken(credential, a.sourceId)); assert.equal(f.refreshCalls, 0);
   }
 });
 test('invalid_grant marks stored credential revoked; transient failure preserves retry possibility', async () => {
   for (const permanent of [true, false]) {
-    const f = fixture(), a = await f.connect(); f.advance(3600 * 1000); f.setRefreshError(permanent ? new ContactsGrantRejected() : Error('private upstream details'));
+    const f = fixture(), a = await f.connect(); f.advance(3541 * 1000); f.setRefreshError(permanent ? new ContactsGrantRejected() : Error('private upstream details'));
     await rejection(f.contacts.getFreshAccessToken(credential, a.sourceId)); assert.equal(f.grants.get(a.sourceId).revokedAt !== null, permanent);
   }
 });
 test('refresh explicitly losing contacts scope revokes the credential', async () => {
-  const f = fixture(), a = await f.connect(); f.advance(3600 * 1000); f.setRefreshTokens({ scopes: ['openid'] });
+  const f = fixture(), a = await f.connect(); f.advance(3541 * 1000); f.setRefreshTokens({ scopes: ['openid'] });
   await rejection(f.contacts.getFreshAccessToken(credential, a.sourceId)); assert.notEqual(f.grants.get(a.sourceId).revokedAt, null);
 });
 test('revoke racing refresh wins and cannot be overwritten', async () => {

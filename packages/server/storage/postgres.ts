@@ -35,7 +35,7 @@ export class PgStore implements AuthStore, ReadPort, ImportPort, ContactsStore {
   constructor(readonly pool: Pool) { this.contacts = new PgContactsPersistence(pool); }
   putContactsTransaction(t: ContactsTransaction) { return this.contacts.putContactsTransaction(t); }
   consumeContactsTransaction(input: Parameters<ContactsStore['consumeContactsTransaction']>[0]) { return this.contacts.consumeContactsTransaction(input); }
-  commitContactsGrant(grant: ContactsGrant) { return this.contacts.commitContactsGrant(grant); }
+  commitContactsGrant(grant: ContactsGrant, sessionHash: string) { return this.contacts.commitContactsGrant(grant, sessionHash); }
   getContactsGrant(ownerUserId: string, sourceId: string) { return this.contacts.getContactsGrant(ownerUserId, sourceId); }
   replaceContactsGrant(grant: ContactsGrant, expectedVersion: string) { return this.contacts.replaceContactsGrant(grant, expectedVersion); }
   revokeContactsGrant(ownerUserId: string, sourceId: string, expectedVersion: string, now: number) { return this.contacts.revokeContactsGrant(ownerUserId, sourceId, expectedVersion, now); }
@@ -124,6 +124,7 @@ export class PgStore implements AuthStore, ReadPort, ImportPort, ContactsStore {
     return r ? {tokenHash: r.token_hash, userId: r.user_id, createdAt: Number(r.created_at), expiresAt: Number(r.expires_at), revokedAt: r.revoked_at === null ? null : Number(r.revoked_at)} : null;
   }
   async revokeSession(tokenHash: string, now: number): Promise<void> {
+    // This row update serializes with Contacts consent's session lock (session before scope).
     await this.pool.query('UPDATE app_sessions SET revoked_at=COALESCE(revoked_at,$2) WHERE token_hash=$1', [tokenHash, now]);
   }
   async pruneExpiredAuth(now: number): Promise<void> {

@@ -38,7 +38,9 @@ describe('real PostgreSQL normalized Google import bridge', {skip: !url}, () => 
   async function owner() {
     const user = await store.upsertGoogleUser({googleSubject: randomUUID(), displayName: '1'});
     const scopeId = (await store.listPrivateScopes(user.userId))[0].id, sourceId = `gc_${sha(JSON.stringify([user.userId, scopeId, user.googleSubject]))}`;
-    await store.commitContactsGrant({ownerUserId: user.userId, scopeId, sourceId, googleSubject: user.googleSubject, grantedScopes: ['https://www.googleapis.com/auth/contacts.readonly'], accessTokenCiphertext: 'encrypted1', accessExpiresAt: 1000, refreshTokenCiphertext: null, refreshExpiresAt: null, createdAt: 200, updatedAt: 200, revokedAt: null, version: randomUUID()});
+    const sessionHash = sha(randomUUID());
+    await store.putSession({tokenHash: sessionHash, userId: user.userId, createdAt: 100, expiresAt: Number.MAX_SAFE_INTEGER, revokedAt: null});
+    await store.commitContactsGrant({ownerUserId: user.userId, scopeId, sourceId, googleSubject: user.googleSubject, grantedScopes: ['https://www.googleapis.com/auth/contacts.readonly'], accessTokenCiphertext: 'encrypted1', accessExpiresAt: 1000, refreshTokenCiphertext: null, refreshExpiresAt: null, createdAt: 200, updatedAt: 200, revokedAt: null, version: randomUUID()}, sessionHash);
     return {user, scopeId, sourceId};
   }
   function bridge(owner, override = {}) {

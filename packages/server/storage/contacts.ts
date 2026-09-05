@@ -36,9 +36,10 @@ export class PgContactsPersistence implements ContactsStore {
   async putContactsTransaction(t: ContactsTransaction): Promise<void> {
     if (t.purpose !== 'GOOGLE_CONTACTS' || ![t.stateHash, t.browserBindingHash, t.sessionHash].every(isHash)) throw invalid();
     await this.tx(async c => {
-      await this.scope(c, t.actorUserId, t.scopeId, t.googleSubject);
+      // All consent paths lock session before scope; logout locks the same session row.
       const session = await c.query('SELECT token_hash FROM app_sessions WHERE token_hash=$1 AND user_id=$2 AND revoked_at IS NULL AND expires_at>$3 FOR SHARE', [t.sessionHash, t.actorUserId, t.createdAt]);
       if (!session.rowCount) throw denied();
+      await this.scope(c, t.actorUserId, t.scopeId, t.googleSubject);
       await c.query('INSERT INTO contacts_transactions(state_hash,browser_binding_hash,session_hash,actor_user_id,scope_id,source_id,google_subject,nonce,code_verifier,created_at,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)', [t.stateHash, t.browserBindingHash, t.sessionHash, t.actorUserId, t.scopeId, t.sourceId, t.googleSubject, t.nonce, t.codeVerifier, t.createdAt, t.expiresAt]);
     });
   }
@@ -47,9 +48,13 @@ export class PgContactsPersistence implements ContactsStore {
     const row = (await this.pool.query<Row>('DELETE FROM contacts_transactions t USING app_sessions s, private_scopes p, app_users u WHERE t.state_hash=$1 AND t.browser_binding_hash=$2 AND t.session_hash=$3 AND t.actor_user_id=$4 AND t.expires_at>$5 AND s.token_hash=t.session_hash AND s.user_id=t.actor_user_id AND s.revoked_at IS NULL AND s.expires_at>$5 AND p.id=t.scope_id AND p.owner_user_id=t.actor_user_id AND u.id=t.actor_user_id AND u.google_subject=t.google_subject RETURNING t.*', [input.stateHash, input.browserBindingHash, input.sessionHash, input.actorUserId, input.now])).rows[0];
     return row ? {purpose: 'GOOGLE_CONTACTS', stateHash: row.state_hash, browserBindingHash: row.browser_binding_hash, sessionHash: row.session_hash, actorUserId: row.actor_user_id, scopeId: row.scope_id, sourceId: row.source_id, googleSubject: row.google_subject, nonce: row.nonce, codeVerifier: row.code_verifier, createdAt: Number(row.created_at), expiresAt: Number(row.expires_at)} : null;
   }
-  async commitContactsGrant(grant: ContactsGrant): Promise<void> {
-    this.checkGrant(grant); if (grant.revokedAt !== null) throw invalid();
+  async commitContactsGrant(grant: ContactsGrant, sessionHash: string): Promise<void> {
+    this.checkGrant(grant); if (grant.revokedAt !== null || !isHash(sessionHash)) throw invalid();
     await this.tx(async c => {
+      // Lock before scope/source writes and keep it through COMMIT. A logout that
+      // already completed is rejected; one that follows must wait for this consent.
+      const session = await c.query('SELECT token_hash FROM app_sessions WHERE token_hash=$1 AND user_id=$2 AND revoked_at IS NULL FOR UPDATE', [sessionHash, grant.ownerUserId]);
+      if (!session.rowCount) throw new ServiceError('UNAUTHENTICATED', 401);
       const row = await this.scope(c, grant.ownerUserId, grant.scopeId, grant.googleSubject);
       const sameAccount = (await c.query<{source_id: string}>('SELECT source_id FROM contacts_grants WHERE owner_user_id=$1 AND scope_id=$2 AND google_subject=$3', [grant.ownerUserId, grant.scopeId, grant.googleSubject])).rows[0];
       if (sameAccount && sameAccount.source_id !== grant.sourceId) throw conflict();
@@ -84,6 +89,10 @@ export class PgContactsPersistence implements ContactsStore {
       // Consent is a new authorization, so it deliberately replaces an older consent/revoked grant.
       // Refreshes must use replaceContactsGrant's version compare-and-swap instead.
       await c.query('INSERT INTO contacts_grants(source_id,owner_user_id,scope_id,google_subject,version,revoked_at,grant_data) VALUES($1,$2,$3,$4,$5,NULL,$6) ON CONFLICT (source_id) DO UPDATE SET version=EXCLUDED.version,revoked_at=NULL,grant_data=EXCLUDED.grant_data WHERE contacts_grants.owner_user_id=EXCLUDED.owner_user_id AND contacts_grants.scope_id=EXCLUDED.scope_id AND contacts_grants.google_subject=EXCLUDED.google_subject', [grant.sourceId, grant.ownerUserId, grant.scopeId, grant.googleSubject, grant.version, grant]);
+      // clock_timestamp (not transaction-start now()) observes expiry during any
+      // session/scope/source/grant lock wait. A failed check rolls back all writes.
+      const live = await c.query('SELECT token_hash FROM app_sessions WHERE token_hash=$1 AND user_id=$2 AND revoked_at IS NULL AND created_at<=GREATEST($3::bigint, floor(extract(epoch FROM clock_timestamp())*1000)::bigint) AND expires_at>GREATEST($3::bigint, floor(extract(epoch FROM clock_timestamp())*1000)::bigint)', [sessionHash, grant.ownerUserId, grant.updatedAt]);
+      if (!live.rowCount) throw new ServiceError('UNAUTHENTICATED', 401);
     });
   }
   async getContactsGrant(ownerUserId: string, sourceId: string): Promise<ContactsGrant | null> {
