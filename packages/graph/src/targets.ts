@@ -20,6 +20,7 @@ export function resolveEvidenceBackedTargets(snapshot: GraphSnapshot, goal: Goal
       const matches = person.affiliations
         .filter((affiliation) => requestedOrganizations.has(affiliation.organizationId))
         .filter((affiliation) => organizationIds.has(affiliation.organizationId))
+        .filter((affiliation) => affiliation.current === true)
         .filter((affiliation) => isSupportedAffiliation(affiliation, affiliationEvidenceIds))
         .sort((left, right) => left.organizationId.localeCompare(right.organizationId));
 
