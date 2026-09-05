@@ -22,6 +22,7 @@
     "check:integration": "npm run typecheck && npm run typecheck:graph && npm test"
   },
   "dependencies": {
+    "google-auth-library": "11.0.2",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },
