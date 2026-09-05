@@ -1,32 +1,55 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { createRoot } from 'react-dom/client';
-import { createAuthGateway, type User } from './auth';
+import { createAuthGateway, type AuthSession } from './auth';
+import { GraphViewport } from './components/GraphViewport';
 import './styles.css';
 
 const auth = createAuthGateway();
 
 function App() {
-  const [user, setUser] = useState<User | null>(null);
+  const [session, setSession] = useState<AuthSession | null>(null);
   const [showAuth, setShowAuth] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
+  const [authLoading, setAuthLoading] = useState(true);
+  const [authError, setAuthError] = useState('');
 
-  useEffect(() => { void auth.currentUser().then(setUser); }, []);
-  const initials = useMemo(() => user?.name.split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase(), [user]);
+  useEffect(() => {
+    void auth.currentSession()
+      .then(setSession)
+      .catch((error: unknown) => setAuthError(error instanceof Error ? error.message : 'We could not check your session.'))
+      .finally(() => setAuthLoading(false));
+  }, []);
+  const initials = useMemo(() => session?.actor.displayName.split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase(), [session]);
 
-  async function signOut() { await auth.signOut(); setUser(null); setNotice('You’re signed out.'); }
+  async function signOut() {
+    setBusy(true);
+    setAuthError('');
+    try {
+      await auth.signOut();
+      setSession(null);
+      setNotice('You’re signed out.');
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : 'We could not sign you out.');
+    } finally { setBusy(false); }
+  }
   async function google() {
     setBusy(true);
-    try { setUser(await auth.signInWithGoogle()); setShowAuth(false); }
-    finally { setBusy(false); }
+    setAuthError('');
+    try { await auth.beginGoogleSignIn(); }
+    catch (error) { setAuthError(error instanceof Error ? error.message : 'Google sign-in could not start.'); setBusy(false); }
   }
   async function email(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
     setBusy(true);
+    setAuthError('');
     try {
-      setUser(await auth.signUpWithEmail({ name: String(data.get('name')), email: String(data.get('email')) }));
+      if (!auth.signUpWithEmail) throw new Error('Email sign-up is not configured yet.');
+      setSession(await auth.signUpWithEmail({ name: String(data.get('name')), email: String(data.get('email')) }));
       setShowAuth(false);
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : 'We could not create your workspace.');
     } finally { setBusy(false); }
   }
 
@@ -35,8 +58,9 @@ function App() {
       <a className="brand" href="#top" aria-label="WarmPath home"><span className="brand-mark">W</span> WarmPath</a>
       <div className="nav-actions">
         <a href="#how-it-works">How it works</a>
-        {user ? <><span className="avatar" title={user.email}>{initials}</span><button className="text-button" onClick={() => void signOut()}>Sign out</button></>
-          : <button className="primary small" onClick={() => setShowAuth(true)}>Get started <span>→</span></button>}
+        {authLoading ? <span className="session-status">Checking session…</span>
+          : session ? <><span className="avatar" title={session.actor.email ?? session.actor.displayName}>{initials}</span><button className="text-button" disabled={busy} onClick={() => void signOut()}>Sign out</button></>
+            : <button className="primary small" onClick={() => setShowAuth(true)}>Get started <span>→</span></button>}
       </div>
     </nav>
 
@@ -51,18 +75,7 @@ function App() {
         </div>
         <p className="privacy-note">✦ Your network stays private. You choose what to connect.</p>
       </div>
-      <div className="constellation" aria-label="Illustration of connected people and a highlighted introduction path">
-        <svg viewBox="0 0 620 480" role="img">
-          <defs><radialGradient id="glow"><stop stopColor="#b5e7df" stopOpacity=".25"/><stop offset="1" stopColor="#b5e7df" stopOpacity="0"/></radialGradient></defs>
-          <circle cx="320" cy="245" r="220" fill="url(#glow)" />
-          <g className="faint-lines"><path d="M102 104L251 184 418 103 521 186 451 342 270 384 92 285Z"/><path d="M102 104L92 285 251 184 270 384 418 103 451 342 521 186"/><path d="M251 184L451 342M92 285L418 103"/></g>
-          <g className="route-line"><path d="M102 104L251 184 451 342 521 186"/></g>
-          <g className="nodes"><circle cx="102" cy="104" r="22"/><circle cx="251" cy="184" r="26"/><circle cx="418" cy="103" r="18"/><circle cx="521" cy="186" r="25"/><circle cx="451" cy="342" r="28"/><circle cx="270" cy="384" r="20"/><circle cx="92" cy="285" r="18"/></g>
-          <g className="route-nodes"><circle cx="102" cy="104" r="12"/><circle cx="251" cy="184" r="13"/><circle cx="451" cy="342" r="14"/><circle cx="521" cy="186" r="12"/></g>
-          <g className="labels"><text x="60" y="65">YOU</text><text x="205" y="145">PROFESSOR</text><text x="400" y="385">ALUMNI</text><text x="465" y="150">RECRUITER</text></g>
-        </svg>
-        <aside className="path-card"><span>BEST PATH FOUND</span><strong>4 introductions</strong><p>High relationship strength · Same school</p></aside>
-      </div>
+      <GraphViewport snapshot={null} />
     </section>
 
     <section id="how-it-works" className="steps">
@@ -76,18 +89,19 @@ function App() {
     <section className="promise"><p>“LinkedIn tells you who you know. We tell you the best path to the person who can actually help.”</p></section>
 
     {notice && <div className="toast">{notice}</div>}
+    {authError && <div className="toast" role="alert">{authError}</div>}
     {showAuth && <div className="overlay" role="dialog" aria-modal="true" aria-labelledby="auth-title" onMouseDown={(e) => e.target === e.currentTarget && setShowAuth(false)}>
       <section className="auth-card">
         <button className="close" aria-label="Close" onClick={() => setShowAuth(false)}>×</button>
         <span className="brand-mark">W</span><h2 id="auth-title">Start with your network.</h2><p>Create your workspace. You’ll decide what data to connect later.</p>
-        <button className="google" disabled={busy} onClick={() => void google()}><span className="google-g">G</span> Continue with Google</button>
-        <div className="divider"><span>or use your email</span></div>
-        <form onSubmit={(e) => void email(e)}>
+        {auth.capabilities.googleSignIn && <button className="google" disabled={busy} onClick={() => void google()}><span className="google-g">G</span> Continue with Google</button>}
+        {auth.capabilities.googleSignIn && auth.capabilities.emailSignup && <div className="divider"><span>or use your email</span></div>}
+        {auth.capabilities.emailSignup ? <form onSubmit={(e) => void email(e)}>
           <label>Name<input required name="name" autoComplete="name" placeholder="Your name" /></label>
           <label>Email<input required name="email" type="email" autoComplete="email" placeholder="you@example.com" /></label>
           <button className="primary full" disabled={busy}>{busy ? 'Creating workspace…' : 'Continue with email'} <span>→</span></button>
-        </form>
-        <small>Development mode: this saves a local browser session only. Connect a backend before using real accounts or network data.</small>
+        </form> : <small>Email sign-up will be available when the server account flow is configured.</small>}
+        <small>This app stores authentication and provider credentials only on the server. Local preview is explicitly opt-in for UI development.</small>
       </section>
     </div>}
   </main>;
