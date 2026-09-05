@@ -1,5 +1,5 @@
 {
-  "extends": "./tsconfig.json",
-  "compilerOptions": { "noUncheckedIndexedAccess": true, "exactOptionalPropertyTypes": true },
+  "extends": "./tsconfig.server.json",
+  "compilerOptions": { "noEmit": true },
   "include": ["contracts/**/*.ts", "packages/graph/**/*.ts"]
 }

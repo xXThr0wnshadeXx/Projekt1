@@ -34,4 +34,4 @@ License: existing GNU GPL v3; see [LICENSE](LICENSE).
 
 With Node 22.19+, run `npm ci` then `npm run dev` and open http://127.0.0.1:5173/.
 See [local integration, checks and setup prerequisites](docs/LOCAL-INTEGRATION.md).
-OAuth/storage are explicitly unavailable until adapters are configured; the separate graph integration check currently fails on the published engine and is not included in the browser/server build pass.
+OAuth/storage remain unavailable without approved configuration. The real goal resolver and graph engine are now composed; the full integration check includes graph typechecking and tests. Live Google consent, real imports and deployment still require acceptance checks.

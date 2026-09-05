@@ -1,5 +1,7 @@
 # Local frontend and API integration
 
+**Current status:** graph relay composition is complete and the full integration gate passes (196 tests with actual disposable PostgreSQL). Earlier milestone sections below are historical; the latest graph-relay section supersedes their graph-unavailable statements. Live user consent/import/deployment acceptance remains outstanding.
+
 Ben's feature branch reconciles main `7e4aef46e268247622934f284c396325824354bd` with backend correction `3873a0f83425b7136ec6c4b0d34777d72863f352`. Nicolas's `src/` and Shreev's graph implementation are preserved without edits. No public deployment or account creation is included.
 
 ## Run
@@ -93,3 +95,13 @@ HTTP contract implemented:
 Checks: 190 tests pass with zero skips using only the authorized disposable PostgreSQL test cluster for database tests; web/server build passes. Includes both owner suites, HTTP response/cookie/origin/input/redirect boundaries, missing-config login isolation, and migration order/idempotence. No live Contacts consent, provider records, source counts, Google refresh, real-user login or deployment is claimed.
 
 Root publication handoff: publish the two cherry-picked owner commits plus the final consent composition commit reported by this task; update PR #6 and issue #2 once. Next bounded work is reviewed graph/goal composition when exact commits arrive, then server-side retrieval/import/review APIs. Root owns all actual Google/Render settings; no credentials were requested or exposed here.
+
+## Graph relay composition (current)
+
+Merged the complete `feat/shreev-relay` history at `b31cc491bc02e28c187169e6dbf778256a07d081`, including corrected PR #3 base `a25d3cc`, the zero-relevance contract fix `e6e9f89`, and the preserved target resolver plus GoalPort adapter. No root package/lock/contracts conflicts occurred. Existing HTTP/auth/Contacts/storage composition and Nicolas UI were preserved; frontend PR #7 was not integrated or edited.
+
+Production `main.ts` now supplies `new EvidenceBackedGoalResolver()` and `new BoundedRouteSearch()` to `createApplication`. The graph target uses strict server/NodeNext settings so the resolver's Node crypto import is typed correctly; browser settings remain separate. No observations are promoted into friendships or introduction edges. The engine consumes only the validated snapshot's search projection. Goal matching stays conservative: current confirmed organization affiliations with appropriate evidence may match; unsupported requirements stay unknown, and former/unknown-current affiliations do not become current-company targets.
+
+Verification: `npm run check:integration` now passes completely—web/server typechecks, graph typecheck, and 196 tests with no skips using the authorized disposable PostgreSQL test environment. The web/server production build passes. Tests include the relay's real-validator and actual BackendService path cases plus a new real PostgreSQL session -> HTTP -> resolver -> engine regression yielding an honest unsupported-goal result. Readiness can now become true when real auth/storage are configured, migrations succeed and the DB probe passes; Contacts config remains an independent optional feature. Passing test readiness is not a live Google login or deployed readiness claim.
+
+Root publication handoff: publish the reconciliation merge commit reported in this task and update PR #6/issue #2 once. Both parents and the complete relay history are preserved. Current blockers move from graph compilation to real environment/user acceptance and the next source import/review API milestone. No independent push, main merge, real account creation, real-source import or deployment occurred here. The source bridge owner remains active; integrate only its exact reviewed commit when relayed by root.
