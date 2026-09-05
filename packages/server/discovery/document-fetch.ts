@@ -98,7 +98,7 @@ function glob(pattern: string, value: string): boolean {
 export function robotsAllowed(text: string, path: string, agent: string): boolean {
   const groups: Array<{agents:string[];rules:Array<{allow:boolean;path:string}>}> = [];
   let group: typeof groups[number]|undefined;
-  for(const raw of text.split(/\r?\n/)) {
+  for(const raw of text.split(/\r\n|\r|\n/)) {
     const line=raw.split('#')[0]!.trim();if(!line)continue;
     const colon=line.indexOf(':');if(colon<0)continue;
     const key=line.slice(0,colon).trim().toLowerCase(), value=line.slice(colon+1).trim();

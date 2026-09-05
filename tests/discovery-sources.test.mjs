@@ -112,6 +112,15 @@ test('robots wildcard, encoded path, exact agent and longest-match rules are hon
   assert.equal(robotsAllowed('User-agent: WarmPath\nDisallow: /\nUser-agent: WarmPath\nAllow: /ok$','/ok','warmpath'),true);
   assert.equal(robotsAllowed('User-agent: WarmPath\nDisallow: /\nUser-agent: WarmPath\nAllow: /ok$','/okay','warmpath'),false);
 });
+test('CRLF, CR and LF robots denials prevent the protected document request',async()=>{
+  for(const newline of ['\r\n','\r','\n']) {
+    const policy=`User-agent: *${newline}Disallow: /${newline}`;
+    assert.equal(robotsAllowed(policy,'/private','warmpath'),false);
+    const f=fixture(input=>input.url.pathname==='/robots.txt'?response(policy):response('must not be fetched'));
+    await fail(new PublicDocumentFetcher(f.http).fetch('https://example.org/private',signal()),'ACCESS_DENIED');
+    assert.deepEqual(f.calls.map(call=>call.url.href),['https://example.org/robots.txt']);
+  }
+});
 test('disallowed or unavailable robots prevent document reads; only missing404 policy allows read',async()=>{
   for(const robot of [response('User-agent: *\nDisallow: /'),response('',403),response('',429),response('',503),response('',302,'text/plain',{location:'https://other.org/robots.txt'}),response('<html>not robots</html>',200,'text/html')]){
     const f=fixture(()=>robot);await fail(new PublicDocumentFetcher(f.http).fetch('https://example.org/story',signal()),'ACCESS_DENIED');assert.equal(f.calls.length,1);
