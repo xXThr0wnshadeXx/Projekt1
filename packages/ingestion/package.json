@@ -5,6 +5,7 @@
   "scripts": {
     "typecheck": "tsc --project tsconfig.json",
     "test": "node --experimental-strip-types googleContactsNormalizer.test.ts",
-    "check": "npm run typecheck && npm run test"
+    "check": "npm run typecheck && npm run test",
+    "check:retrieval": "tsc --project tsconfig.retrieval.json && node --test googleContactsRetriever.test.mjs"
   }
 }

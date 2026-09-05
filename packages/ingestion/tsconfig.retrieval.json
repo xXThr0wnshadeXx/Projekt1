@@ -1,0 +1,5 @@
+{
+  "extends": "../../tsconfig.server.json",
+  "compilerOptions": {"outDir": "../../dist/retrieval"},
+  "include": ["googleContactsRetriever.ts", "googleContactsRetriever.typecheck.ts"]
+}
