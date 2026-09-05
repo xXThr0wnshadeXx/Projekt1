@@ -75,7 +75,7 @@ export function createDiscoverySources(options: DiscoverySourcesOptions) {
     const result:DiscoveryResult={discoveryId:randomUUID(),scopeId:request.scopeId,baseGraphVersion:authority.graphVersion,
       status:!successfulSearch&&!documents.length?'SOURCE_UNAVAILABLE':'INSUFFICIENT_PUBLIC_EVIDENCE',
       capabilities:{wikimedia:provider.kind==='WIKIMEDIA'&&available?'AVAILABLE':'UNAVAILABLE',
-        generalWeb:provider.kind==='BRAVE'?(provider.configured?(available?'AVAILABLE':'UNAVAILABLE'):'NOT_CONFIGURED'):'NOT_CONFIGURED',
+        generalWeb:provider.kind!=='WIKIMEDIA'?(provider.configured?(available?'AVAILABLE':'UNAVAILABLE'):'NOT_CONFIGURED'):'NOT_CONFIGURED',
         coverage:provider.kind==='WIKIMEDIA'?'WIKIMEDIA_ONLY':'GENERAL_PUBLIC_WEB'},
       proposalRefs:[],unresolvedIdentityCount:2+(request.target.personName||request.target.profileUrl?1:0),warnings,
       budget:{queriesUsed,pagesRead,exhausted}};

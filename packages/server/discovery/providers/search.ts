@@ -1,5 +1,5 @@
 import {DiscoveryError,publicUrl,type SearchHit,type SearchProvider} from '../contracts.js';
-import {PublicHttpClient,providerJson,abortable} from './http.js';
+import {PublicHttpClient,providerJson,parseProviderJson,abortable} from './http.js';
 
 function queryText(query: string): string {
   if (!query.trim() || query.length > 600 || /[\u0000-\u001f\u007f]/.test(query)) throw new DiscoveryError('INVALID_INPUT');
@@ -73,6 +73,30 @@ export class BraveSearchProvider implements SearchProvider {
       const row = record(value);
       try {hits.push({url:publicUrl(text(row.url,2048)).href,title:hint(text(row.title,1000)),snippet:hint(text(row.description??'',10000)),provider:this.kind,evidenceStatus:'DISCOVERY_HINT'});}
       catch (error) {if (error instanceof DiscoveryError && error.code==='INVALID_INPUT') continue; throw error;}
+    }
+    return hits;
+  }
+}
+
+/** Tavily basic web search. The optional key is injected by server composition, never looked up.
+ * Returned content/scores/answers are NOT factual evidence; only bounded discovery hints escape. */
+export class TavilySearchProvider implements SearchProvider {
+  readonly kind = 'TAVILY' as const;
+  readonly configured: boolean;
+  constructor(private readonly http: PublicHttpClient, private readonly apiKey?: string) {
+    this.configured=Boolean(apiKey);
+    if(apiKey!==undefined&&(!apiKey||apiKey.length>4096||/[\s\u007f]/.test(apiKey)))throw new DiscoveryError('INVALID_INPUT');
+  }
+  async search(query: string, signal: AbortSignal): Promise<SearchHit[]> {
+    if(!this.configured||!this.apiKey)throw new DiscoveryError('NOT_CONFIGURED');
+    const data=record(parseProviderJson(await this.http.postTavilySearch({query:queryText(query),search_depth:'basic',topic:'general',max_results:5,
+      include_answer:false,include_raw_content:false,include_images:false,auto_parameters:false},this.apiKey,signal)));
+    if(data.error || !Array.isArray(data.results) || data.results.length>20)throw new DiscoveryError('SOURCE_UNAVAILABLE');
+    const hits:SearchHit[]=[];
+    for(const value of data.results.slice(0,5)) {
+      const row=record(value);
+      try {hits.push({url:publicUrl(text(row.url,2048)).href,title:hint(text(row.title,1000)),snippet:hint(text(row.content??'',10000)),provider:this.kind,evidenceStatus:'DISCOVERY_HINT'});}
+      catch(error){if(error instanceof DiscoveryError&&error.code==='INVALID_INPUT')continue;throw error;}
     }
     return hits;
   }

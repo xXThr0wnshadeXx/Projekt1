@@ -57,7 +57,7 @@ export interface PublicSourceEnvelope {
   documents: PublicDocument[]; citations: PublicCitation[]; proposals: PublicClaimProposal[];
 }
 export interface SearchHit {
-  url: string; title: string; snippet: string; provider: 'WIKIMEDIA'|'BRAVE';
+  url: string; title: string; snippet: string; provider: 'WIKIMEDIA'|'BRAVE'|'TAVILY';
   /** Always a hint. Search snippets are never verified claim/citation text. */
   evidenceStatus: 'DISCOVERY_HINT';
 }

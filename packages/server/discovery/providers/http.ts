@@ -17,6 +17,7 @@ export interface ResolvedAddress {address: string; family: 4|6}
 export interface NetworkResponse {status: number; headers: Record<string,string>; body: Uint8Array}
 export interface PinnedRequest {
   url: URL; address: ResolvedAddress; headers: Record<string,string>; maxBytes: number; signal: AbortSignal;
+  method?: 'GET'|'POST'; body?: string;
 }
 export interface NetworkDependencies {
   resolve(hostname: string): Promise<ResolvedAddress[]>;
@@ -34,7 +35,7 @@ export function abortable<T>(work: Promise<T>, signal: AbortSignal): Promise<T> 
  * No agent reuse, automatic redirects, decompression, cookies, proxy environment or browser headers. */
 export function requestPinned(input: PinnedRequest): Promise<NetworkResponse> {
   return new Promise((done,reject) => {
-    const req = httpsRequest(input.url, {method:'GET',agent:false,signal:input.signal,
+    const req = httpsRequest(input.url, {method:input.method??'GET',agent:false,signal:input.signal,
       family:input.address.family,headers:input.headers,
       lookup: (_host,_options,callback) => callback(null,input.address.address,input.address.family)}, response => {
       const headers: Record<string,string> = {};
@@ -48,7 +49,7 @@ export function requestPinned(input: PinnedRequest): Promise<NetworkResponse> {
       response.once('end',()=>done({status:response.statusCode??0,headers,body:Buffer.concat(chunks)}));
       response.once('aborted',()=>reject(new DiscoveryError('SOURCE_UNAVAILABLE')));
     });
-    req.once('error',reject); req.end();
+    req.once('error',reject); req.end(input.body);
   });
 }
 const nativeNetwork: NetworkDependencies = {
@@ -61,15 +62,28 @@ export class PublicHttpClient {
   }
   get agentToken(): string {return this.userAgent.split('/')[0]!.toLowerCase();}
   async get(value: string, options: {signal: AbortSignal; maxBytes: number; accept?: string; headers?: Record<string,string>}): Promise<NetworkResponse> {
+    return this.send(value,{...options,method:'GET'});
+  }
+  /** The sole POST transport entrypoint: fixed Tavily search endpoint, no user-selected auth URL. */
+  async postTavilySearch(body: Record<string,unknown>, apiKey: string, signal: AbortSignal): Promise<NetworkResponse> {
+    if (!apiKey || apiKey.length>4096 || /[\s\u007f]/.test(apiKey)) throw new DiscoveryError('INVALID_INPUT');
+    const payload=JSON.stringify(body);
+    if (Buffer.byteLength(payload)>8192) throw new DiscoveryError('LIMIT_EXCEEDED');
+    return this.send('https://api.tavily.com/search',{signal,maxBytes:512*1024,accept:'application/json',method:'POST',body:payload,
+      headers:{authorization:`Bearer ${apiKey}`,'content-type':'application/json','content-length':String(Buffer.byteLength(payload))}});
+  }
+  private async send(value: string, options: {signal: AbortSignal; maxBytes: number; accept?: string; headers?: Record<string,string>;method:'GET'|'POST';body?:string}): Promise<NetworkResponse> {
     const url = publicUrl(value), hostname = url.hostname.replace(/^\[|\]$/g,'');
-    if (options.headers && (Object.keys(options.headers).some(key=>key!=='x-subscription-token') || url.origin!=='https://api.search.brave.com' || url.pathname!=='/res/v1/web/search')) throw new DiscoveryError('ACCESS_DENIED');
+    if (options.method==='POST') {
+      if(url.href!=='https://api.tavily.com/search' || options.body===undefined || Object.keys(options.headers??{}).some(key=>!['authorization','content-type','content-length'].includes(key)))throw new DiscoveryError('ACCESS_DENIED');
+    } else if (options.headers && (Object.keys(options.headers).some(key=>key!=='x-subscription-token') || url.origin!=='https://api.search.brave.com' || url.pathname!=='/res/v1/web/search')) throw new DiscoveryError('ACCESS_DENIED');
     if (hostname === 'localhost' || /\.(localhost|local|internal|home|lan)$/.test(hostname) || !Number.isSafeInteger(options.maxBytes) || options.maxBytes < 1 || options.maxBytes > 1024*1024) throw new DiscoveryError('ACCESS_DENIED');
     const signal = AbortSignal.any([options.signal,AbortSignal.timeout(8000)]);
     try {
       const addresses = isIP(hostname) ? [{address:hostname,family:isIP(hostname) as 4|6}] : await abortable(this.network.resolve(hostname),signal);
       if (!addresses.length || addresses.length > 32 || addresses.some(item => !isPublicAddress(item.address) || isIP(item.address) !== item.family)) throw new DiscoveryError('ACCESS_DENIED');
       if (signal.aborted) throw new DiscoveryError('CANCELLED');
-      const response = await abortable(this.network.request({url,address:addresses[0]!,signal,maxBytes:options.maxBytes,
+      const response = await abortable(this.network.request({url,address:addresses[0]!,signal,maxBytes:options.maxBytes,method:options.method,...(options.body===undefined?{}:{body:options.body}),
         headers:{'user-agent':this.userAgent,accept:options.accept??'text/html, text/plain;q=0.9','accept-encoding':'identity',...(options.headers??{})}}),signal);
       if (response.body.byteLength > options.maxBytes) throw new DiscoveryError('LIMIT_EXCEEDED');
       if (response.headers['content-encoding'] && response.headers['content-encoding'].toLowerCase() !== 'identity') throw new DiscoveryError('UNSUPPORTED_CONTENT');
@@ -84,7 +98,11 @@ export function responseText(response: NetworkResponse): string {
 }
 export async function providerJson(client: PublicHttpClient, url: URL, signal: AbortSignal, headers?: Record<string,string>): Promise<unknown> {
   const response = await client.get(url.href,{signal,maxBytes:512*1024,accept:'application/json',...(headers?{headers}:{})});
+  return parseProviderJson(response);
+}
+export function parseProviderJson(response: NetworkResponse): unknown {
   // Never forward a provider secret through an HTTP redirect, even to another public host.
+  if ([432,433].includes(response.status)) throw new DiscoveryError('LIMIT_EXCEEDED');
   if (response.status !== 200) throw new DiscoveryError([401,403,429,451].includes(response.status)?'ACCESS_DENIED':'SOURCE_UNAVAILABLE');
   if (!/^application\/json(?:\s*;|$)/i.test(response.headers['content-type']??'')) throw new DiscoveryError('UNSUPPORTED_CONTENT');
   try {return JSON.parse(responseText(response));} catch (error) {if(error instanceof DiscoveryError)throw error;throw new DiscoveryError('SOURCE_UNAVAILABLE');}
