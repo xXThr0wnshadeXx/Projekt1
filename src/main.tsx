@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createAuthGateway, type AuthSession } from './auth';
 import { GraphViewport } from './components/GraphViewport';
@@ -7,6 +7,14 @@ import type { GraphSnapshot, OpportunityPath, SearchEvent, SearchResult } from '
 import './styles.css';
 
 const auth = createAuthGateway();
+type DiscoveryIntent = {
+  company: string;
+  recruiter: string;
+  location: string;
+  field: string;
+  linkedinUrl: string;
+  instagramUrl: string;
+};
 
 function safeSelectedPathIds(result: SearchResult, snapshot: GraphSnapshot): string[] | null {
   if (result.scopeId !== snapshot.scopeId || result.graphVersion !== snapshot.graphVersion || !Array.isArray(result.events)) return null;
@@ -57,6 +65,7 @@ function App() {
   const [searchResult, setSearchResult] = useState<SearchResult | null>(null);
   const [selectedPaths, setSelectedPaths] = useState<OpportunityPath[]>([]);
   const [activePersonIds, setActivePersonIds] = useState<string[]>([]);
+  const [intentStatus, setIntentStatus] = useState('');
   const replayTimer = useRef<number | null>(null);
 
   useEffect(() => {
@@ -150,6 +159,11 @@ function App() {
       setAuthError(error instanceof Error ? error.message : 'We could not create your workspace.');
     } finally { setBusy(false); }
   }
+  function saveIntent(intent: DiscoveryIntent) {
+    if (!session) { setShowAuth(true); return; }
+    // Discovery persistence will be server-owned once Ben freezes its request contract.
+    setIntentStatus(`Your ${intent.company || intent.field || 'connection'} goal is ready to send to the secure discovery service.`);
+  }
 
   return <main>
     <nav className="nav">
@@ -176,8 +190,10 @@ function App() {
       <GraphViewport snapshot={snapshot} loading={graphLoading} error={graphError} selectedPaths={selectedPaths} activePersonIds={activePersonIds} />
     </section>
 
+    <DiscoveryIntentForm signedIn={Boolean(session)} onSignIn={() => setShowAuth(true)} onSave={saveIntent} status={intentStatus} />
+
     <section className="search-panel" aria-labelledby="search-title">
-      <div><p className="eyebrow"><i /> INTRODUCTION SEARCH</p><h2 id="search-title">Search a real, authorized path.</h2><p>The server resolves the goal and selects routes. WarmPath only displays the returned graph facts and selected paths.</p></div>
+      <div><p className="eyebrow"><i /> ROUTE SEARCH</p><h2 id="search-title">Explore a supported path.</h2><p>Once discovery has returned an authorized graph, the server resolves your goal and selects routes. WarmPath only displays returned facts and paths.</p></div>
       {session && session.scopes.length > 0 ? <form onSubmit={(event) => void submitSearch(event)}>
         <label>Authorized graph scope<select value={scopeId} onChange={(event) => setScopeId(event.target.value)}>{session.scopes.map((scope) => <option key={scope.id} value={scope.id}>{scope.label}</option>)}</select></label>
         <label>Your goal<input value={goalText} onChange={(event) => setGoalText(event.target.value)} placeholder="e.g. PayPal early talent recruiter" required /></label>
@@ -214,6 +230,25 @@ function App() {
       </section>
     </div>}
   </main>;
+}
+
+function DiscoveryIntentForm({ signedIn, onSignIn, onSave, status }: { signedIn: boolean; onSignIn: () => void; onSave: (intent: DiscoveryIntent) => void; status: string }) {
+  const [intent, setIntent] = useState<DiscoveryIntent>({ company: '', recruiter: '', location: '', field: '', linkedinUrl: '', instagramUrl: '' });
+  const change = (field: keyof DiscoveryIntent) => (event: ChangeEvent<HTMLInputElement>) => setIntent((current) => ({ ...current, [field]: event.target.value }));
+  function submit(event: FormEvent<HTMLFormElement>) { event.preventDefault(); onSave(intent); }
+  return <section className="intent-panel" aria-labelledby="intent-title">
+    <div className="intent-heading"><p className="eyebrow"><i /> START A CONNECTION QUEST</p><h2 id="intent-title">What do you want to do?</h2><p>Tell us who or what you want to get closer to. We will only look for evidence the secure service is authorized to use.</p></div>
+    <form className="intent-form" onSubmit={(event) => void submit(event)}>
+      <label>Company<input value={intent.company} onChange={change('company')} placeholder="e.g. PayPal" /></label>
+      <label>Recruiter or person<input value={intent.recruiter} onChange={change('recruiter')} placeholder="Name or “early talent recruiter”" /></label>
+      <label>Location<input value={intent.location} onChange={change('location')} placeholder="e.g. San Jose, CA" /></label>
+      <label>Field or role<input value={intent.field} onChange={change('field')} placeholder="e.g. product design internship" /></label>
+      <fieldset className="profile-links"><legend>Optional public profile links</legend><label>LinkedIn profile<input value={intent.linkedinUrl} onChange={change('linkedinUrl')} type="url" placeholder="https://linkedin.com/in/..." /></label><label>Instagram profile<input value={intent.instagramUrl} onChange={change('instagramUrl')} type="url" placeholder="https://instagram.com/..." /></label></fieldset>
+      {signedIn ? <button className="primary intent-submit">Save this connection goal <span>→</span></button> : <button type="button" className="primary intent-submit" onClick={onSignIn}>Sign in to start <span>→</span></button>}
+      <p className="intent-privacy">Profile links are optional. We do not scrape private networks or keep this draft in your browser.</p>
+      {status && <p className="intent-status" role="status">{status}</p>}
+    </form>
+  </section>;
 }
 
 function SearchSummary({ result, selectedPaths, snapshot }: { result: SearchResult; selectedPaths: OpportunityPath[]; snapshot: GraphSnapshot | null }) {
