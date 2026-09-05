@@ -49,6 +49,7 @@ function peopleForEvent(event: SearchEvent): string[] {
 }
 
 function App() {
+  useScrollReveal();
   const [session, setSession] = useState<AuthSession | null>(null);
   const [showAuth, setShowAuth] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -177,7 +178,7 @@ function App() {
     </nav>
 
     <section id="top" className="hero">
-      <div className="hero-copy">
+      <div className="hero-copy scroll-reveal scroll-reveal--left">
         <p className="eyebrow"><i /> YOUR NETWORK, MADE ACTIONABLE</p>
         <h1>Find your way <em>in.</em></h1>
         <p className="lede">Turn a job post into the strongest, most human path to the person who can help.</p>
@@ -187,12 +188,12 @@ function App() {
         </div>
         <p className="privacy-note">✦ Your network stays private. You choose what to connect.</p>
       </div>
-      <GraphViewport snapshot={snapshot} loading={graphLoading} error={graphError} selectedPaths={selectedPaths} activePersonIds={activePersonIds} />
+      <div className="scroll-reveal scroll-reveal--right"><GraphViewport snapshot={snapshot} loading={graphLoading} error={graphError} selectedPaths={selectedPaths} activePersonIds={activePersonIds} /></div>
     </section>
 
     <DiscoveryIntentForm signedIn={Boolean(session)} onSignIn={() => setShowAuth(true)} onSave={saveIntent} status={intentStatus} />
 
-    <section className="search-panel" aria-labelledby="search-title">
+    <section className="search-panel scroll-reveal scroll-reveal--rise" aria-labelledby="search-title">
       <div><p className="eyebrow"><i /> ROUTE SEARCH</p><h2 id="search-title">Explore a supported path.</h2><p>Once discovery has returned an authorized graph, the server resolves your goal and selects routes. WarmPath only displays returned facts and paths.</p></div>
       {session && session.scopes.length > 0 ? <form onSubmit={(event) => void submitSearch(event)}>
         <label>Authorized graph scope<select value={scopeId} onChange={(event) => setScopeId(event.target.value)}>{session.scopes.map((scope) => <option key={scope.id} value={scope.id}>{scope.label}</option>)}</select></label>
@@ -204,14 +205,14 @@ function App() {
     </section>
 
     <section id="how-it-works" className="steps">
-      <div className="section-heading"><p className="eyebrow"><i /> HOW IT WORKS</p><h2>From opportunity to introduction.</h2></div>
+      <div className="section-heading scroll-reveal scroll-reveal--left"><p className="eyebrow"><i /> HOW IT WORKS</p><h2>From opportunity to introduction.</h2></div>
       <div className="step-grid">
-        <article><b>01</b><div className="icon">⌑</div><h3>Share the opportunity</h3><p>Upload a job post or add a role you’re excited about.</p></article>
-        <article><b>02</b><div className="icon">⌘</div><h3>See the path</h3><p>We weigh your real connections to find the strongest route.</p></article>
-        <article><b>03</b><div className="icon">✦</div><h3>Make the ask</h3><p>Get thoughtful, personalized outreach for every step.</p></article>
+        <article className="scroll-reveal scroll-reveal--rise"><b>01</b><div className="icon">⌑</div><h3>Share the opportunity</h3><p>Upload a job post or add a role you’re excited about.</p></article>
+        <article className="scroll-reveal scroll-reveal--rise scroll-reveal--delay-1"><b>02</b><div className="icon">⌘</div><h3>See the path</h3><p>We weigh your real connections to find the strongest route.</p></article>
+        <article className="scroll-reveal scroll-reveal--rise scroll-reveal--delay-2"><b>03</b><div className="icon">✦</div><h3>Make the ask</h3><p>Get thoughtful, personalized outreach for every step.</p></article>
       </div>
     </section>
-    <section className="promise"><p>“LinkedIn tells you who you know. We tell you the best path to the person who can actually help.”</p></section>
+    <section className="promise scroll-reveal scroll-reveal--pop"><p>“LinkedIn tells you who you know. We tell you the best path to the person who can actually help.”</p></section>
 
     {notice && <div className="toast">{notice}</div>}
     {authError && <div className="toast" role="alert">{authError}</div>}
@@ -236,7 +237,7 @@ function DiscoveryIntentForm({ signedIn, onSignIn, onSave, status }: { signedIn:
   const [intent, setIntent] = useState<DiscoveryIntent>({ company: '', recruiter: '', location: '', field: '', linkedinUrl: '', instagramUrl: '' });
   const change = (field: keyof DiscoveryIntent) => (event: ChangeEvent<HTMLInputElement>) => setIntent((current) => ({ ...current, [field]: event.target.value }));
   function submit(event: FormEvent<HTMLFormElement>) { event.preventDefault(); onSave(intent); }
-  return <section className="intent-panel" aria-labelledby="intent-title">
+  return <section className="intent-panel scroll-reveal scroll-reveal--rise" aria-labelledby="intent-title">
     <div className="intent-heading"><p className="eyebrow"><i /> START A CONNECTION QUEST</p><h2 id="intent-title">What do you want to do?</h2><p>Tell us who or what you want to get closer to. We will only look for evidence the secure service is authorized to use.</p></div>
     <form className="intent-form" onSubmit={(event) => void submit(event)}>
       <label>Company<input value={intent.company} onChange={change('company')} placeholder="e.g. PayPal" /></label>
@@ -249,6 +250,22 @@ function DiscoveryIntentForm({ signedIn, onSignIn, onSave, status }: { signedIn:
       {status && <p className="intent-status" role="status">{status}</p>}
     </form>
   </section>;
+}
+
+function useScrollReveal() {
+  useEffect(() => {
+    const elements = Array.from(document.querySelectorAll<HTMLElement>('.scroll-reveal'));
+    const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    if (reducedMotion || !('IntersectionObserver' in window)) {
+      elements.forEach((element) => element.classList.add('is-in-view'));
+      return;
+    }
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => entry.target.classList.toggle('is-in-view', entry.isIntersecting));
+    }, { threshold: 0.14, rootMargin: '0px 0px -4% 0px' });
+    elements.forEach((element) => observer.observe(element));
+    return () => observer.disconnect();
+  }, []);
 }
 
 function SearchSummary({ result, selectedPaths, snapshot }: { result: SearchResult; selectedPaths: OpportunityPath[]; snapshot: GraphSnapshot | null }) {
