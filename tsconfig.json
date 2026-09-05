@@ -1,4 +1,9 @@
 {
-  "compilerOptions": { "target": "ES2022", "module": "NodeNext", "moduleResolution": "NodeNext", "strict": true, "noUncheckedIndexedAccess": true, "exactOptionalPropertyTypes": true, "declaration": true, "outDir": "dist", "rootDir": ".", "skipLibCheck": true },
-  "include": ["contracts/**/*.ts", "packages/server/**/*.ts"]
+  "compilerOptions": {
+    "target": "ES2022", "useDefineForClassFields": true, "lib": ["DOM", "DOM.Iterable", "ES2022"],
+    "allowJs": false, "skipLibCheck": true, "esModuleInterop": true, "allowSyntheticDefaultImports": true,
+    "strict": true, "module": "ESNext", "moduleResolution": "Bundler", "resolveJsonModule": true,
+    "isolatedModules": true, "noEmit": true, "jsx": "react-jsx", "types": ["vite/client"]
+  },
+  "include": ["src", "vite.config.ts"]
 }
