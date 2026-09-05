@@ -132,3 +132,21 @@ The routes pass the extracted opaque session token to the authorized bridge, pre
 Verification: full `npm run check:integration` passed with 209 tests, zero failures and zero skips using the authorized disposable PostgreSQL test database. Production server/browser build passed. Added route boundary tests and a real PostgreSQL application regression for persisted sources and missing retrieval. No live provider retrieval, real-user consent or deployment was performed. Nicolas's upstream event-sequence issue remains pending its owner fix.
 
 Root publication handoff: publish the frontend merge, bridge cherry-pick and final import HTTP composition commit reported by this task; update PR #6 and issue #2 once. This worktree has not pushed or modified main. Next action is to connect Shaw's exact reviewed retriever and integrate Nicolas's sequence fix through root.
+
+## Stopping checkpoint for the next observer
+
+Implementation is stopped at `2e297ff7fea7ce564b63a10d7579ad7ba70223b3` on `feat/ben-integration`. The working tree was clean before this documentation-only checkpoint. Completed validation remains: `npm run check:integration` passed all 209 tests with zero skips against the disposable test database, and `npm run build` passed server compilation and the 34-module browser build. No validation is still running in this task. No new implementation milestone, push, main update or deployment was started.
+
+Running processes observed at handoff: existing `npm run dev` PID 59375, runner PID 59420, API PID 59421 listening on 127.0.0.1:3001, and Vite PID 59422 on 127.0.0.1:5173. These predate the latest commits and were not restarted or claimed to serve the latest server composition. PostgreSQL test PID 60373 listens on 127.0.0.1:55439; the separate local live cluster PID 67153 listens on 127.0.0.1:55440. All were left running and unchanged. Process IDs are a point-in-time observation and should be rechecked before operating on them.
+
+Command reports the empty `projekt1_live` database is ready on 127.0.0.1:55440, with required settings in ignored mode-0600 `private-data/server.env` and operations instructions in `private-data/LOCAL-DATABASE-OPERATIONS.md`. This task did not read the secret file, rotate keys, connect the application to that database, or verify live migrations/readiness. Google private-data scope approval is still pending; do not start private-data access before that approval.
+
+Precise remaining gaps for the next observer:
+
+- Publish the verified frontend merge, bridge cherry-pick, import composition and this documentation checkpoint through command's normal review flow.
+- Connect Shaw's exact reviewed `RetrieveAndNormalizeGoogleContacts` entrypoint in production composition; authenticated starts currently return `SOURCE_UNAVAILABLE` by design.
+- Integrate Nicolas's owned event-sequence fix: the preserved frontend expects one-based sequences while backend events are zero-based.
+- After required scope approval and reviewed environment setup, restart the application with the intended live configuration and verify migrations, readiness, login/Contacts consent, persisted source listing, import review, explicit approval and UI behavior using authorized data. None of those live acceptance checks is implied by the synthetic/disposable test suite.
+- Keep private-data files out of publication. No deployment or real-provider access has been performed by this task.
+
+No further implementation work is scheduled here. Root/new observer owns continuation and publication.
