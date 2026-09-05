@@ -65,7 +65,7 @@ export class BoundedRouteSearch implements SearchEngine {
       .filter((person) => isUnitScore(person.identityConfidence))
       .map((person) => [person.id, person]));
     const targetsByPerson = new Map(targets
-      .filter((target) => isUnitScore(target.relevance))
+      .filter((target) => isUnitScore(target.relevance) && target.relevance > 0)
       .map((target) => [target.personId, target]));
     if (targetsByPerson.size === 0) {
       const stats: SearchStats = {
@@ -92,6 +92,7 @@ export class BoundedRouteSearch implements SearchEngine {
       const routeKey = path.personIds.join('\u0000');
       const existing = candidatesByRoute.get(routeKey);
       if (!existing || compareCandidates({ path, rankKey: routeKey }, existing) < 0) {
+        emit({ type: 'TARGET_FOUND', personId: target.personId });
         candidatesByRoute.set(routeKey, { path, rankKey: routeKey });
         emit({ type: 'PATH_CANDIDATE', path });
       }
@@ -109,8 +110,7 @@ export class BoundedRouteSearch implements SearchEngine {
       emit({ type: 'NODE_VISITED', personId: currentPersonId, prefixPersonIds: state.personIds });
 
       const target = targetsByPerson.get(currentPersonId);
-      if (target && target.relevance > 0 && state.edgeIds.length > 0) {
-        emit({ type: 'TARGET_FOUND', personId: currentPersonId });
+      if (target && state.edgeIds.length > 0) {
         recordCandidate(state, target);
       }
       // A state reached just as the expansion budget was consumed is still a
@@ -155,8 +155,7 @@ export class BoundedRouteSearch implements SearchEngine {
         frontier.push(nextState);
         // Retain a reached target even when this was the final permitted expansion.
         const reachedTarget = targetsByPerson.get(edge.toPersonId);
-        if (reachedTarget && reachedTarget.relevance > 0) {
-          emit({ type: 'TARGET_FOUND', personId: edge.toPersonId });
+        if (reachedTarget) {
           recordCandidate(nextState, reachedTarget);
         }
       }
@@ -215,7 +214,8 @@ function makePath(snapshot: GraphSnapshot, goal: Goal, target: Target, state: Pa
     identities: state.personIds.slice(1).map((personId) => ({ personId, value: snapshot.people.find((person) => person.id === personId)!.identityConfidence })),
     policyVersion: ROUTE_POLICY_VERSION,
   };
-  const evidenceIds = [...new Set([...state.edges.flatMap((edge) => edge.evidenceIds), ...target.evidenceIds])];
+  const evidenceIds = [...new Set([...state.edges.flatMap((edge) => edge.evidenceIds), ...target.evidenceIds])]
+    .sort((left, right) => left.localeCompare(right));
   return {
     id: makeOpaqueId('path', [...state.personIds, ...state.edgeIds, target.personId]),
     personIds: state.personIds, edgeIds: state.edgeIds, target, score,
