@@ -25,8 +25,9 @@ test('first two actions start promptly, later actions obey two-minute spacing; r
   assert.equal((await h.command({type:'START',url:root})).ok,true);
   for(let i=0;i<30;i++)await h.tick();
   const s=h.data.orbitNetwork;assert.equal(s.status,'complete');assert.deepEqual(route(s,b),[root,a,b]);assert.equal(s.pages,2);assert.equal(h.advances,0);for(let i=2;i<h.requests.length;i++)assert.ok(h.requests[i]-h.requests[i-1]>=120000);assert.equal(h.alarms.size,0);
+  await h.elapse(Date.parse(s.branches[root].checkedAt)-Date.now()+24*60*60*1000+1);
   h.snapshots={[root]:{kind:'blocked',url:root,reason:'LinkedIn verification required'}};
-  await h.command({type:'START',url:root});await h.tick();await h.tick();assert.equal(h.data.orbitNetwork.status,'paused');assert.equal(h.alarms.size,0);
+  const refresh=await h.command({type:'START',url:root});assert.equal(refresh.status,'running');await h.tick();await h.tick();assert.equal(h.data.orbitNetwork.status,'paused');assert.equal(h.alarms.size,0);
   assert.equal((await h.command({type:'RESUME',config:{maxNodes:1000,depth:3,delay:0}})).ok,false);
   assert.equal(h.listeners.external({type:'GET_STATE'},{url:'https://evil.example/'},()=>{}),false);
   assert.equal(h.listeners.message({type:'CLEAR'},{id:'test-extension',url:'https://www.linkedin.com/'},()=>{}),false);
@@ -237,6 +238,27 @@ test('duplicate Start keeps the current checkpoint instead of refreshing every k
   const before=structuredClone(h.data.orbitNetwork.current);
   await h.command({type:'START',url:root});
   assert.deepEqual(h.data.orbitNetwork.current,before);assert.equal(h.requests.length,1);
+});
+
+test('a completed map stays put until its daily freshness window',async t=>{
+  const s=newState(root,{depth:2,delay:0});s.status='complete';s.queue=[];s.branches[root]={status:'exhausted',pages:1,profiles:[a],url:list('root'),checkedAt:new Date(1000000).toISOString()};s.nodes[a]={...person('a'),id:a,depth:1};s.branches[a]={status:'hidden',pages:0,profiles:[],checkedAt:new Date(1000000).toISOString()};
+  const h=await harness(t,s);const response=await h.command({type:'START',url:root,config:{depth:2,delay:0}});
+  assert.equal(response.ok,true);assert.equal(h.data.orbitNetwork.status,'complete');assert.equal(h.requests.length,0);assert.equal(h.data.orbitNetwork.queue.length,0);assert.match(h.data.orbitNetwork.reason,/current/i);
+});
+
+test('incremental refresh rotates through a bounded stale batch without erasing coverage',async t=>{
+  const s=newState(root,{depth:2,delay:0});s.status='complete';s.queue=[];s.commentCoverage={};const old=new Date(-100000000).toISOString();
+  s.branches[root]={status:'exhausted',pages:4,profiles:[],url:list('root'),checkedAt:old};
+  for(let i=0;i<40;i++){const p=person(`known-${i}`),id=p.url;s.nodes[id]={...p,id,depth:1};s.branches[id]={status:'hidden',pages:0,profiles:[],checkedAt:old};s.commentCoverage[id]={status:'exhausted',posts:[],profiles:[],comments:0,checkedAt:old};}
+  const h=await harness(t,s);h.snapshots={[root]:profile(person('root'),list('root'))};await h.command({type:'START',url:root,config:{depth:2,delay:0}});
+  const active=[...h.data.orbitNetwork.queue,...h.data.orbitNetwork.workers.map(w=>w.current?.job).filter(Boolean)];
+  assert.equal(active.length,24);assert.ok(active.every(job=>job.refresh));assert.equal(h.data.orbitNetwork.refreshing,true);assert.equal(h.data.orbitNetwork.branches[root].pages,4);assert.equal(Object.keys(h.data.orbitNetwork.commentCoverage).length,40);assert.equal(Object.keys(h.data.orbitNetwork.nodes).length,41);
+});
+
+test('reopening the Site starts a due daily refresh without rebuilding the map',async t=>{
+  const s=newState(root,{depth:1,delay:0});s.status='complete';s.queue=[];s.branches[root]={status:'exhausted',pages:2,profiles:[a],url:list('root'),checkedAt:'stale'};s.nodes[a]={...person('a'),id:a,depth:1};
+  const h=await harness(t,s);h.snapshots={[root]:profile(person('root'),list('root'))};await h.command({type:'WORKSPACE_ACTIVE',active:true});
+  assert.equal(h.data.orbitNetwork.status,'running');assert.equal(h.data.orbitNetwork.refreshing,true);assert.equal(h.data.orbitNetwork.current.job.owner,root);assert.equal(h.data.orbitNetwork.branches[root].pages,2);assert.ok(h.data.orbitNetwork.log.some(entry=>/Daily incremental refresh/.test(entry.message)));
 });
 
 test('an incomplete direct layer pauses before navigating to any deeper profile',async t=>{

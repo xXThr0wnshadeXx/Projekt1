@@ -52,7 +52,7 @@ The extension is a background collection companion; the permanent knowledge grap
 
 ## One account, one network
 
-Orbit maintains one continuously growing network for each signed-in account. Resuming an unfinished collection keeps its checkpoint; duplicate starts leave an active collection alone. **Continue collecting** on a finished map refreshes it from the direct layer outward. Every changed person and relationship is periodically upserted into the shared team graph, and reopening Orbit loads the account’s saved neighborhood from D1. **Reset my account network** is deliberately kept in Settings and removes only that account’s contribution—overlapping records supported by teammates remain.
+Orbit maintains one continuously growing network for each signed-in account. Resuming an unfinished collection keeps its exact page, queue, and checkpoint; duplicate starts leave an active collection alone. A finished map becomes **Check for new connections**. Orbit never clears its saved coverage or requeues the whole known network: after 24 hours it checks the 24 stalest eligible branches, prioritizes the starting account, and rotates through the remainder on later runs. Newly discovered people still expand outward to the chosen degree. Reopening the Site starts a due daily batch, while reopening an unfinished run resumes exactly where it stopped. Every changed person and relationship is periodically upserted into the shared team graph. **Reset my account network** is deliberately kept in Settings and removes only that account’s contribution—overlapping records supported by teammates remain.
 
 ### Comment relationships (2.6.1)
 
@@ -73,6 +73,7 @@ Existing exports with `commentObservations`, combined comment evidence, or `kind
 - Scrolling uses overlapping viewports and combines unique people across virtualized snapshots. Modern and legacy result cards can coexist. A person cap saves only accepted rows and resumes the remainder without inflating page counts. An uncertain end remains **Incomplete** in Coverage.
 - Incomplete direct lists resume from an already validated list URL when available, and deeper profiles wait until that layer is resolved. Browser restarts preserve the last paginated URL.
 - An open Site now keeps its collection lease through background-tab throttling and overnight computer sleep. A normal Site close still pauses immediately and reopening resumes the same checkpoint.
+- Completed maps keep per-branch freshness timestamps. Daily refreshes inspect at most 24 stale branches at a time, retain all prior people, relationship evidence, comment coverage, and pagination history, and use idempotent URL/edge keys so a refresh cannot duplicate graph records.
 
 The added `webRequest` permission observes status codes and `Retry-After` in the collector tab using Chrome's [response-header events](https://developer.chrome.com/docs/extensions/reference/api/webRequest). It does not request blocking interception, read response bodies or cookies, change headers, or expand host access beyond `www.linkedin.com`.
 

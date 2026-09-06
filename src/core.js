@@ -134,11 +134,23 @@ export function route(state,target) {
   if(!prev.has(target))return [];
   const out=[];for(let n=target;n;n=prev.get(n))out.unshift(n);return out;
 }
+export function routeStrength(state,path,now=Date.now()){
+  if(!Array.isArray(path)||path.length<2)return 0;let score=10000-(path.length-1)*1000;
+  for(let i=1;i<path.length;i++){
+    const edge=state.edges?.[[path[i-1],path[i]].sort().join('|')],evidence=edge?.evidence||[];
+    if(evidence.some(item=>(item.type||'visible_connection_list')==='visible_connection_list'))score+=80;
+    if(evidence.some(item=>item.type==='comment_interaction'))score+=35;
+    score+=Math.min(40,Math.max(0,evidence.length-1)*10);
+    const newest=Math.max(...evidence.map(item=>Date.parse(item.observedAt||'')).filter(Number.isFinite),0);
+    if(newest)score+=Math.max(0,30-Math.floor(Math.max(0,now-newest)/86400000));
+  }
+  return score;
+}
 export function routes(state,target,limit=4,maxDepth=6){
   if(!state?.nodes[target]||limit<1)return [];const adj=new Map();for(const e of Object.values(state.edges)){for(const [a,b] of [[e.source,e.target],[e.target,e.source]]){if(!adj.has(a))adj.set(a,[]);adj.get(a).push(b);}}
-  for(const neighbors of adj.values())neighbors.sort();const found=[],queue=[[state.root]],visits=new Map([[state.root,1]]);let explored=0;
-  while(queue.length&&found.length<limit&&explored++<20000){const path=queue.shift(),last=path.at(-1);if(path.length>maxDepth)continue;for(const next of adj.get(last)||[]){if(path.includes(next))continue;const candidate=[...path,next];if(next===target){found.push(candidate);if(found.length===limit)break;continue;}const count=visits.get(next)||0;if(count>=limit)continue;visits.set(next,count+1);queue.push(candidate);}}
-  return found;
+  for(const neighbors of adj.values())neighbors.sort();const found=[],queue=[[state.root]],visits=new Map([[state.root,1]]),candidateLimit=Math.max(limit,limit*6);let explored=0;
+  while(queue.length&&found.length<candidateLimit&&explored++<20000){const path=queue.shift(),last=path.at(-1);if(path.length>maxDepth)continue;for(const next of adj.get(last)||[]){if(path.includes(next))continue;const candidate=[...path,next];if(next===target){found.push(candidate);if(found.length===candidateLimit)break;continue;}const count=visits.get(next)||0;if(count>=candidateLimit)continue;visits.set(next,count+1);queue.push(candidate);}}
+  return found.sort((a,b)=>a.length-b.length||routeStrength(state,b)-routeStrength(state,a)||a.join('|').localeCompare(b.join('|'))).slice(0,limit);
 }
 export function exportGraph(state) {
   return {schemaVersion:SCHEMA,root:state.root,createdAt:state.createdAt,exportedAt:new Date().toISOString(),config:state.config,status:state.status,nodes:Object.values(state.nodes),edges:Object.values(state.edges),branches:state.branches,pages:state.pages};

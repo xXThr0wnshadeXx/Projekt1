@@ -5,6 +5,7 @@ import {normalizePolicy,nextAction,reserveAction,backoffPolicy,blockPolicy,retry
 
 const KEY='orbitNetwork',ALARM='orbit-collect',VERSION=COMPANION_VERSION;
 const POLL=1000,SETTLE=200,LOAD_TIMEOUT=60000,UNCHANGED_TIMEOUT=15000,WORKSPACE_LEASE=24*60*60*1000;
+const REFRESH_AFTER=24*60*60*1000,REFRESH_BATCH=24;
 const POLICY_KEY='orbitCollectionPolicy';
 let policy,storageFailed=false;
 let chain=Promise.resolve(),cached,timer=null,timerAt=Infinity,workspaceTabs=new Map();
@@ -66,8 +67,30 @@ async function schedule(s){
   else {clearTimeout(timer);timer=null;await chrome.alarms.clear(ALARM);}
 }
 const pause=async(s,reason,w)=>{s.attentionTabId=w?.tabId||null;s.status='paused';log(s,reason);try{await save(s);}finally{await schedule(s);}};
-function finishBranch(s,w,status,reason){const b=w.current.job.kind==='posts'?s.commentCoverage?.[w.current.job.owner]:s.branches[w.current.job.owner];if(b){b.status=status;b.reason=reason;}log(s,reason);w.current=null;}
+function finishBranch(s,w,status,reason){const b=w.current.job.kind==='posts'?s.commentCoverage?.[w.current.job.owner]:s.branches[w.current.job.owner];if(b){b.status=status;b.reason=reason;b.checkedAt=new Date().toISOString();}log(s,reason);w.current=null;}
 function limit(s){s.status='limit';log(s,'Person limit reached. Increase the limit and resume to expand further.');}
+function prepareIncrementalRefresh(s,now=Date.now()){
+  const lastBatch=Date.parse(s.lastRefreshBatchAt||'');
+  if(Number.isFinite(lastBatch)&&now-lastBatch<REFRESH_AFTER)return [];
+  const legacyCheckedAt=s.lastCompletedAt||s.updatedAt||s.createdAt||new Date(now).toISOString();
+  for(const coverage of [...Object.values(s.branches||{}),...Object.values(s.commentCoverage||{})])if(coverage&&!coverage.checkedAt&&coverage.status!=='collecting'&&coverage.status!=='queued')coverage.checkedAt=legacyCheckedAt;
+  const candidates=Object.values(s.nodes).filter(person=>person.depth<s.config.depth).map(person=>{
+    const branch=s.branches?.[person.id],checked=Date.parse(branch?.checkedAt||'');
+    return {person,branch,checked:Number.isFinite(checked)?checked:-Infinity};
+  }).filter(item=>!item.branch||now-item.checked>=REFRESH_AFTER).sort((a,b)=>{
+    if(a.person.id===s.root)return -1;if(b.person.id===s.root)return 1;
+    if(Boolean(a.branch)!==Boolean(b.branch))return a.branch?1:-1;
+    return a.checked-b.checked||a.person.depth-b.person.depth||a.person.id.localeCompare(b.person.id);
+  });
+  return candidates.slice(0,REFRESH_BATCH).map(({person})=>({kind:'profile',owner:person.id,depth:person.depth,refresh:true}));
+}
+async function beginIncrementalRefresh(s,jobs,automatic=false){
+  s.queue=jobs;for(const w of workers(s))w.current=null;
+  for(const job of jobs)if(s.branches[job.owner]){s.branches[job.owner].status='queued';s.branches[job.owner].reason='Scheduled for an incremental freshness check.';}
+  await startRun(s);s.status='running';s.refreshing=true;s.lastRefreshBatchAt=new Date().toISOString();s.attentionTabId=null;s.engineVersion=5;
+  log(s,`${automatic?'Daily incremental refresh':'Incremental refresh'} started · ${jobs.length} stale ${jobs.length===1?'branch':'branches'} · completed checkpoints kept`);
+  await save(s);await schedule(s);await tick();
+}
 async function navigate(s,w,job,replayURL=job.replayURL){
   const url=job.kind==='profile'?profileURL(job.owner):job.kind==='posts'?activityURL(job.url,job.owner):listURL(replayURL&&sameList(job.url,replayURL)?replayURL:job.url);
   if(!url)throw Error('A queued URL is invalid.');
@@ -81,10 +104,12 @@ async function navigate(s,w,job,replayURL=job.replayURL){
 }
 function queueComments(s,job,snap){
   s.commentCoverage||={};
-  if(s.commentCoverage[job.owner])return;
+  if(s.commentCoverage[job.owner]&&!job.refresh)return;
   const url=activityURL(snap.activityUrl,job.owner);
-  s.commentCoverage[job.owner]={status:url?'queued':'hidden',posts:[],comments:0,profiles:[],url,reason:url?'Queued visible post comments.':'No visible post activity link.'};
-  if(url)s.queue.push({kind:'posts',owner:job.owner,depth:job.depth,url});
+  const previous=s.commentCoverage[job.owner]||{};
+  s.commentCoverage[job.owner]={...previous,status:url?'queued':'hidden',posts:previous.posts||[],comments:previous.comments||0,profiles:previous.profiles||[],url,reason:url?'Queued visible post comments.':'No visible post activity link.'};
+  if(url)s.queue.push({kind:'posts',owner:job.owner,depth:job.depth,url,refresh:Boolean(job.refresh)});
+  else s.commentCoverage[job.owner].checkedAt=new Date().toISOString();
 }
 async function collectComments(s,w,snap){
   const c=w.current,job=c.job,now=Date.now();
@@ -170,12 +195,14 @@ async function step(s,w,assign=true){
     if(now-c.stableSince<(snap.listUrl?SETTLE:2000))return;
     addPerson(s,snap.person,job.depth);
     queueComments(s,job,snap);
-    if(!snap.listUrl){s.branches[job.owner]={status:'hidden',pages:0,profiles:[],reason:'No visible connection-list link on this profile.'};log(s,`${s.nodes[job.owner].name}: connection list not visible`);w.current=null;await save(s);}
+    if(!snap.listUrl){const previous=s.branches[job.owner]||{};s.branches[job.owner]={...previous,status:'hidden',pages:previous.pages||0,profiles:previous.profiles||[],reason:'No visible connection-list link on this profile.',checkedAt:new Date().toISOString()};log(s,`${s.nodes[job.owner].name}: connection list not visible`);w.current=null;await save(s);}
     else {
       const url=listURL(snap.listUrl);if(!url)throw Error('LinkedIn provided an unsupported connection-list link.');
-      s.branches[job.owner]={status:'collecting',scope:snap.scope,totalLabel:snap.totalLabel,pages:0,profiles:[],url};
+      const previous=s.branches[job.owner]||{};
+      s.branches[job.owner]={...previous,status:'collecting',scope:snap.scope,totalLabel:snap.totalLabel,pages:previous.pages||0,profiles:previous.profiles||[],url,seenPages:[]};
+      delete s.branches[job.owner].partialSignature;delete s.branches[job.owner].resumeURL;delete s.branches[job.owner].checkedAt;
       // Follow this list immediately instead of putting it behind every profile.
-      await navigate(s,w,{kind:'list',owner:job.owner,depth:job.depth,url});
+      await navigate(s,w,{kind:'list',owner:job.owner,depth:job.depth,url,refresh:Boolean(job.refresh)});
     }
     return;
   }
@@ -278,7 +305,7 @@ async function tick(){
       }
     }
     if(s.status==='running'&&!s.queue.length&&s.workers.every(w=>!w.current)){
-      s.status='complete';log(s,'Available collection queue finished. Check Coverage for hidden or incomplete lists.');await save(s);
+      s.status='complete';s.lastCompletedAt=new Date().toISOString();log(s,s.refreshing?'Incremental refresh finished. Saved checkpoints remain ready for the next daily check.':'Available collection queue finished. Check Coverage for hidden or incomplete lists.');s.refreshing=false;await save(s);
     }
   }catch(error){await pause(s,error.message||'Collection paused after an unexpected error.');}
   finally{await schedule(s);}
@@ -298,7 +325,9 @@ async function command(message){
     // A normal close still pauses immediately through pagehide; this lease is
     // only a crash fallback and must not interrupt an intentionally open run.
     s.workspaceLeaseUntil=Date.now()+WORKSPACE_LEASE;
-    if(s.status==='paused'&&s.pauseKind==='workspace_closed'){s.status='running';s.pauseKind=null;s.attentionTabId=null;log(s,'Site reopened · continuing from the saved checkpoint');await save(s);await schedule(s);wake(0);}else await save(s);
+    if(s.status==='paused'&&s.pauseKind==='workspace_closed'){s.status='running';s.pauseKind=null;s.attentionTabId=null;log(s,'Site reopened · continuing from the saved checkpoint');await save(s);await schedule(s);wake(0);}
+    else if(s.status==='complete'&&!(await readPolicy(s)).blocked){const jobs=prepareIncrementalRefresh(s);if(jobs.length)await beginIncrementalRefresh(s,jobs,true);else await save(s);}
+    else await save(s);
     return {ok:true};
   }
   if(message.type==='GET_STATE'){const s=await read(),revision=s?`${s.id}:${s.revision||0}:${s.updatedAt}`:'empty';return message.revision===revision?{ok:true,unchanged:true,revision}:{ok:true,state:s,revision};}
@@ -327,8 +356,14 @@ async function command(message){
     if(current&&root===current.root&&current.status==='running')return {ok:true};
     if(current&&root===current.root&&['paused','limit'].includes(current.status))return command({type:'RESUME',config});
     await acknowledgeRestriction(current);
-    if(current&&root===current.root){if(Object.keys(current.nodes).length>config.maxNodes)throw Error('Increase the person limit above the number already saved.');current.config={...config,delay:Math.max(120,config.delay||120),depth:Math.max(current.config.depth,config.depth)};current.queue=[];current.commentCoverage={};await startRun(current);for(const person of Object.values(current.nodes).sort((a,b)=>a.depth-b.depth))if(person.depth<current.config.depth)current.queue.push({kind:'profile',owner:person.id,depth:person.depth});for(const w of workers(current))w.current=null;if(current.branches[root])current.branches[root].status='queued';current.status='running';current.attentionTabId=null;current.engineVersion=3;log(current,'Refreshing your single account network from the direct layer outward');await save(current);await schedule(current);await tick();return {ok:true};}
-    const s=newState(message.url,config);s.nextRequestAt=Math.max(current?.nextRequestAt||0,(await chrome.storage.local.get('orbitNextRequestAt')).orbitNextRequestAt||0);s.engineVersion=4;await startRun(s);await save(s);await schedule(s);await tick();return {ok:true};
+    if(current&&root===current.root){
+      if(Object.keys(current.nodes).length>config.maxNodes)throw Error('Increase the person limit above the number already saved.');
+      current.config={...config,delay:Math.max(120,config.delay||120),depth:Math.max(current.config.depth,config.depth)};
+      const jobs=prepareIncrementalRefresh(current);
+      if(!jobs.length){current.status='complete';current.refreshing=false;current.engineVersion=5;log(current,'Network is current. Orbit will keep this checkpoint and check stale branches on the next daily refresh.');await save(current);await schedule(current);return {ok:true,status:current.status,reason:current.reason};}
+      await beginIncrementalRefresh(current,jobs);return {ok:true,status:current.status,reason:current.reason};
+    }
+    const s=newState(message.url,config);s.nextRequestAt=Math.max(current?.nextRequestAt||0,(await chrome.storage.local.get('orbitNextRequestAt')).orbitNextRequestAt||0);s.engineVersion=5;await startRun(s);await save(s);await schedule(s);await tick();return {ok:true};
   }
   if(message.type==='PAUSE'){const s=await read();if(s?.status==='running'){s.pauseKind='user';await pause(s,'Paused by you. Your progress and queue are saved.');}return {ok:true};}
   if(message.type==='RESUME'){
@@ -336,7 +371,7 @@ async function command(message){
     const config=options(message.config||s.config);config.delay=Math.max(120,config.delay||120);if(config.depth!==s.config.depth)throw Error('Exploration depth is fixed for an existing collection. Start a new map to change it.');
     if(Object.keys(s.nodes).length>=config.maxNodes)throw Error('Increase the person limit above the current number of people.');
     await acknowledgeRestriction(s);
-    s.config=config;s.engineVersion=3;s.status='running';s.pauseKind=null;s.attentionTabId=null;if(s.workspaceManaged)s.workspaceLeaseUntil=Date.now()+WORKSPACE_LEASE;
+    s.config=config;s.engineVersion=5;s.status='running';s.pauseKind=null;s.attentionTabId=null;if(s.workspaceManaged)s.workspaceLeaseUntil=Date.now()+WORKSPACE_LEASE;
     const rootBranch=s.branches[s.root],repair=['incomplete','hidden','mutuals_only'].includes(rootBranch?.status)&&!s.commentCoverage?.[s.root]?.profiles.length&&!workers(s).some(w=>w.current?.job.kind==='posts'&&w.current.job.owner===s.root);
     if(repair){const interrupted=[];for(const w of workers(s)){if(w.current)interrupted.push(w.current.job);w.current=null;}const direct=rootBranch.scope==='connections'&&listURL(rootBranch.url)?{kind:'list',owner:s.root,depth:0,url:rootBranch.url,replayURL:rootBranch.resumeURL||rootBranch.url}:{kind:'profile',owner:s.root,depth:0};const jobs=[direct,...interrupted,...s.queue],seen=new Set();s.queue=jobs.filter(job=>{const key=`${job.kind}|${job.owner}|${job.depth??0}`;if(seen.has(key)||job.owner===s.root&&job!==direct)return false;seen.add(key);return true;});rootBranch.status='queued';rootBranch.reason='Rechecking the complete direct layer before continuing.';log(s,'Resuming by rechecking your direct connections, then continuing the saved queue');}
     else for(const w of workers(s)){if(w.current){w.current.since=Date.now();w.current.candidate=null;w.current.nextActionAt=0;}}
