@@ -53,7 +53,8 @@ export function addPerson(state,person,depth) {
   const old=state.nodes[id];
   state.nodeCount??=Object.keys(state.nodes).length;
   if(!old && state.nodeCount>=state.config.maxNodes)return null;
-  state.nodes[id]={id,url:id,name:String(person.name||old?.name||new URL(id).pathname.split('/')[2]).slice(0,200),headline:String(person.headline||old?.headline||'').slice(0,1000),location:String(person.location||old?.location||'').slice(0,300),depth:Math.min(depth,old?.depth??depth)};
+  const detail=(key,max)=>String(person[key]||old?.[key]||'').slice(0,max);
+  state.nodes[id]={id,url:id,name:String(person.name||old?.name||new URL(id).pathname.split('/')[2]).slice(0,200),headline:detail('headline',1000),location:detail('location',300),about:detail('about',4000),experience:detail('experience',6000),education:detail('education',4000),skills:detail('skills',3000),depth:Math.min(depth,old?.depth??depth)};
   state.graphRevision=(state.graphRevision||0)+1;
   if(!old)state.nodeCount++;
   if((!old||depth<old.depth)&&depth<state.config.depth&&!state.queue.some(j=>j.kind==='profile'&&j.owner===id&&j.depth<=depth))state.queue.push({kind:'profile',owner:id,depth});
@@ -94,7 +95,7 @@ export function importGraph(data) {
   if(data.schemaVersion!==SCHEMA||!Array.isArray(data.nodes)||!Array.isArray(data.edges)||data.nodes.length>10000||data.edges.length>200000)throw Error('This is not a supported Orbit network JSON file.');
   const root=profileURL(data.root);if(!root)throw Error('The network is missing a valid starting profile.');
   const state=newState(root,{maxNodes:Math.max(1000,data.nodes.length),depth:2});state.queue=[];state.nodes={};
-  for(const p of data.nodes){const id=profileURL(p.url||p.id);if(!id||p.id!==id)throw Error('A profile has an invalid URL.');state.nodes[id]={id,url:id,name:String(p.name||'').slice(0,200),headline:String(p.headline||'').slice(0,1000),location:String(p.location||'').slice(0,300),depth:3};}
+  for(const p of data.nodes){const id=profileURL(p.url||p.id);if(!id||p.id!==id)throw Error('A profile has an invalid URL.');state.nodes[id]={id,url:id,name:String(p.name||'').slice(0,200),headline:String(p.headline||'').slice(0,1000),location:String(p.location||'').slice(0,300),about:String(p.about||'').slice(0,4000),experience:String(p.experience||'').slice(0,6000),education:String(p.education||'').slice(0,4000),skills:String(p.skills||'').slice(0,3000),depth:3};}
   if(!state.nodes[root])throw Error('The starting person is missing.');
   for(const e of data.edges){if(!state.nodes[e.source]||!state.nodes[e.target]||e.source===e.target)throw Error('A connection references a missing person.');const id=[e.source,e.target].sort().join('|');const evidence=(e.evidence||[]).filter(v=>listURL(v.url)).map(v=>({url:v.url,type:'visible_connection_list',observedAt:String(v.observedAt||'').slice(0,40)}));if(!evidence.length)throw Error('Every connection needs a LinkedIn connection-list source.');state.edges[id]={id,source:e.source,target:e.target,evidence};}
   const adj={};for(const e of Object.values(state.edges)){(adj[e.source]||=[]).push(e.target);(adj[e.target]||=[]).push(e.source);}const q=[root];state.nodes[root].depth=0;const seen=new Set(q);for(let i=0;i<q.length;i++)for(const id of adj[q[i]]||[])if(!seen.has(id)){seen.add(id);state.nodes[id].depth=state.nodes[q[i]].depth+1;q.push(id);}

@@ -29,6 +29,27 @@
       "when": 1788682745750,
       "tag": "0003_greedy_surge",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1788685724716,
+      "tag": "0004_heavy_nuke",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1788686006112,
+      "tag": "0005_thankful_mercury",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1788687167893,
+      "tag": "0006_modern_meteorite",
+      "breakpoints": true
     }
   ]
 }

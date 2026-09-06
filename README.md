@@ -7,7 +7,7 @@ Orbit builds an evidence-backed graph from LinkedIn pages that a contributor can
 - **Canonical application:** [orbit-shreev2703-graph-test.shreev2703.chatgpt.site](https://orbit-shreev2703-graph-test.shreev2703.chatgpt.site/)
 - **Repository:** [xXThr0wnshadeXx/Projekt1](https://github.com/xXThr0wnshadeXx/Projekt1)
 - **Companion download:** [download the current ZIP](https://orbit-shreev2703-graph-test.shreev2703.chatgpt.site/downloads/orbit-network-mapper.zip)
-- **Current application and companion version:** `2.2.0`
+- **Current application and companion version:** `2.3.0`
 
 This is the single supported hosted application and database. Do not use the retired Turso setup or the older `doublejav.chatgpt.site` deployment.
 
@@ -31,7 +31,7 @@ LinkedIn pages visible to a contributor
                 ▼
 Local Chrome companion
   - reads visible page content
-  - stores resumable maps in that Chrome profile
+  - stores one resumable account checkpoint in that Chrome profile
   - spaces LinkedIn page actions
                 │
                 ▼
@@ -50,22 +50,15 @@ Sites D1 binding: DB
 
 The extension is a background collection companion; the permanent knowledge graph and user onboarding are not local. All authenticated contributors use the hard-coded shared workspace `demo-knowledge-graph`.
 
-## Multiple local maps
+## One account, one network
 
-Version 2.1 supports several resumable maps in one Chrome profile:
+Orbit now maintains one continuously growing network for each signed-in account. **Continue collecting** refreshes the same checkpoint from the direct layer outward; it does not create disposable maps. Every changed person and relationship is periodically upserted into the shared team graph, and reopening Orbit loads the account’s saved neighborhood from D1. **Reset my account network** is deliberately kept in Settings and removes only that account’s contribution—overlapping records supported by teammates remain.
 
-- **Your maps on this device** returns to an existing collection.
-- **New map** starts another collection.
-- Switching maps pauses the active build and preserves its checkpoint.
-- Only one map collects at a time, and the LinkedIn cooldown carries across maps.
-- **Cancel build** keeps discovered people as a viewable map but permanently stops that map’s queue.
-- Filters reduce line clutter; **Show all connections** restores the complete visible edge set.
-
-These map checkpoints are device-local. The hosted D1 library combines saved discoveries from every authenticated contributor.
+Use the filters to organize this persistent network by distance, location, estimated field, or school/employer/skill keywords. Search is suggestion-based rather than exact-only: aliases such as `SJSU`, full institution names, profile details, and close spellings are ranked together. Selecting a person shows progressively disclosed professional details and the shortest observed route across all teammates’ saved connections.
 
 ### Workspace and settings
 
-The **Map workspace** tab contains the graph, people, and filters. Use **Map settings** for saved maps, starting profiles, collection options, and build controls. Starting a build returns to the workspace automatically. Optional scroll zoom eases toward the pointer; reduced-motion mode applies changes immediately.
+The **Map workspace** tab contains the graph, people, filters, route viewer, and share action. Use **Map settings** for the account profile, collection coverage, Team library, live database activity, and the guarded reset control. Starting or continuing collection returns to the workspace automatically. Optional scroll zoom eases toward the pointer; reduced-motion mode applies changes immediately.
 
 ## Shared database
 
@@ -73,14 +66,16 @@ Sites supplies D1 through the `DB` binding in [`.openai/hosting.json`](.openai/h
 
 Migrations live in [`drizzle/`](drizzle/) and are packaged with each deployment. The live schema contains:
 
-- `people` — canonical profile URL, name, search name, headline, location, and timestamps;
+- `people` — canonical profile URL, name, headline, location, About, Experience, Education, Skills, generated search keywords, and timestamps;
+- `people_search` — FTS5 trigram search index for aliases, substrings, and suggestion candidates;
 - `connections` — stable undirected endpoints and first/last observation times;
 - `evidence` — the visible connection-list source supporting a relationship;
+- `people_contributors`, `connection_contributors`, and `evidence_contributors` — which signed-in accounts support each shared record and source observation;
 - `api_rate_limits` — atomic per-contributor request counters used when enforcement is enabled;
 - `imports` and `import_records` — imported file metadata and lossless preserved source records;
 - `users`, `identities`, and `sessions` — server-backed account, onboarding, and hashed-session state.
 
-Open **Map settings → Database activity** to review recent imports without leaving Orbit. Site owners can inspect the raw D1 tables from the Orbit project in the Sites dashboard; the logical binding is named `DB`.
+Open **Map settings → Database activity → View database activity** to see live totals, the latest saved people, the latest relationships, contributor names, timestamps, and imported files without leaving Orbit. For raw rows, open **Sites → Orbit Knowledge Graph → Edit → Database → DB**, select `people`, `connections`, `evidence`, or a contributor table, and refresh the table. The Settings and Analytics pages show configuration/traffic, not row contents.
 
 ### Google account login
 
@@ -88,7 +83,7 @@ The hosted Site uses Google Identity Services with the configured Web client ID.
 
 Set `GOOGLE_CLIENT_ID` in the Site environment to the public Web client ID, then publish a version. The Google Cloud client must list the exact Site origin under **Authorized JavaScript origins**. New users continue to LinkedIn setup, returning users with a saved starting profile go to the map, and onboarding is stored in D1 so it follows the account to another device. ChatGPT sign-in remains available during the transition.
 
-Ingestion uses idempotent upserts. Overlapping collections add evidence and relationships without duplicating people. Empty incoming fields do not replace existing nonempty profile information.
+Ingestion uses idempotent upserts. People are globally deduplicated inside the shared workspace by canonical LinkedIn URL; undirected relationships are deduplicated by their sorted endpoint pair. Overlapping collections add contributor attribution and evidence without duplicating people or links. Empty incoming fields do not replace existing nonempty profile information.
 
 ### Import a teammate's existing collection
 
@@ -113,12 +108,14 @@ Orbit processes only LinkedIn pages that the contributor can access in their bro
 
 - One collection tab is used at a time.
 - Collector-initiated LinkedIn actions are spaced by at least two minutes.
+- Orbit completes or explicitly marks the starting profile’s visible direct list before expanding connections-of-connections; jobs are always ordered from the shallowest layer outward.
+- The collector identifies LinkedIn’s actual virtualized connection-list scroller and performs bounded loading retries rather than silently skipping the first layer.
 - Checkpoints survive browser restarts.
 - Unexpected pages, ownership changes, verification screens, and restrictions stop or pause collection.
 - Every saved relationship requires an observable connection-list source.
 - A missing relationship means “not recorded,” not “not connected.”
 
-Wait for **Saved to library** before clearing a local checkpoint. Clearing a browser map does not remove records already written to D1.
+Wait for **Saved to library** before closing the Site. Closing or navigating away auto-pauses LinkedIn collection while preserving the exact local checkpoint; reopening the Site resumes that workspace-managed pause and syncs pending changes to D1. A manual pause or LinkedIn restriction never auto-resumes. The Settings reset action removes that account’s contributor attribution and deletes only records unsupported by another teammate.
 
 ## Local development
 
@@ -143,9 +140,12 @@ The npm tooling uses Node.js on Windows, macOS, and Linux. Python is not require
 Authenticated routes are under `/api/library/`:
 
 - `GET /api/library/stats` — shared people and connection counts;
+- `GET /api/library/activity` — live totals plus recent people, connections, contributors, and imports;
 - `GET /api/library/search?q=...` — search saved profiles;
 - `GET /api/library/graph?url=...&depth=2&limit=1000` — bounded neighborhood;
+- `GET /api/library/path?to=...&depth=6` — shortest observed cross-team route from the signed-in account profile;
 - `POST /api/library/ingest` — validate and merge a collection batch.
+- `POST /api/account/network/reset` — remove only the signed-in account’s contribution while retaining teammate-supported records.
 
 `GET /api/session` reports whether Sites supplied a trusted identity. Clients cannot choose their own identity. Anonymous library requests return 401, cross-origin writes return 403, oversized bodies return 413, and a missing database binding returns 503.
 
@@ -177,7 +177,7 @@ After companion changes, also run `npm run package`, copy `dist/orbit-network-ma
 
 ## Capacity and limitations
 
-The UI supports up to 10,000 people per local map. The D1 library has no application-level 10,000-person lifetime cap, but a multi-million-person dataset has not been load-tested. Add capacity tests, monitoring, backups, and restore procedures before treating D1 as the sole copy of an important corpus.
+The responsive browser view is bounded to 10,000 people at once. The D1 library has no application-level 10,000-person lifetime cap, but a multi-million-person dataset has not been load-tested. Add capacity tests, monitoring, backups, and restore procedures before treating D1 as the sole copy of an important corpus.
 
 There is no unattended cloud crawler, verification bypass, hidden-data inference, full-database export, or record-deletion interface. LinkedIn may prohibit automated collection; contributors are responsible for following applicable terms and laws.
 

@@ -1,4 +1,4 @@
-import {ingest,stats,search,neighborhood,listImports} from './database.js';
+import {ingest,stats,search,neighborhood,listImports,shortestPath,resetContribution,activity} from './database.js';
 import {consumeRateLimit,rateLimitConfig} from './rate-limit.js';
 import {profileURL} from '../src/core.js';
 import {authenticatedActor,finishGoogleLogin,googleConfig,googleLoginEnabled,signOut,updateLinkedInProfile} from './auth.js';
@@ -36,13 +36,16 @@ export async function handleAPI(request,env){
         const body=await readJSON(request),profile=profileURL(body.linkedinProfileUrl);if(!profile)return json({error:'Enter a valid LinkedIn person profile URL.'},400);
         const updated=await updateLinkedInProfile(env.DB,actor,profile);return json({saved:true,linkedinProfileUrl:updated.linkedinProfileUrl,onboardingComplete:true});
       }
+      if(url.pathname==='/api/account/network/reset'&&request.method==='POST')return json(await resetContribution(env.DB,owner,actor.id));
       const limited=async kind=>{if(env.ORBIT_RATE_LIMIT_ENABLED!=='true')return null;const limit=rateLimitConfig(env,kind),rate=await consumeRateLimit(env.DB,`${actor.id}:${kind}`,limit);return rate.allowed?null:json({error:'Rate limit exceeded. Please retry shortly.'},429,{'Retry-After':String(Math.max(1,Math.ceil((rate.resetAt-Date.now())/1000))),'X-RateLimit-Limit':String(rate.limit),'X-RateLimit-Remaining':'0'});};
       if(url.pathname==='/api/library/stats'&&request.method==='GET'){const stop=await limited('read');return stop||json(await stats(env.DB,owner));}
       if(url.pathname==='/api/library/imports'&&request.method==='GET'){const stop=await limited('read');return stop||json({imports:await listImports(env.DB,owner)});}
+      if(url.pathname==='/api/library/activity'&&request.method==='GET'){const stop=await limited('read');return stop||json(await activity(env.DB,owner));}
       if(url.pathname==='/api/library/search'&&request.method==='GET'){const stop=await limited('read');return stop||json({people:await search(env.DB,owner,url.searchParams.get('q')||'')});}
+      if(url.pathname==='/api/library/path'&&request.method==='GET'){const stop=await limited('read');return stop||json(await shortestPath(env.DB,owner,actor.linkedinProfileUrl,url.searchParams.get('to'),Number(url.searchParams.get('depth')||6)));}
       if(url.pathname==='/api/library/graph'&&request.method==='GET'){const stop=await limited('read');return stop||json(await neighborhood(env.DB,owner,url.searchParams.get('url'),Number(url.searchParams.get('depth')||2),Number(url.searchParams.get('limit')||1000)));}
       if(url.pathname==='/api/library/ingest'&&request.method==='POST'){
-        const body=await readJSON(request,500000),stop=await limited('write');return stop||json(await ingest(env.DB,owner,body));
+        const body=await readJSON(request,500000),stop=await limited('write');return stop||json(await ingest(env.DB,owner,body,actor.id));
       }
       return json({error:'Not found.'},404);
     }catch(error){console.error('Library request failed',url.pathname,error.message);return json({error: /Invalid|Choose|Enter|Save at most|Each link|Send|Request/.test(error.message)?error.message:'The library request failed. Please retry.'},error.status||400);}
