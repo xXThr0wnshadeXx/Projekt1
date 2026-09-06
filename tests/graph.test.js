@@ -78,6 +78,15 @@ test('continuous wheel input does not restart easing and has a useful zoom range
  h.handlers.wheel(event);assert.equal(h.g.zoomTime,start);
  h.paint(start+16);assert.ok(h.g.scale<initial);
 });
+test('fit is always 100% and controls make useful progress on very large maps',t=>{
+ const h=graph(t),ratios=[];h.g.onZoom=(_scale,ratio)=>ratios.push(ratio);
+ h.g.points=[{id:'far',x:100000,y:50000,depth:1,bornAt:0}];
+ h.g.fit();assert.ok(h.g.scale<.01);assert.equal(h.g.zoomRatio(),1);assert.equal(ratios.at(-1),1);
+ h.g.stepZoom(1);assert.equal(h.g.zoomTarget.scale/h.g.fitScale,1.5);
+ const start=h.g.zoomTime;for(let i=1;i<100;i++)h.paint(start+i*16);
+ assert.equal(h.g.zoomTarget,null);assert.ok(Math.abs(h.g.zoomRatio()-1.5)<1e-12);assert.ok(Math.abs(ratios.at(-1)-1.5)<1e-12);
+ h.g.stepZoom(-1);assert.ok(Math.abs(h.g.zoomTarget.scale/h.g.fitScale-1)<1e-12);
+});
 test('adaptive branch targets make room for growing second-degree clusters',()=>{
  const points=[{id:'root',depth:0},{id:'a',depth:1},{id:'b',depth:1},...Array.from({length:30},(_,i)=>({id:`child-${i}`,depth:2}))],edges=[{source:'root',target:'a'},{source:'root',target:'b'},...Array.from({length:30},(_,i)=>({source:'a',target:`child-${i}`}))];
  const targets=networkTargets(points,edges,'root');assert.equal(targets.size,points.length);for(const point of targets.values())assert.ok(Number.isFinite(point.x)&&Number.isFinite(point.y));assert.ok(Math.hypot(targets.get('a').x,targets.get('a').y)<Math.hypot(targets.get('b').x,targets.get('b').y)||Math.hypot(targets.get('a').x,targets.get('a').y)>0);

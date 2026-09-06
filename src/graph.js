@@ -1,5 +1,6 @@
 import {matchesFilters,groupTargets,springProgress} from './filters.js';
 import {scorePerson} from './search.js';
+const MIN_SCALE=.001,MAX_SCALE=12,CONTROL_ZOOM_FACTOR=1.5;
 // Reserve space for each observed branch, then arrange siblings in a golden-angle
 // spiral. This keeps large second-degree clusters readable without an expensive
 // all-pairs force simulation on every animation frame.
@@ -20,7 +21,7 @@ export function focusTargets(points){
 }
 export class NetworkGraph {
   constructor(canvas,onSelect){
-    this.canvas=canvas;this.ctx=canvas.getContext('2d');this.onSelect=onSelect;this.points=[];this.edges=[];this.positions=new Map();this.showAllConnections=false;this.filters={};this.groupBy="none";this.groupLabels=[];this.treeRoot=null;this.treeNodes=null;this.treeDepths=new Map();this.motion=null;this.scale=1;this.offset={x:0,y:0};this.selected=null;this.query='';this.searchContext=new Set();this.path=new Set();this.neighbors=new Set();this.autoFit=true;this.scrollZoom=false;this.zoomTarget=null;this.zoomTime=null;this.frame=null;this.childCounts=new Map();this.directCount=0;this.reducedMotion=globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches||false;
+    this.canvas=canvas;this.ctx=canvas.getContext('2d');this.onSelect=onSelect;this.points=[];this.edges=[];this.positions=new Map();this.showAllConnections=false;this.filters={};this.groupBy="none";this.groupLabels=[];this.treeRoot=null;this.treeNodes=null;this.treeDepths=new Map();this.motion=null;this.scale=1;this.fitScale=1;this.offset={x:0,y:0};this.selected=null;this.query='';this.searchContext=new Set();this.path=new Set();this.neighbors=new Set();this.autoFit=true;this.scrollZoom=false;this.zoomTarget=null;this.zoomTime=null;this.frame=null;this.childCounts=new Map();this.directCount=0;this.reducedMotion=globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches||false;
     if(globalThis.document?.fonts)document.fonts.load('15px "Space Grotesk"').then(()=>this.draw()).catch(()=>{});
     this.observer=new ResizeObserver(()=>this.resize());this.observer.observe(canvas.parentElement);
     canvas.addEventListener('wheel',e=>{if(!this.scrollZoom)return;e.preventDefault();const pixels=e.deltaY*(e.deltaMode===1?16:e.deltaMode===2?this.h:1);this.queueZoom(Math.exp(-Math.max(-120,Math.min(120,pixels))*.002),e.offsetX,e.offsetY);},{passive:false});
@@ -51,11 +52,14 @@ export class NetworkGraph {
     const homes=networkTargets(this.points,this.edges,state.root);for(const p of this.points){const target=homes.get(p.id);p.homeX=target.x;p.homeY=target.y;}
     if(this.treeRoot)this.buildTree(this.treeRoot);this.updateNeighbors();this.layout();if(this.autoFit)this.fit();else this.draw();
   }
-  fit(){this.zoomTarget=null;this.autoFit=true;if(!this.points.length||!this.w||!this.h){this.draw();return;}let ex=100,ey=100;for(const p of this.points){if(!this.isVisible(p)||(this.query&&!this.isSearchVisible(p)))continue;ex=Math.max(ex,Math.abs(p.tx??p.x)+80);ey=Math.max(ey,Math.abs(p.ty??p.y)+80);}for(const label of this.groupLabels){ex=Math.max(ex,Math.abs(label.x)+100);ey=Math.max(ey,Math.abs(label.y)+30);}this.scale=Math.max(.01,Math.min((this.w-65)/(ex*2),(this.h-100)/(ey*2),1.8));this.offset={x:0,y:0};this.autoFit=false;this.onZoom?.(this.scale);this.draw();}
-  zoom(factor,x=this.w/2,y=this.h/2){this.autoFit=false;const old=this.scale;this.scale=Math.max(.01,Math.min(12,this.scale*factor));const ratio=this.scale/old;this.offset={x:x-this.w/2-(x-this.w/2-this.offset.x)*ratio,y:y-this.h/2-(y-this.h/2-this.offset.y)*ratio};this.onZoom?.(this.scale);this.draw();}
+  fit(){this.zoomTarget=null;this.zoomTime=null;this.autoFit=true;if(!this.points.length||!this.w||!this.h){this.draw();return;}let ex=100,ey=100;for(const p of this.points){if(!this.isVisible(p)||(this.query&&!this.isSearchVisible(p)))continue;ex=Math.max(ex,Math.abs(p.tx??p.x)+80);ey=Math.max(ey,Math.abs(p.ty??p.y)+80);}for(const label of this.groupLabels){ex=Math.max(ex,Math.abs(label.x)+100);ey=Math.max(ey,Math.abs(label.y)+30);}this.scale=Math.max(MIN_SCALE,Math.min((this.w-65)/(ex*2),(this.h-100)/(ey*2),1.8));this.fitScale=this.scale;this.offset={x:0,y:0};this.autoFit=false;this.notifyZoom();this.draw();}
+  zoomRatio(){return this.fitScale>0?this.scale/this.fitScale:1;}
+  notifyZoom(){this.onZoom?.(this.scale,this.zoomRatio());}
+  zoom(factor,x=this.w/2,y=this.h/2){this.autoFit=false;const old=this.scale;this.scale=Math.max(MIN_SCALE,Math.min(MAX_SCALE,this.scale*factor));const ratio=this.scale/old;this.offset={x:x-this.w/2-(x-this.w/2-this.offset.x)*ratio,y:y-this.h/2-(y-this.h/2-this.offset.y)*ratio};this.notifyZoom();this.draw();}
+  stepZoom(direction,x=this.w/2,y=this.h/2){this.queueZoom(direction>0?CONTROL_ZOOM_FACTOR:1/CONTROL_ZOOM_FACTOR,x,y);}
   queueZoom(factor,x=this.w/2,y=this.h/2){
     if(this.reducedMotion){this.zoom(factor,x,y);return;}
-    this.zoomTarget={scale:Math.max(.01,Math.min(12,(this.zoomTarget?.scale??this.scale)*factor)),x,y};
+    this.zoomTarget={scale:Math.max(MIN_SCALE,Math.min(MAX_SCALE,(this.zoomTarget?.scale??this.scale)*factor)),x,y};
     if(this.zoomTime===null)this.zoomTime=performance.now();this.draw();
   }
   advanceZoom(now){

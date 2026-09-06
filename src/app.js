@@ -89,7 +89,7 @@ $('resume').onclick=async()=>{const button=$('resume'),original=button.textConte
 $('show-tab').onclick=async()=>{try{await send({type:'SHOW_TAB'});}catch(e){toast(e.message);}};
 $('clear-button').onclick=async()=>{if(!confirm('Reset your account network? Orbit removes this account’s contribution, but keeps people and links that teammates also contributed. This cannot be undone.'))return;try{if(hasCollector())await send({type:'CLEAR'});else localStorage.removeItem(KEY);const response=await fetch('/api/account/network/reset',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:'{}'}),data=await response.json();if(!response.ok)throw Error(data.error||'The account network could not be reset.');library.resetCaches();collectionState=null;state=null;selected=null;render();toast(`Account network reset · ${data.connectionContributions||0} contributed links reviewed.`);}catch(e){toast(e.message);}};
 for(const name of ['graph','directory','coverage'])$(`tab-${name}`).onclick=()=>switchView(name);
-$('search').oninput=()=>{closeTreeView();graph.search($('search').value);if(selected){const point=graph.positions.get(selected);if(point&&!graph.isSearchHit(point)){selected=null;graph.focus(null);$('inspector').close();}}if(view==='directory')renderPeople();};$('fit').onclick=()=>graph.fit();$('zoom-in').onclick=()=>{graph.zoomTarget=null;graph.zoom(1.08);};$('zoom-out').onclick=()=>{graph.zoomTarget=null;graph.zoom(1/1.08);};
+$('search').oninput=()=>{closeTreeView();graph.search($('search').value);if(selected){const point=graph.positions.get(selected);if(point&&!graph.isSearchHit(point)){selected=null;graph.focus(null);$('inspector').close();}}if(view==='directory')renderPeople();};$('fit').onclick=()=>graph.fit();$('zoom-in').onclick=()=>graph.stepZoom(1);$('zoom-out').onclick=()=>graph.stepZoom(-1);
 if(EXTENSION){set('connection-mode','CHROME COLLECTOR CONNECTED');send({type:'WORKSPACE_ACTIVE',active:true}).catch(()=>{});chrome.storage.onChanged.addListener((changes,area)=>{if(area==='local'&&changes[KEY])refresh().catch(e=>toast(e.message));});}else{set('connection-mode','COMPANION NOT CONNECTED');show('install-note',true);}
 async function refreshShared(){const root=collectionState?.root||globalThis.ORBIT_PROFILE;if(sharedRefreshing||libraryMode||!root||document.visibilityState!=='visible')return;sharedRefreshing=true;try{await library.loadAccount(root,6);}finally{sharedRefreshing=false;}}
 await refresh();if(state){$('profile-url').value=state.root;$('max-nodes').value=state.config.maxNodes;$('depth').value=state.config.depth;$('delay').value=Math.max(120,state.config.delay||120);$('collect-comments').checked=Boolean(state.config.comments);await refreshShared();}else if(globalThis.ORBIT_PROFILE){$('profile-url').value=globalThis.ORBIT_PROFILE;await library.loadAccount(globalThis.ORBIT_PROFILE,6);}
@@ -104,8 +104,8 @@ setInterval(()=>{if(document.visibilityState==='visible')renderLive();},1000);
 setInterval(()=>refreshShared().catch(()=>{}),30000);
 
 if($('scroll-zoom'))$('scroll-zoom').onchange=e=>{graph.scrollZoom=e.target.checked;if(!e.target.checked)graph.zoomTarget=null;};
-graph.onZoom=scale=>{if($('zoom-level'))set('zoom-level',`${Math.round(scale*100)}%`);};
-graph.onZoom(graph.scale);
+graph.onZoom=(scale,ratio=graph.zoomRatio())=>{if($('zoom-level'))set('zoom-level',`${Math.round(ratio*100)}%`);};
+graph.onZoom(graph.scale,graph.zoomRatio());
 
 function activeKeywords(){return keywordTerms($('filter-keywords').value);}
 function activeFilters(){return {location:$('filter-location').value.trim(),field:$('filter-field').value.trim(),keywords:activeKeywords(),first:$('degree-first').checked,second:$('degree-second').checked,extended:$('degree-extended').checked,maxDepth:Number($('max-distance').value)};}
