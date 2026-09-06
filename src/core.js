@@ -134,6 +134,12 @@ export function route(state,target) {
   if(!prev.has(target))return [];
   const out=[];for(let n=target;n;n=prev.get(n))out.unshift(n);return out;
 }
+export function routes(state,target,limit=4,maxDepth=6){
+  if(!state?.nodes[target]||limit<1)return [];const adj=new Map();for(const e of Object.values(state.edges)){for(const [a,b] of [[e.source,e.target],[e.target,e.source]]){if(!adj.has(a))adj.set(a,[]);adj.get(a).push(b);}}
+  for(const neighbors of adj.values())neighbors.sort();const found=[],queue=[[state.root]],visits=new Map([[state.root,1]]);let explored=0;
+  while(queue.length&&found.length<limit&&explored++<20000){const path=queue.shift(),last=path.at(-1);if(path.length>maxDepth)continue;for(const next of adj.get(last)||[]){if(path.includes(next))continue;const candidate=[...path,next];if(next===target){found.push(candidate);if(found.length===limit)break;continue;}const count=visits.get(next)||0;if(count>=limit)continue;visits.set(next,count+1);queue.push(candidate);}}
+  return found;
+}
 export function exportGraph(state) {
   return {schemaVersion:SCHEMA,root:state.root,createdAt:state.createdAt,exportedAt:new Date().toISOString(),config:state.config,status:state.status,nodes:Object.values(state.nodes),edges:Object.values(state.edges),branches:state.branches,pages:state.pages};
 }

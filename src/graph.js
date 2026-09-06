@@ -20,7 +20,7 @@ export function focusTargets(points){
 }
 export class NetworkGraph {
   constructor(canvas,onSelect){
-    this.canvas=canvas;this.ctx=canvas.getContext('2d');this.onSelect=onSelect;this.points=[];this.edges=[];this.positions=new Map();this.showAllConnections=false;this.filters={};this.groupBy="none";this.groupLabels=[];this.motion=null;this.scale=1;this.offset={x:0,y:0};this.selected=null;this.query='';this.path=new Set();this.neighbors=new Set();this.autoFit=true;this.scrollZoom=false;this.zoomTarget=null;this.zoomTime=null;this.frame=null;this.childCounts=new Map();this.directCount=0;this.reducedMotion=globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches||false;
+    this.canvas=canvas;this.ctx=canvas.getContext('2d');this.onSelect=onSelect;this.points=[];this.edges=[];this.positions=new Map();this.showAllConnections=false;this.filters={};this.groupBy="none";this.groupLabels=[];this.treeRoot=null;this.treeNodes=null;this.treeDepths=new Map();this.motion=null;this.scale=1;this.offset={x:0,y:0};this.selected=null;this.query='';this.path=new Set();this.neighbors=new Set();this.autoFit=true;this.scrollZoom=false;this.zoomTarget=null;this.zoomTime=null;this.frame=null;this.childCounts=new Map();this.directCount=0;this.reducedMotion=globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches||false;
     if(globalThis.document?.fonts)document.fonts.load('15px "Space Grotesk"').then(()=>this.draw()).catch(()=>{});
     this.observer=new ResizeObserver(()=>this.resize());this.observer.observe(canvas.parentElement);
     canvas.addEventListener('wheel',e=>{if(!this.scrollZoom)return;e.preventDefault();const pixels=e.deltaY*(e.deltaMode===1?16:e.deltaMode===2?this.h:1);this.queueZoom(Math.exp(-Math.max(-120,Math.min(120,pixels))*.002),e.offsetX,e.offsetY);},{passive:false});
@@ -32,7 +32,7 @@ export class NetworkGraph {
   resize(){const r=this.canvas.parentElement.getBoundingClientRect();this.w=r.width;this.h=r.height;const dpr=window.devicePixelRatio||1;this.canvas.width=Math.round(r.width*dpr);this.canvas.height=Math.round(r.height*dpr);this.ctx.setTransform(dpr,0,0,dpr,0,0);if(this.autoFit)this.fit();else this.draw();}
   setData(state){
     this.state=state;
-    if(!state||this.dataId!==state.id){this.points=[];this.edges=[];this.positions.clear();this.zoomTarget=null;this.motion=null;this.groupLabels=[];this.childCounts.clear();this.directCount=0;this.dataId=state?.id;this.graphRevision=null;this.autoFit=true;this.lastRevealed=null;}
+    if(!state||this.dataId!==state.id){this.points=[];this.edges=[];this.positions.clear();this.zoomTarget=null;this.motion=null;this.groupLabels=[];this.treeRoot=null;this.treeNodes=null;this.treeDepths.clear();this.childCounts.clear();this.directCount=0;this.dataId=state?.id;this.graphRevision=null;this.autoFit=true;this.lastRevealed=null;}
     if(!state){this.draw();return;}
     if(state.graphRevision!==undefined&&this.graphRevision===state.graphRevision)return;
     this.graphRevision=state.graphRevision;
@@ -49,7 +49,7 @@ export class NetworkGraph {
     // Refresh metadata, then animate every branch toward a collision-resistant home.
     for(const p of nodes){const point=this.positions.get(p.id);Object.assign(point,p);point.r=p.depth===0?9:p.depth===1?4.2:2.8;}
     const homes=networkTargets(this.points,this.edges,state.root);for(const p of this.points){const target=homes.get(p.id);p.homeX=target.x;p.homeY=target.y;}
-    this.updateNeighbors();this.layout();if(this.autoFit)this.fit();else this.draw();
+    if(this.treeRoot)this.buildTree(this.treeRoot);this.updateNeighbors();this.layout();if(this.autoFit)this.fit();else this.draw();
   }
   fit(){this.zoomTarget=null;this.autoFit=true;if(!this.points.length||!this.w||!this.h){this.draw();return;}let ex=100,ey=100;for(const p of this.points){if(!this.isVisible(p)||(this.query&&!this.isSearchHit(p)))continue;ex=Math.max(ex,Math.abs(p.tx??p.x)+80);ey=Math.max(ey,Math.abs(p.ty??p.y)+80);}for(const label of this.groupLabels){ex=Math.max(ex,Math.abs(label.x)+100);ey=Math.max(ey,Math.abs(label.y)+30);}this.scale=Math.max(.01,Math.min((this.w-65)/(ex*2),(this.h-100)/(ey*2),1.8));this.offset={x:0,y:0};this.autoFit=false;this.onZoom?.(this.scale);this.draw();}
   zoom(factor,x=this.w/2,y=this.h/2){this.autoFit=false;const old=this.scale;this.scale=Math.max(.01,Math.min(12,this.scale*factor));const ratio=this.scale/old;this.offset={x:x-this.w/2-(x-this.w/2-this.offset.x)*ratio,y:y-this.h/2-(y-this.h/2-this.offset.y)*ratio};this.onZoom?.(this.scale);this.draw();}
@@ -66,7 +66,7 @@ export class NetworkGraph {
     this.zoom(next/this.scale,target.x,target.y);return true;
   }
   nodeRadius(p){return Math.max(p.r,(p.depth===0?8:p.depth===1?4.5:3)/this.scale);}
-  isVisible(p){return matchesFilters(p,this.filters);}
+  isVisible(p){return matchesFilters(p,this.filters)&&(!this.treeNodes||this.treeNodes.has(p.id));}
   isSearchHit(p){return !this.query||scorePerson(p,this.query).score>0;}
   eventPoint(e){const r=this.canvas.getBoundingClientRect();return {x:(e.clientX-r.left-this.w/2-this.offset.x)/this.scale,y:(e.clientY-r.top-this.h/2-this.offset.y)/this.scale};}
   pickPoint(x,y){let near=null,dist=Infinity,now=performance.now();for(const p of this.points){if(!this.isVisible(p)||!this.isSearchHit(p)||p.bornAt>now)continue;const d=Math.hypot(p.x-x,p.y-y);if(d<Math.max(9/this.scale,this.nodeRadius(p)+4/this.scale)&&d<dist){near=p;dist=d;}}return near;}
@@ -75,11 +75,19 @@ export class NetworkGraph {
     for(const [i,p] of this.points.entries()){const was=before.get(p.id),visible=this.isVisible(p);if(was&&!visible&&!this.reducedMotion){p.snapAt=now+Math.min(i,60)*5;p.restoreAt=null;}else if(!was&&visible&&!this.reducedMotion){p.restoreAt=now+Math.min(i,40)*4;p.snapAt=null;}else if(visible)p.snapAt=null;}
     this.layout();this.fit();
   }
+  buildTree(root,maxDepth=2,maxNodes=600){
+    if(!this.positions.has(root))return null;const allowed=new Set(this.points.filter(p=>matchesFilters(p,this.filters)).map(p=>p.id)),adj=new Map();
+    for(const e of this.edges){if(!allowed.has(e.source)||!allowed.has(e.target))continue;if(!adj.has(e.source))adj.set(e.source,[]);if(!adj.has(e.target))adj.set(e.target,[]);adj.get(e.source).push(e.target);adj.get(e.target).push(e.source);}
+    const nodes=new Set([root]),depths=new Map([[root,0]]),queue=[root];while(queue.length&&nodes.size<maxNodes){const id=queue.shift(),depth=depths.get(id);if(depth>=maxDepth)continue;for(const next of (adj.get(id)||[]).sort()){if(nodes.has(next))continue;nodes.add(next);depths.set(next,depth+1);queue.push(next);if(nodes.size>=maxNodes)break;}}
+    this.treeRoot=root;this.treeNodes=nodes;this.treeDepths=depths;return {count:nodes.size,direct:[...depths.values()].filter(depth=>depth===1).length,extended:[...depths.values()].filter(depth=>depth===2).length};
+  }
+  showTree(root){const summary=this.buildTree(root);if(!summary)return null;this.groupBy='none';this.groupLabels=[];this.layout();this.fit();return summary;}
+  clearTree(){if(!this.treeRoot)return;this.treeRoot=null;this.treeNodes=null;this.treeDepths.clear();this.layout();this.fit();}
   layout(){
     const now=performance.now();this.advanceMotion(now);
-    const visible=this.points.filter(p=>this.isVisible(p)),focused=this.query?visible.filter(p=>this.isSearchHit(p)):visible,faceted=Boolean(this.filters.location||this.filters.field||this.filters.keywords?.length),grouped=this.groupBy==='none'?null:groupTargets(focused,this.groupBy,this.groupKeywords),focus=(!grouped&&(this.query||faceted))?focusTargets(focused):null;
+    const visible=this.points.filter(p=>this.isVisible(p)),focused=this.query?visible.filter(p=>this.isSearchHit(p)):visible,faceted=Boolean(this.filters.location||this.filters.field||this.filters.keywords?.length),tree=this.treeRoot?networkTargets(visible.map(p=>({...p,depth:this.treeDepths.get(p.id)??3})),this.edges,this.treeRoot):null,grouped=!tree&&this.groupBy!=='none'?groupTargets(focused,this.groupBy,this.groupKeywords):null,focus=(!tree&&!grouped&&(this.query||faceted))?focusTargets(focused):null;
     this.groupLabels=grouped?.labels||[];
-    const targets=this.points.map(p=>[p,grouped?.targets.get(p.id)||focus?.get(p.id)||{x:p.homeX,y:p.homeY}]);
+    const targets=this.points.map(p=>[p,tree?.get(p.id)||grouped?.targets.get(p.id)||focus?.get(p.id)||{x:p.homeX,y:p.homeY}]);
     if(!targets.some(([p,t])=>(p.tx??p.x)!==t.x||(p.ty??p.y)!==t.y))return;
     for(const [p,target] of targets){p.fromX=p.x;p.fromY=p.y;p.tx=target.x;p.ty=target.y;if(this.reducedMotion){p.x=p.tx;p.y=p.ty;}}
     this.motion=this.reducedMotion?null:now;
@@ -104,7 +112,7 @@ export class NetworkGraph {
     for(const chosen of [false,true]){ctx.strokeStyle=chosen?'#ead779':this.selected?'#41443c':'#747b67';ctx.lineWidth=(chosen?1.6:.85)/this.scale;ctx.globalAlpha=chosen?1:(this.query?.22:.55);ctx.beginPath();for(const e of this.edges){const a=this.positions.get(e.source),b=this.positions.get(e.target);if(!a||!b||!this.isVisible(a)||!this.isVisible(b)||a.bornAt>now||b.bornAt>now)continue;const highlighted=(this.path.has(a.id)&&this.path.has(b.id))||(Boolean(this.selected)&&(a.id===this.selected||b.id===this.selected));if(this.query&&(!this.isSearchHit(a)||!this.isSearchHit(b))&&!highlighted)continue;if((faceted||this.groupBy!=='none')&&!this.showAllConnections&&!highlighted)continue;if(highlighted!==chosen)continue;ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);}ctx.stroke();}
     const labelBoxes=[];
     for(const p of this.points){const shown=this.isVisible(p);if(!shown){if(p.snapAt&&!this.reducedMotion){const progress=(now-p.snapAt)/680;if(progress<0){animating=true;ctx.globalAlpha=.8;ctx.fillStyle=p.depth===0?'#ead779':p.depth===1?'#a8bf83':'#b5a0cb';ctx.beginPath();ctx.arc(p.x,p.y,this.nodeRadius(p),0,Math.PI*2);ctx.fill();}else if(progress<1){animating=true;this.drawDust(p,progress);}else p.snapAt=null;}continue;}const age=now-p.bornAt;if(age<0){animating=true;continue;}visible++;if(!latest||p.bornAt>latest.bornAt)latest=p;const entering=!this.reducedMotion&&age<450;if(entering)animating=true;let reveal=1;if(p.restoreAt&&!this.reducedMotion){const progress=(now-p.restoreAt)/360;if(progress<0){animating=true;continue;}reveal=Math.min(1,progress);if(progress<1)animating=true;else p.restoreAt=null;}const opacity=(entering?Math.min(1,age/180):1)*reveal,hit=this.isSearchHit(p),selected=p.id===this.selected,muted=this.selected&&!this.neighbors.has(p.id);if(this.query&&hit){ctx.globalAlpha=.18*opacity;ctx.fillStyle='#ead779';ctx.beginPath();ctx.arc(p.x,p.y,this.nodeRadius(p)+9/this.scale,0,Math.PI*2);ctx.fill();}ctx.globalAlpha=(hit?1:.035)*opacity;ctx.fillStyle=!hit?'#5b5d56':muted?'#747474':entering?'#ead779':p.depth===0?'#ead779':p.depth===1?'#a8bf83':'#b5a0cb';ctx.beginPath();ctx.arc(p.x,p.y,(this.nodeRadius(p)+(selected?2/this.scale:0))+(entering?2*(1-age/450):0),0,Math.PI*2);ctx.fill();if(selected||(entering&&!muted)){ctx.strokeStyle=entering?'#b4c5e0':'#f2f0e6';ctx.lineWidth=1/this.scale;ctx.globalAlpha*=entering?1-age/450:1;ctx.beginPath();ctx.arc(p.x,p.y,this.nodeRadius(p)+(entering?5+age/40:6)/this.scale,0,Math.PI*2);ctx.stroke();ctx.globalAlpha=opacity;}
-      const grouped=this.groupBy!=='none',labelCandidate=hit&&(selected||p.depth===0||(!grouped&&p.depth===1&&this.points.length<65)||(this.query&&focusCount<=(grouped?18:120))||(!grouped&&faceted&&focusCount<=80));if(labelCandidate){ctx.font=`${15/this.scale}px "Space Grotesk",sans-serif`;ctx.textAlign='center';ctx.fillStyle=muted?'#898989':'#e9e6d8';const text=(p.name||'Unknown person').slice(0,35),x=p.x*this.scale,y=p.y*this.scale+this.nodeRadius(p)*this.scale+22,w=Math.max(40,text.length*7.7),box={x:x-w/2,y:y-16,w,h:20};if(selected||!labelBoxes.some(b=>box.x<b.x+b.w&&box.x+box.w>b.x&&box.y<b.y+b.h&&box.y+box.h>b.y)){labelBoxes.push(box);ctx.fillText(text,p.x,p.y+this.nodeRadius(p)+22/this.scale);}}
+      const grouped=this.groupBy!=='none',treeDepth=this.treeDepths.get(p.id),labelCandidate=hit&&(selected||p.depth===0||p.id===this.treeRoot||(this.treeRoot&&treeDepth===1&&focusCount<=80)||(!grouped&&!this.treeRoot&&p.depth===1&&this.points.length<65)||(this.query&&focusCount<=(grouped?18:120))||(!grouped&&!this.treeRoot&&faceted&&focusCount<=80));if(labelCandidate){ctx.font=`${15/this.scale}px "Space Grotesk",sans-serif`;ctx.textAlign='center';ctx.fillStyle=muted?'#898989':'#e9e6d8';const text=(p.name||'Unknown person').slice(0,35),x=p.x*this.scale,y=p.y*this.scale+this.nodeRadius(p)*this.scale+22,w=Math.max(40,text.length*7.7),box={x:x-w/2,y:y-16,w,h:20};if(selected||!labelBoxes.some(b=>box.x<b.x+b.w&&box.x+box.w>b.x&&box.y<b.y+b.h&&box.y+box.h>b.y)){labelBoxes.push(box);ctx.fillText(text,p.x,p.y+this.nodeRadius(p)+22/this.scale);}}
     }
     ctx.globalAlpha=1;ctx.restore();
     if(latest&&latest.id!==this.lastRevealed){this.lastRevealed=latest.id;this.onReveal?.(latest,visible,this.points.length);}

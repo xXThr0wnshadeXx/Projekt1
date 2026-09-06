@@ -28,7 +28,7 @@ async function showGoogleLogin(){
   $('existing-signin').hidden=false;
   try{
     const current=await session();
-    if(current.authenticated){target.hidden=true;$('existing-signin').hidden=true;$('account-workspace').hidden=false;$('account-logout').hidden=false;bindLogout(current);status.textContent=`Signed in${current.email?' as '+current.email:''}.`;return;}
+    if(current.authenticated){target.hidden=true;$('existing-signin').hidden=true;$('account-workspace').hidden=false;$('account-logout').hidden=false;if($('login-link'))$('login-link').hidden=true;if($('signup-link'))$('signup-link').hidden=true;if($('workspace-link'))$('workspace-link').hidden=false;bindLogout(current);status.textContent=`Signed in${current.email?' as '+current.email:''}.`;return;}
     const response=await fetch('/api/auth/google/config',{credentials:'same-origin'}),config=await response.json();
     if(!response.ok||!config.enabled){status.textContent='Google sign-in is not configured for this Site yet. You can continue with ChatGPT.';return;}
     await loadGoogle();

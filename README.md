@@ -6,8 +6,8 @@ Orbit builds an evidence-backed graph from LinkedIn pages that a contributor can
 
 - **Canonical application:** [orbit-shreev2703-graph-test.shreev2703.chatgpt.site](https://orbit-shreev2703-graph-test.shreev2703.chatgpt.site/)
 - **Repository:** [xXThr0wnshadeXx/Projekt1](https://github.com/xXThr0wnshadeXx/Projekt1)
-- **Companion download:** [download the current ZIP](https://orbit-shreev2703-graph-test.shreev2703.chatgpt.site/downloads/orbit-network-mapper.zip?v=2.6.0)
-- **Current application and companion version:** `2.6.0`
+- **Companion download:** [download the current ZIP](https://orbit-shreev2703-graph-test.shreev2703.chatgpt.site/downloads/orbit-network-mapper.zip?v=2.6.1)
+- **Current application and companion version:** `2.6.1`
 
 This is the single supported hosted application and database. Do not use the retired Turso setup or the older `doublejav.chatgpt.site` deployment.
 
@@ -54,7 +54,7 @@ The extension is a background collection companion; the permanent knowledge grap
 
 Orbit maintains one continuously growing network for each signed-in account. Resuming an unfinished collection keeps its checkpoint; duplicate starts leave an active collection alone. **Continue collecting** on a finished map refreshes it from the direct layer outward. Every changed person and relationship is periodically upserted into the shared team graph, and reopening Orbit loads the account’s saved neighborhood from D1. **Reset my account network** is deliberately kept in Settings and removes only that account’s contribution—overlapping records supported by teammates remain.
 
-### Comment relationships (2.6.0)
+### Comment relationships (2.6.1)
 
 A commenter and the actual author of a visible post get one **undirected, equal-weight relationship**, whether or not they are LinkedIn connections. Repeated comments and connection-list observations merge into the same pair while keeping separate evidence. Commenters on the same post are not automatically connected to each other.
 
@@ -72,12 +72,13 @@ Existing exports with `commentObservations`, combined comment evidence, or `kind
 - Transient failures back off exponentially, with two navigation retries per job and a pause after repeated failures. A stalled Next/scroll gets at most three paced attempts without repeatedly reloading the list. A checkpoint-write failure stops further actions until the companion is reloaded.
 - Scrolling uses overlapping viewports and combines unique people across virtualized snapshots. Modern and legacy result cards can coexist. A person cap saves only accepted rows and resumes the remainder without inflating page counts. An uncertain end remains **Incomplete** in Coverage.
 - Incomplete direct lists resume from an already validated list URL when available, and deeper profiles wait until that layer is resolved. Browser restarts preserve the last paginated URL.
+- An open Site now keeps its collection lease through background-tab throttling and overnight computer sleep. A normal Site close still pauses immediately and reopening resumes the same checkpoint.
 
 The added `webRequest` permission observes status codes and `Retry-After` in the collector tab using Chrome's [response-header events](https://developer.chrome.com/docs/extensions/reference/api/webRequest). It does not request blocking interception, read response bodies or cookies, change headers, or expand host access beyond `www.linkedin.com`.
 
 LinkedIn [prohibits scraping extensions and automated activity](https://www.linkedin.com/help/linkedin/answer/a1341387/prohibited-software-and-extensions). No delay, quota, or browser agent guarantees that an account will avoid restrictions. Test collector changes with the local fixtures, not a live scraping run on a teammate's account.
 
-Use the filters to organize this persistent network by distance, location, estimated field, or school/employer/skill keywords. Search is suggestion-based rather than exact-only: aliases such as `SJSU`, full institution names, profile details, and close spellings are ranked together. Selecting a person shows progressively disclosed professional details and the shortest observed route across all teammates’ saved connections.
+Use the filters to organize this persistent network by distance, location, estimated field, or school/employer/skill keywords. Search is suggestion-based rather than exact-only: aliases such as `SJSU`, full institution names, profile details, and close spellings are ranked together. The map can animate all visible people into readable location clusters. Selecting a person shows progressively disclosed professional details, alternate observed routes, and a person-centered two-hop connection tree.
 
 ### Workspace and settings
 

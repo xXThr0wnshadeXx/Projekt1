@@ -4,7 +4,7 @@ import {SITE_ORIGIN,COMPANION_VERSION} from './companion.js';
 import {normalizePolicy,nextAction,reserveAction,backoffPolicy,blockPolicy,retryAfter,beginRun} from './collection-policy.js';
 
 const KEY='orbitNetwork',ALARM='orbit-collect',VERSION=COMPANION_VERSION;
-const POLL=1000,SETTLE=200,LOAD_TIMEOUT=60000,UNCHANGED_TIMEOUT=15000;
+const POLL=1000,SETTLE=200,LOAD_TIMEOUT=60000,UNCHANGED_TIMEOUT=15000,WORKSPACE_LEASE=24*60*60*1000;
 const POLICY_KEY='orbitCollectionPolicy';
 let policy,storageFailed=false;
 let chain=Promise.resolve(),cached,timer=null,timerAt=Infinity,workspaceTabs=new Map();
@@ -294,9 +294,10 @@ async function command(message){
   if(message.type==='WORKSPACE_ACTIVE'){
     const s=await read();if(!s)return {ok:true};s.workspaceManaged=true;
     if(message.active===false){s.workspaceLeaseUntil=0;if(s.status==='running'){s.pauseKind='workspace_closed';await pause(s,'Orbit paused because the Site was closed. Reopen it to continue from this exact checkpoint.');}else await save(s);return {ok:true};}
-    // Three minutes tolerates aggressive background-tab timer throttling while
-    // pagehide still pauses immediately on a normal close or navigation.
-    s.workspaceLeaseUntil=Date.now()+180000;
+    // Background tabs and sleeping computers can delay Site timers for hours.
+    // A normal close still pauses immediately through pagehide; this lease is
+    // only a crash fallback and must not interrupt an intentionally open run.
+    s.workspaceLeaseUntil=Date.now()+WORKSPACE_LEASE;
     if(s.status==='paused'&&s.pauseKind==='workspace_closed'){s.status='running';s.pauseKind=null;s.attentionTabId=null;log(s,'Site reopened · continuing from the saved checkpoint');await save(s);await schedule(s);wake(0);}else await save(s);
     return {ok:true};
   }
@@ -335,7 +336,7 @@ async function command(message){
     const config=options(message.config||s.config);config.delay=Math.max(120,config.delay||120);if(config.depth!==s.config.depth)throw Error('Exploration depth is fixed for an existing collection. Start a new map to change it.');
     if(Object.keys(s.nodes).length>=config.maxNodes)throw Error('Increase the person limit above the current number of people.');
     await acknowledgeRestriction(s);
-    s.config=config;s.engineVersion=3;s.status='running';s.pauseKind=null;s.attentionTabId=null;if(s.workspaceManaged)s.workspaceLeaseUntil=Date.now()+180000;
+    s.config=config;s.engineVersion=3;s.status='running';s.pauseKind=null;s.attentionTabId=null;if(s.workspaceManaged)s.workspaceLeaseUntil=Date.now()+WORKSPACE_LEASE;
     const rootBranch=s.branches[s.root],repair=['incomplete','hidden','mutuals_only'].includes(rootBranch?.status)&&!s.commentCoverage?.[s.root]?.profiles.length&&!workers(s).some(w=>w.current?.job.kind==='posts'&&w.current.job.owner===s.root);
     if(repair){const interrupted=[];for(const w of workers(s)){if(w.current)interrupted.push(w.current.job);w.current=null;}const direct=rootBranch.scope==='connections'&&listURL(rootBranch.url)?{kind:'list',owner:s.root,depth:0,url:rootBranch.url,replayURL:rootBranch.resumeURL||rootBranch.url}:{kind:'profile',owner:s.root,depth:0};const jobs=[direct,...interrupted,...s.queue],seen=new Set();s.queue=jobs.filter(job=>{const key=`${job.kind}|${job.owner}|${job.depth??0}`;if(seen.has(key)||job.owner===s.root&&job!==direct)return false;seen.add(key);return true;});rootBranch.status='queued';rootBranch.reason='Rechecking the complete direct layer before continuing.';log(s,'Resuming by rechecking your direct connections, then continuing the saved queue');}
     else for(const w of workers(s)){if(w.current){w.current.since=Date.now();w.current.candidate=null;w.current.nextActionAt=0;}}
