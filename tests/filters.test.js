@@ -35,6 +35,7 @@ test('degree and alias-aware keyword filters combine without losing the root',()
  const sjsu={id:'s',depth:2,headline:'Student at San Jose State University',location:'San Jose'};
  assert.deepEqual(keywordTerms(' SJSU, machine learning, sjsu '),['SJSU','machine learning']);assert.deepEqual(keywordMatches(sjsu,['SJSU']),['SJSU']);assert.deepEqual(keywordMatches(sjsu,['San Jose State Universty']),['San Jose State Universty']);assert.equal(keywordGroupOf(sjsu,['SJSU']),'Matches: SJSU');
  assert.equal(matchesFilters(sjsu,{first:true,second:true,extended:false,keywords:['SJSU'],keywordOnly:true}),true);assert.equal(matchesFilters({...sjsu,depth:3},{extended:false}),false);assert.equal(matchesFilters({...sjsu,depth:0},{first:false,second:false,extended:false}),true);
+ assert.equal(matchesFilters({...sjsu,depth:5},{extended:true,maxDepth:4}),false);assert.equal(matchesFilters({...sjsu,depth:5},{extended:true,maxDepth:6}),true);
  const grouped=groupTargets([sjsu,{id:'x',depth:2,headline:'Designer'}],'keyword',['SJSU']);assert.deepEqual(grouped.labels.map(label=>label.name),['Matches: SJSU','No keyword match']);
 });
 

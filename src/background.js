@@ -51,6 +51,18 @@ function workers(s){
   // Preserve outstanding work when migrating an older three-tab collection.
   if(s.workers.length>1){for(const w of s.workers.slice(1)){if(w.current)s.queue.unshift({...w.current.job,replayURL:w.current.resumeURL});}s.workers=s.workers.slice(0,1);}
   if(!s.workers.length)s.workers.push({tabId:null,current:null});
+  s.config.comments=Boolean(s.config.comments);
+  if(!s.config.comments){
+    s.deferredJobs||=[];
+    const defer=job=>{if(job&&!s.deferredJobs.some(item=>item.kind==='posts'&&item.owner===job.owner))s.deferredJobs.push(job);};
+    for(const job of s.queue.filter(item=>item.kind==='posts'))defer(job);
+    s.queue=s.queue.filter(item=>item.kind!=='posts');
+    for(const worker of s.workers)if(worker.current?.job.kind==='posts'){defer({...worker.current.job,replayURL:worker.current.resumeURL});worker.current=null;}
+  }else if(s.deferredJobs?.some(job=>job.kind==='posts')){
+    const active=new Set([...s.queue,...s.workers.map(worker=>worker.current?.job).filter(Boolean)].filter(job=>job.kind==='posts').map(job=>job.owner));
+    const restored=s.deferredJobs.filter(job=>job.kind==='posts'&&!active.has(job.owner));
+    s.queue.push(...restored);s.deferredJobs=s.deferredJobs.filter(job=>job.kind!=='posts');
+  }
   return s.workers;
 }
 const save=async s=>{
@@ -71,7 +83,7 @@ function finishBranch(s,w,status,reason){const b=w.current.job.kind==='posts'?s.
 function limit(s){s.status='limit';log(s,'Person limit reached. Increase the limit and resume to expand further.');}
 function queueUnexplored(s,minDepth=0){
   s.queue=s.queue.filter(job=>job.kind!=='profile'||job.refresh||!['exhausted','hidden','mutuals_only','incomplete'].includes(s.branches[job.owner]?.status));
-  const busy=new Set([...s.queue,...(s.deferredJobs||[]),...workers(s).map(w=>w.current?.job).filter(Boolean)].map(job=>job.owner));
+  const busy=new Set([...s.queue,...(s.deferredJobs||[]),...workers(s).map(w=>w.current?.job).filter(Boolean)].filter(job=>job.kind==='profile').map(job=>job.owner));
   let added=0;
   for(const person of Object.values(s.nodes).sort((a,b)=>a.depth-b.depth||a.id.localeCompare(b.id))){
     // A known person is not necessarily an explored branch. Only schedule
@@ -123,6 +135,7 @@ async function navigate(s,w,job,replayURL=job.replayURL){
   w.tabId=tab.id;log(s,`Exploring ${s.nodes[job.owner]?.name||'profile'}’s ${job.kind==='posts'?'post comments':'connections'}`);await save(s);
 }
 function queueComments(s,job,snap){
+  if(!s.config.comments)return;
   s.commentCoverage||={};
   if(s.commentCoverage[job.owner]&&!(s.commentCoverage[job.owner].status==='hidden'&&!s.commentCoverage[job.owner].url)&&!job.refresh)return;
   if(s.queue.some(item=>item.kind==='posts'&&item.owner===job.owner)||workers(s).some(w=>w.current?.job.kind==='posts'&&w.current.job.owner===job.owner))return;
@@ -419,7 +432,7 @@ async function command(message){
     // Older companions recorded a missing, lazily mounted Activity link as hidden.
     // Recover that skipped work once, preserving all completed connection checkpoints.
     const rootComments=s.commentCoverage?.[s.root];
-    if(rootComments?.status==='hidden'&&!rootComments.url){
+    if(s.config.comments&&rootComments?.status==='hidden'&&!rootComments.url){
       queueComments(s,{owner:s.root,depth:0},{activityUrl:activityURL(s.root+'recent-activity/all/',s.root)});
     }
     for(const w of workers(s)){if(w.current){w.current.since=Date.now();w.current.candidate=null;w.current.nextActionAt=0;}}

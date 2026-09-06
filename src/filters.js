@@ -27,9 +27,9 @@ export function fieldMatches(p,query=''){
  if(!query)return true;const categories=fieldsOf(p),source=[...categories,p.industry,p.field,p.headline,p.about,p.education,p.experience,p.skills].flat().filter(Boolean).join(' ');
  return categories.some(value=>fuzzyTextMatch(value,query,58))||fuzzyTextMatch(source,query,68);
 }
-export function matchesFilters(p,{location='',field='',keywords=[],keywordOnly=false,first=true,second=true,extended=true}={}){
- const terms=keywordTerms(keywords),depth=p.depth===1?first:p.depth===2?second:p.depth>2?extended:true;
- return depth&&locationMatches(p,location)&&fieldMatches(p,field)&&(!terms.length||keywordMatches(p,terms).length>0);
+export function matchesFilters(p,{location='',field='',keywords=[],keywordOnly=false,first=true,second=true,extended=true,maxDepth=6}={}){
+ const terms=keywordTerms(keywords),within=p.depth===undefined||p.depth===0||p.depth<=Number(maxDepth||6),depth=p.depth===1?first:p.depth===2?second:p.depth>2?extended:true;
+ return within&&depth&&locationMatches(p,location)&&fieldMatches(p,field)&&(!terms.length||keywordMatches(p,terms).length>0);
 }
 export function springProgress(t){if(t>=1)return 1;if(t<=0)return 0;return 1-Math.exp(-7*t)*Math.cos(10*t);}
 export function groupTargets(points,by,keywords=[]){

@@ -45,6 +45,15 @@ test('library neighborhoods are bounded even for high-degree profiles',async()=>
   for(let i=0;i<5;i++){const names=Array.from({length:100},(_,j)=>'p'+(i*100+j));await ingest(db,'one',{nodes:names.map(person),edges:names.map(n=>edge('root',n))});}
   const graph=await neighborhood(db,'one',person('root').id,2,100);assert.equal(graph.nodes.length,100);assert.equal(graph.truncated,true);assert.ok(graph.edges.every(e=>graph.nodes.some(n=>n.id===e.source)&&graph.nodes.some(n=>n.id===e.target)));
 });
+test('a shared neighborhood expands to six hops and enriches duplicates in place',async()=>{
+  const {db}=database(),names=['root','a','b','c','d','e','f'];
+  await ingest(db,'shared',{nodes:names.map(person),edges:names.slice(1).map((name,index)=>edge(names[index],name))},'ben');
+  await ingest(db,'shared',{nodes:[{...person('c'),headline:'Updated role',location:'San Jose'}],edges:[edge('b','c')]},'shreev');
+  const graph=await neighborhood(db,'shared',person('root').id,6,100);
+  assert.equal(graph.nodes.length,7);assert.equal(graph.edges.length,6);assert.equal(graph.nodes.find(node=>node.id===person('f').id).depth,6);
+  assert.equal(graph.nodes.find(node=>node.id===person('c').id).headline,'Updated role');assert.ok(graph.updatedAt);
+  assert.equal((await stats(db,'shared')).people,7);assert.equal((await stats(db,'shared')).connections,6);
+});
 test('search understands abbreviations, rich fields, and close spellings',async()=>{
   const {db}=database();await ingest(db,'shared',{nodes:[{...person('sam'),name:'Sam Engineer',headline:'Student at San Jose State University',skills:'Machine Learning'},{...person('jasper'),name:'Jasper Chen',headline:'Applied Mathematics and RAG at AutoSitu'},{...person('tina'),name:'Tina Rong',headline:'Emulation Verification Engineer at Apple'}],edges:[]},'sam-user');
   assert.equal((await search(db,'shared','sjsu'))[0].id,person('sam').id);

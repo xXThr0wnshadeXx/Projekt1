@@ -61,11 +61,11 @@ export function sameList(a,b){
   return filterValues(new URL(a),'network')===filterValues(new URL(b),'network');
 }
 export function options(input={}) {
-  const maxNodes=Number(input.maxNodes ?? 1000),depth=Number(input.depth ?? 2),delay=Number(input.delay ?? 120);
+  const maxNodes=Number(input.maxNodes ?? 1000),depth=Number(input.depth ?? 2),delay=Number(input.delay ?? 120),comments=input.comments===true||input.comments==='true';
   if (!Number.isInteger(maxNodes)||maxNodes<10||maxNodes>10000) throw Error('Choose a whole-number limit from 10 to 10,000 people.');
   if (!Number.isInteger(depth)||depth<1||depth>3) throw Error('Choose a depth from 1 to 3.');
   if (!Number.isInteger(delay)||delay<0||delay>3600) throw Error('Choose a page interval from 0 to 3,600 seconds.');
-  return {maxNodes,depth,delay};
+  return {maxNodes,depth,delay,comments};
 }
 export function newState(url,input={}) {
   const root=profileURL(url);

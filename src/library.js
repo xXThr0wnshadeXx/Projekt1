@@ -1,9 +1,23 @@
 import {prepareImport} from './import.js';
 export function splitEvidence(edge){const parts=[];for(let i=0;i<(edge.evidence||[]).length;i+=20)parts.push({...edge,evidence:edge.evidence.slice(i,i+20)});return parts;}
+export function mergeAccountGraphs(local,shared,maxDepth=6){
+  if(!local)return shared||null;if(!shared||shared.root!==local.root)return local;
+  const nodes={...shared.nodes,...local.nodes},edges={...shared.edges};
+  for(const edge of Object.values(local.edges||{})){
+    const previous=edges[edge.id],seen=new Set((previous?.evidence||[]).map(item=>`${item.type||'visible_connection_list'}|${item.url}|${item.commentId||''}`));
+    edges[edge.id]={...(previous||{}),...edge,evidence:[...(previous?.evidence||[]),...(edge.evidence||[]).filter(item=>!seen.has(`${item.type||'visible_connection_list'}|${item.url}|${item.commentId||''}`))]};
+  }
+  const adjacent=new Map();for(const edge of Object.values(edges)){if(!nodes[edge.source]||!nodes[edge.target])continue;for(const [a,b] of [[edge.source,edge.target],[edge.target,edge.source]]){if(!adjacent.has(a))adjacent.set(a,[]);adjacent.get(a).push(b);}}
+  const depths=new Map([[local.root,0]]),queue=[local.root];while(queue.length){const id=queue.shift(),depth=depths.get(id);if(depth>=maxDepth)continue;for(const next of adjacent.get(id)||[])if(!depths.has(next)){depths.set(next,depth+1);queue.push(next);}}
+  const connected={};for(const [id,depth] of depths)if(nodes[id])connected[id]={...nodes[id],depth};
+  const connectedEdges={};for(const edge of Object.values(edges))if(connected[edge.source]&&connected[edge.target])connectedEdges[edge.id]=edge;
+  return {...local,id:`account:${local.root}`,graphRevision:`${local.revision||0}:${shared.graphRevision||0}:${Object.keys(connectedEdges).length}`,nodes:connected,edges:connectedEdges,cloudView:false,sharedView:true,updatedAt:[local.updatedAt,shared.updatedAt].filter(Boolean).sort().at(-1)};
+}
 // The hosted page uses its Sites session; no LinkedIn credentials leave Chrome.
 export function createLibrary({getCollection,showGraph,showCollection}){
   const $=id=>document.getElementById(id),enabled=location.protocol==='https:'||location.hostname==='127.0.0.1';
   let pending=null,prepared=null,saving=false,importing=false,timer=null,searchTimer=null,searchSerial=0;
+  const accountRevisions=new Map();
   const savedNodes=new Map(),savedEdges=new Map();
   async function api(path,body){const r=await fetch('/api/library/'+path,{method:body?'POST':'GET',headers:body?{'Content-Type':'application/json'}:undefined,body:body?JSON.stringify(body):undefined});const data=await r.json();if(r.status===401){$('library-signin').hidden=false;$('library-signin').href='/?return_to=%2Fmap.html#login';$('library-signin').textContent='Sign in to continue ↗';$('library-counts').textContent='Sign in to view the shared team library';}else if(r.ok)$('library-signin').hidden=true;if(!r.ok){const error=Error(data.error||'Library request failed.');error.status=r.status;error.retryAfter=Number(r.headers.get('Retry-After'))||0;throw error;}return data;}
   const status=text=>{$('library-status').textContent=text;};
@@ -36,13 +50,15 @@ export function createLibrary({getCollection,showGraph,showCollection}){
     finally{saving=false;if(pending){clearTimeout(timer);timer=setTimeout(sync,30000);}}
   }
   function queue(state){if(!enabled||!state||state.cloudView)return;pending=state;clearTimeout(timer);timer=setTimeout(sync,2000);}
-  async function lookup(url,accountView=false){
+  async function lookup(url,accountView=false,depth=2,quiet=false){
     try{
-      status('Loading saved connections…');const data=await api('graph?url='+encodeURIComponent(url)+'&depth=2&limit=1000');
+      if(!quiet)status('Loading saved connections…');depth=Math.max(1,Math.min(6,Number(depth)||2));const since=accountView?accountRevisions.get(url)||'':'';const data=await api('graph?url='+encodeURIComponent(url)+`&depth=${depth}&limit=3000${since?`&since=${encodeURIComponent(since)}`:''}`);
       if(!data.found){status('This person is not in the team library yet. Collect a network containing them.');return;}
+      if(data.unchanged)return;
       const nodes=Object.fromEntries(data.nodes.map(p=>[p.id,p])),edges=Object.fromEntries(data.edges.map(e=>[e.id,e]));
-      showGraph({schemaVersion:1,id:'library:'+data.root+':'+Date.now(),root:data.root,nodes,edges,branches:{},queue:[],status:'imported',cloudView:true,pages:0,config:{maxNodes:1000,depth:2,delay:120},createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),reason:data.truncated?'Showing a bounded sample of the account network. Continue collecting to expand it.':'Loaded the persistent account network from shared D1.'},accountView);
-      $('back-collection').hidden=accountView;status(data.truncated?'Account network loaded · bounded view for responsive rendering':'Account network loaded from D1 · no LinkedIn request needed');
+      const shared={schemaVersion:1,id:`library-account:${data.root}`,graphRevision:data.updatedAt||`${data.nodes.length}:${data.edges.length}`,root:data.root,nodes,edges,branches:{},queue:[],status:'imported',cloudView:true,pages:0,config:{maxNodes:3000,depth,delay:120,comments:false},createdAt:data.updatedAt||new Date().toISOString(),updatedAt:data.updatedAt||new Date().toISOString(),reason:data.truncated?'Showing a bounded connected view for responsive rendering.':'Loaded every saved path connected to this account within the selected distance.'};
+      if(accountView&&data.updatedAt)accountRevisions.set(url,data.updatedAt);showGraph(shared,accountView);
+      $('back-collection').hidden=accountView;if(!quiet)status(data.truncated?'Account network loaded · bounded view for responsive rendering':'Account network loaded from D1 · no LinkedIn request needed');return shared;
     }catch(error){status(error.message);}
   }
   $('library-query').addEventListener('input',()=>{
@@ -77,5 +93,5 @@ export function createLibrary({getCollection,showGraph,showCollection}){
   if(enabled)refreshStats().then(()=>status('Autosave ready · every changed person and connection merges into shared D1')).catch(error=>{if(error.status===401)status('Sign in to contribute to the shared team library.');else{$('library-counts').textContent='Library unavailable';status('Open the hosted Orbit site to use the shared team library.');}});
   else status('Use the hosted Orbit site for permanent storage.');
   setInterval(()=>{if(pending&&!saving&&!importing)sync();},30000);
-  return {queue,loadAccount:url=>lookup(url,true),resetCaches(){pending=null;savedNodes.clear();savedEdges.clear();}};
+  return {queue,loadAccount:(url,depth=6)=>lookup(url,true,depth,true),resetCaches(){pending=null;savedNodes.clear();savedEdges.clear();accountRevisions.clear();}};
 }

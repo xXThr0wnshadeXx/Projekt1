@@ -91,10 +91,12 @@ async function edgeSources(db,owner,pairs){
     FROM json_each(?) j`).bind(owner,JSON.stringify(pairs)).all()).results;
   return new Map(rows.map(row=>[`${row.a}|${row.b}`,JSON.parse(row.observations||'[]').map(e=>({type:'visible_connection_list',...JSON.parse(e.details||'{}'),url:e.url,observedAt:e.observedAt}))]));
 }
-export async function neighborhood(db,owner,root,depth=2,limit=1000){
+export async function neighborhood(db,owner,root,depth=2,limit=1000,since=''){
   root=profileURL(root);if(!root)throw Error('Enter a LinkedIn profile URL.');
-  if(!Number.isInteger(depth)||depth<1||depth>2||!Number.isInteger(limit)||limit<10||limit>3000)throw Error('Choose 1–2 layers and 10–3,000 people.');
+  if(!Number.isInteger(depth)||depth<1||depth>6||!Number.isInteger(limit)||limit<10||limit>3000)throw Error('Choose 1–6 layers and 10–3,000 people.');
   const start=await db.prepare('SELECT * FROM people WHERE owner=? AND id=?').bind(owner,root).first();if(!start)return {found:false,nodes:[],edges:[]};
+  const revision=await db.prepare(`SELECT MAX(value) updatedAt FROM (SELECT MAX(last_seen) value FROM people WHERE owner=? UNION ALL SELECT MAX(last_seen) value FROM connections WHERE owner=?)`).bind(owner,owner).first();
+  if(since&&revision?.updatedAt===since)return {found:true,unchanged:true,root,updatedAt:revision.updatedAt};
   const nodes=new Map([[root,{...start,url:root,depth:0}]]),edges=new Map();let frontier=[root],truncated=false,queriesUsed=0;
   for(let layer=1;layer<=depth&&frontier.length;layer++){
     const next=[];
@@ -119,7 +121,7 @@ export async function neighborhood(db,owner,root,depth=2,limit=1000){
   const pairs=[...edges.values()].map(e=>({a:e.source,b:e.target}));
   const sources=await edgeSources(db,owner,pairs);
   for(const edge of edges.values())edge.evidence=sources.get(`${edge.source}|${edge.target}`)||[];
-  return {found:true,root,nodes:[...nodes.values()],edges:[...edges.values()],truncated,depth,limit};
+  return {found:true,root,nodes:[...nodes.values()],edges:[...edges.values()],truncated,depth,limit,updatedAt:revision?.updatedAt||start.last_seen};
 }
 export async function shortestPath(db,owner,from,to,maxDepth=6,limit=10000){
   from=profileURL(from);to=profileURL(to);if(!from||!to)throw Error('Choose two valid LinkedIn profiles.');

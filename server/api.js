@@ -43,7 +43,7 @@ export async function handleAPI(request,env){
       if(url.pathname==='/api/library/activity'&&request.method==='GET'){const stop=await limited('read');return stop||json(await activity(env.DB,owner));}
       if(url.pathname==='/api/library/search'&&request.method==='GET'){const stop=await limited('read');return stop||json({people:await search(env.DB,owner,url.searchParams.get('q')||'')});}
       if(url.pathname==='/api/library/path'&&request.method==='GET'){const stop=await limited('read');return stop||json(await shortestPath(env.DB,owner,actor.linkedinProfileUrl,url.searchParams.get('to'),Number(url.searchParams.get('depth')||6)));}
-      if(url.pathname==='/api/library/graph'&&request.method==='GET'){const stop=await limited('read');return stop||json(await neighborhood(env.DB,owner,url.searchParams.get('url'),Number(url.searchParams.get('depth')||2),Number(url.searchParams.get('limit')||1000)));}
+      if(url.pathname==='/api/library/graph'&&request.method==='GET'){const stop=await limited('read');return stop||json(await neighborhood(env.DB,owner,url.searchParams.get('url'),Number(url.searchParams.get('depth')||2),Number(url.searchParams.get('limit')||1000),url.searchParams.get('since')||''));}
       if(url.pathname==='/api/library/ingest'&&request.method==='POST'){
         const body=await readJSON(request,500000),stop=await limited('write');return stop||json(await ingest(env.DB,owner,body,actor.id));
       }

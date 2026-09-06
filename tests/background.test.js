@@ -299,12 +299,18 @@ test('a late restriction response persists even after the active job is cancelle
   assert.equal((await h.command({type:'START',url:a})).ok,false);assert.equal(h.requests.length,1);
 });
 
+test('connection-list collection is the default and leaves comment work optional',async t=>{
+  const url=root+'recent-activity/all/',h=await harness(t);h.snapshots={[root]:{...profile(person('root'),null),activityUrl:url}};
+  await h.command({type:'START',url:root});for(let i=0;i<10;i++)await h.tick();
+  const s=h.data.orbitNetwork;assert.equal(s.status,'complete');assert.equal(s.config.comments,false);assert.equal(s.commentCoverage,undefined);assert.equal(h.requests.length,1);
+});
+
 test('a profile with hidden connections still discovers commenters and expands their paths',async t=>{
   const url=root+'recent-activity/all/',h=await harness(t);
   const comments=[{commenter:person('a'),author:root,post:'https://www.linkedin.com/feed/update/urn:li:activity:123/',commentId:'urn:li:comment:(activity:123,456)',observedAt:'2026-09-06T00:00:00Z'}];
   const snapshots={[root]:{...profile(person('root'),null),activityUrl:url},[url]:{kind:'posts',url,owner:root,cards:[{urn:'urn:li:activity:123',author:root,post:comments[0].post,comments:[],control:'open'}]},[a]:profile(person('a'),list('a')),[list('a')]:page(list('a'),[person('b')])};
   h.snapshots=snapshots;h.onComments=()=>{snapshots[url].cards[0].comments=comments;snapshots[url].cards[0].control=null;};
-  await h.command({type:'START',url:root});
+  await h.command({type:'START',url:root,config:{comments:true}});
   for(let i=0;i<65;i++)await h.elapse(10000);
   const s=h.data.orbitNetwork;
   assert.ok(s.nodes[a]);assert.deepEqual(route(s,a),[root,a]);assert.equal(s.branches[root].status,'hidden');
@@ -318,7 +324,7 @@ test('a profile with hidden connections still discovers commenters and expands t
 test('comment collection pauses on restrictions and never consumes a startup exemption to bypass them',async t=>{
   const h=await harness(t),url=root+'recent-activity/all/';
   h.snapshots={[root]:{...profile(person('root'),null),activityUrl:url},[url]:{kind:'blocked',reason:'LinkedIn rate limit',url}};
-  await h.command({type:'START',url:root});for(let i=0;i<10;i++)await h.tick();
+  await h.command({type:'START',url:root,config:{comments:true}});for(let i=0;i<10;i++)await h.tick();
   assert.equal(h.requests.length,2);assert.equal(h.data.orbitNetwork.status,'paused');assert.ok(h.data.orbitCollectionPolicy.blocked);
   assert.equal((await h.command({type:'RESUME'})).ok,false);assert.equal(h.requests.length,2);
 });
@@ -333,7 +339,7 @@ test('missing pagination never delays recording already visible relationships',a
   for(let i=0;i<12;i++)await h.tick();assert.equal(h.data.orbitNetwork.pages,1);assert.equal(h.advances,1);assert.equal(h.data.orbitNetwork.status,'complete');
 });
 test('resume repairs skipped posts once without replaying mutual lists or dropping queued people',async t=>{
-  const s=newState(root,{depth:2});s.status='paused';s.queue=[{kind:'profile',owner:a,depth:1}];s.workers=[{tabId:null,current:null}];
+  const s=newState(root,{depth:2,comments:true});s.status='paused';s.queue=[{kind:'profile',owner:a,depth:1}];s.workers=[{tabId:null,current:null}];
   s.branches[root]={status:'incomplete',scope:'mutuals_only',pages:1,profiles:[a],url:list('root')};s.nodes[a]={...person('a'),id:a,depth:1};
   s.commentCoverage={[root]:{status:'hidden',url:null,profiles:[],comments:0,posts:[]}};
   const h=await harness(t,s),url=root+'recent-activity/all/';
