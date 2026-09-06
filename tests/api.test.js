@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {handleAPI} from '../server/api.js';
-const base='https://orbit-network-mapper.doublejav.chatgpt.site';
+const base='https://orbit-shreev2703-graph-test.shreev2703.chatgpt.site';
 test('private library APIs reject anonymous reads and cross-origin writes',async()=>{
   assert.equal((await handleAPI(new Request(base+'/api/library/stats'),{DB:{}})).status,401);
   assert.equal((await handleAPI(new Request(base+'/api/library/stats'),{DB:{},SHARED_OWNER:'shared'})).status,401);
