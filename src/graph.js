@@ -1,4 +1,30 @@
 import {matchesFilters,groupTargets,springProgress,locationOf,fieldOf} from './filters.js';
+// Reserve a disk for each branch, then arrange siblings in a golden-angle spiral.
+// Bottom-up sizing lets a growing second-degree branch make room across the map
+// without running an all-pairs force simulation on every animation frame.
+export function networkTargets(points,edges,root){
+  const ordered=[...points].sort((a,b)=>a.depth-b.depth),byId=new Map(points.map(p=>[p.id,p]));
+  const parents=new Map(),children=new Map(points.map(p=>[p.id,[]]));
+  for(const edge of edges)for(const [a,b] of [[edge.source,edge.target],[edge.target,edge.source]]){
+    if(byId.has(a)&&byId.has(b)&&byId.get(a).depth<byId.get(b).depth&&!parents.has(b))parents.set(b,a);
+  }
+  for(const p of ordered){if(p.id===root)continue;const parent=parents.get(p.id)||root;if(children.has(parent))children.get(parent).push(p);}
+  const radii=new Map(),local=new Map();
+  for(const p of [...ordered].reverse()){
+    const branch=children.get(p.id),largest=Math.max(12,...branch.map(c=>radii.get(c.id)||12));
+    const spacing=largest*2+28;
+    let radius=16;
+    for(const [i,child] of branch.entries()){
+      const angle=i*2.3999632297,distance=spacing*Math.sqrt(i+1);
+      local.set(child.id,{x:Math.cos(angle)*distance,y:Math.sin(angle)*distance});
+      radius=Math.max(radius,distance+radii.get(child.id));
+    }
+    radii.set(p.id,radius);
+  }
+  const targets=new Map([[root,{x:0,y:0}]]);
+  for(const p of ordered){if(p.id===root)continue;const parent=targets.get(parents.get(p.id)||root)||{x:0,y:0},offset=local.get(p.id)||{x:0,y:0};targets.set(p.id,{x:parent.x+offset.x,y:parent.y+offset.y});}
+  return targets;
+}
 export class NetworkGraph {
   constructor(canvas,onSelect){
     this.canvas=canvas;this.ctx=canvas.getContext('2d');this.onSelect=onSelect;this.points=[];this.edges=[];this.positions=new Map();this.showAllConnections=false;this.filters={};this.groupBy="none";this.groupLabels=[];this.motion=null;this.scale=1;this.offset={x:0,y:0};this.selected=null;this.query='';this.path=new Set();this.autoFit=true;this.scrollZoom=false;this.zoomTarget=null;this.zoomTime=null;this.frame=null;this.childCounts=new Map();this.directCount=0;this.reducedMotion=globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches||false;
@@ -22,13 +48,14 @@ export class NetworkGraph {
     // Reveal each arrival without delaying collection or accumulating an animation backlog.
     const animate=state.status!=='imported'&&!this.reducedMotion,spacing=animate?Math.min(55,1200/Math.max(1,added.length)):0;
     for(const [i,p] of added.entries()){
-      let x=0,y=0,owner=state.root;
-      if(p.depth===1){const n=this.directCount++,angle=n*2.3999632297,r=220+80*Math.floor(Math.sqrt(n/12));x=Math.cos(angle)*r;y=Math.sin(angle)*r;}
-      else if(p.depth>1){owner=(adj.get(p.id)||[]).find(id=>this.positions.has(id)&&state.nodes[id]?.depth<p.depth)||state.root;const parent=this.positions.get(owner)||{x:0,y:0},n=this.childCounts.get(owner)||0;this.childCounts.set(owner,n+1);const angle=Math.atan2(parent.y,parent.x),theta=n*2.3999632297,rr=12*Math.sqrt(n+1);x=parent.x+Math.cos(angle)*150+Math.cos(theta)*rr;y=parent.y+Math.sin(angle)*150+Math.sin(theta)*rr;}
+      const owner=(adj.get(p.id)||[]).find(id=>this.positions.has(id)&&state.nodes[id]?.depth<p.depth)||state.root;
+      const parent=this.positions.get(owner),x=parent?.x||0,y=parent?.y||0;
       const point={...p,x,y,homeX:x,homeY:y,r:p.depth===0?9:p.depth===1?4.2:2.8,owner,bornAt:animate?now+i*spacing:now-1000};this.positions.set(p.id,point);this.points.push(point);
     }
-    // Keep positions stable while names, evidence, and shortest known depths improve.
+    // Refresh metadata without snapping positions during an active transition.
     for(const p of nodes){const point=this.positions.get(p.id);Object.assign(point,p);point.r=p.depth===0?9:p.depth===1?4.2:2.8;}
+    const homes=networkTargets(this.points,this.edges,state.root);
+    for(const p of this.points){const target=homes.get(p.id);p.homeX=target.x;p.homeY=target.y;}
     this.layout();if(this.autoFit)this.fit();else this.draw();
   }
   fit(){this.zoomTarget=null;this.autoFit=true;if(!this.points.length||!this.w||!this.h){this.draw();return;}let ex=100,ey=100;for(const p of this.points){if(!this.isVisible(p))continue;ex=Math.max(ex,Math.abs(p.tx??p.x)+80);ey=Math.max(ey,Math.abs(p.ty??p.y)+80);}for(const label of this.groupLabels){ex=Math.max(ex,Math.abs(label.x)+100);ey=Math.max(ey,Math.abs(label.y)+30);}this.scale=Math.max(.01,Math.min((this.w-65)/(ex*2),(this.h-100)/(ey*2),1.8));this.offset={x:0,y:0};this.autoFit=false;this.onZoom?.(this.scale);this.draw();}
@@ -57,7 +84,7 @@ export class NetworkGraph {
     this.motion=this.reducedMotion?null:now;
   }
 
-  advanceMotion(now){if(this.motion===null)return false;const t=Math.min(1,Math.max(0,(now-this.motion)/950)),progress=springProgress(t);for(const p of this.points){p.x=t===1?p.tx:p.fromX+(p.tx-p.fromX)*progress;p.y=t===1?p.ty:p.fromY+(p.ty-p.fromY)*progress;}if(t===1)this.motion=null;return t<1;}
+  advanceMotion(now){if(this.motion===null)return false;const t=Math.min(1,Math.max(0,(now-this.motion)/950)),progress=springProgress(t);for(const p of this.points){if(p.tx===undefined)continue;p.x=t===1?p.tx:p.fromX+(p.tx-p.fromX)*progress;p.y=t===1?p.ty:p.fromY+(p.ty-p.fromY)*progress;}if(t===1)this.motion=null;return t<1;}
   focus(id,path=[]){if(this.selected===id&&[...this.path].join('|')===path.join('|'))return;this.selected=id;this.path=new Set(path);this.draw();}
   search(q){q=q.toLowerCase();if(this.query===q)return;this.query=q;this.draw();}
   draw(){if(this.frame!==null)return;this.frame=requestAnimationFrame(now=>{this.frame=null;this.paint(now);});}

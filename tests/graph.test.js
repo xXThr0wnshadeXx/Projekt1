@@ -78,3 +78,34 @@ test('continuous wheel input does not restart easing and has a useful zoom range
  h.handlers.wheel(event);assert.equal(h.g.zoomTime,start);
  h.paint(start+16);assert.ok(h.g.scale<initial);
 });
+
+test('second-degree arrivals expand other branches smoothly without changing the camera',t=>{
+ const {g}=graph(t),s=newState(root),parents=[];
+ for(let i=0;i<6;i++){const id=addPerson(s,{url:`https://www.linkedin.com/in/parent-${i}/`},1);addEdge(s,root,id,source);parents.push(id);}
+ g.setData(s);g.advanceMotion(performance.now()+2000);
+ const sibling=g.positions.get(parents[1]),before={x:sibling.x,y:sibling.y},scale=g.scale,offset={...g.offset};
+ for(let i=0;i<30;i++){const id=addPerson(s,{url:`https://www.linkedin.com/in/child-${i}/`},2);addEdge(s,parents[0],id,source);}
+ g.setData(s);
+ assert.deepEqual({x:sibling.x,y:sibling.y},before,'existing nodes start from their displayed positions');
+ assert.ok(Math.hypot(sibling.tx,sibling.ty)>Math.hypot(before.x,before.y),'other branches make room');
+ assert.equal(g.scale,scale);assert.deepEqual(g.offset,offset);
+ const start=g.motion;g.advanceMotion(start+300);
+ assert.notEqual(sibling.x,before.x);assert.notEqual(sibling.x,sibling.tx);
+ // Another batch arriving mid-animation must not create invalid coordinates.
+ const extra=addPerson(s,{url:'https://www.linkedin.com/in/extra-child/'},2);addEdge(s,parents[0],extra,source);g.setData(s);
+ g.advanceMotion(g.motion+1000);
+ for(const p of g.points){assert.ok(Number.isFinite(p.x)&&Number.isFinite(p.y));assert.equal(p.x,p.homeX);assert.equal(p.y,p.homeY);}
+ for(let i=0;i<g.points.length;i++)for(let j=i+1;j<g.points.length;j++){
+   const a=g.points[i],b=g.points[j];assert.ok(Math.hypot(a.x-b.x,a.y-b.y)>a.r+b.r+10,'nodes retain breathing room');
+ }
+});
+test('growth respects grouping and reduced motion, and ungrouping uses the expanded layout',t=>{
+ const {g}=graph(t),s=newState(root);g.reducedMotion=true;
+ const a=addPerson(s,{url:'https://www.linkedin.com/in/group-parent/',location:'Paris'},1);addEdge(s,root,a,source);
+ g.setData(s);g.setFilters({},'location');
+ const b=addPerson(s,{url:'https://www.linkedin.com/in/group-child/',location:'London'},2);addEdge(s,a,b,source);g.setData(s);
+ assert.equal(g.motion,null);assert.equal(g.groupLabels.length,3);
+ g.setFilters({},'none');
+ for(const p of g.points){assert.equal(p.x,p.homeX);assert.equal(p.y,p.homeY);}
+ assert.ok(Math.hypot(g.positions.get(a).x,g.positions.get(a).y)>60);
+});
