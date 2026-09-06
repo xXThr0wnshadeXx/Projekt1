@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {scrollAngle,easeAngle,project,makeSystem} from '../src/landing-solar.js';
+import {scrollAngle,easeAngle,project,makeSystem,orbitalPosition} from '../src/landing-solar.js';
 test('Y-axis rotation changes depth, closes one revolution, and reverses with scroll',()=>{
  const p={x:120,y:15,z:40},a=project(p,scrollAngle(0)),b=project(p,scrollAngle(1));
  for(const key of ['x','y','z'])assert.ok(Math.abs(a[key]-b[key])<1e-9);
@@ -8,6 +8,13 @@ test('Y-axis rotation changes depth, closes one revolution, and reverses with sc
  assert.equal(scrollAngle(-1),scrollAngle(0));assert.equal(scrollAngle(2),scrollAngle(1));
  const forward=Array.from({length:21},(_,i)=>project(p,scrollAngle(i/20)));
  for(let i=20;i>=0;i--)assert.deepEqual(project(p,scrollAngle(i/20)),forward[i]);
+});
+test('small planets travel their own paths while the central sun remains fixed',()=>{
+ const system=makeSystem(),sun=system.nodes[0],planet=system.nodes.find(node=>node.orbit);
+ assert.deepEqual(orbitalPosition(sun,0),orbitalPosition(sun,100));
+ const start=orbitalPosition(planet,0),later=orbitalPosition(planet,5);
+ assert.notDeepEqual(start,later);
+ assert.ok(Math.abs(Math.hypot(start.x,start.y,start.z)-planet.orbit.radius)<1e-9);
 });
 test('rotation eases without overshoot and settles in either direction',()=>{
  for(const target of [-4,6]){let current=0;for(let i=0;i<200;i++){
