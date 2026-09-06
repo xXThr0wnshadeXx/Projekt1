@@ -1,15 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {NetworkGraph,networkTargets} from '../src/graph.js';
+import {NetworkGraph,networkTargets,focusTargets} from '../src/graph.js';
 import {newState,addPerson,addEdge} from '../src/core.js';
 const root='https://www.linkedin.com/in/root/',source='https://www.linkedin.com/search/results/people/?connectionOf=root';
 function graph(t){
-  let callback,scheduled=0;const arcs=[],fills=[],handlers={};
+  let callback,scheduled=0;const arcs=[],fills=[],handlers={},selections=[];
   t.mock.method(globalThis,'requestAnimationFrame',fn=>{callback=fn;return ++scheduled;});
   globalThis.ResizeObserver=class {observe(){}};globalThis.window={devicePixelRatio:1};
   const context=new Proxy({arc(x,y,r){arcs.push({x,y,r});},fill(){fills.push(context.fillStyle);}},{get:(o,k)=>o[k]||(()=>{})});
-  const canvas={getContext:()=>context,addEventListener(name,fn){handlers[name]=fn;},parentElement:{getBoundingClientRect:()=>({width:1000,height:700})}};
-  const g=new NetworkGraph(canvas,()=>{});g.resize();return {g,arcs,fills,handlers,paint(now){const fn=callback;callback=null;fn?.(now);},get scheduled(){return scheduled;}};
+  const canvas={style:{},getContext:()=>context,getBoundingClientRect:()=>({left:0,top:0,width:1000,height:700}),addEventListener(name,fn){handlers[name]=fn;},parentElement:{getBoundingClientRect:()=>({width:1000,height:700})}};
+  const g=new NetworkGraph(canvas,id=>selections.push(id));g.resize();return {g,arcs,fills,handlers,selections,paint(now){const fn=callback;callback=null;fn?.(now);},get scheduled(){return scheduled;}};
 }
 // Node has no animation frame API; these tests exercise timing/layout without a browser.
 globalThis.requestAnimationFrame=()=>0;
@@ -103,4 +103,16 @@ test('zooming out keeps dots visible without moving the layout',t=>{
  const before=g.points.map(p=>({x:p.x,y:p.y}));g.scale=.02;arcs.length=0;paint(performance.now()+2000);
  assert.equal(arcs.length,2);assert.ok(arcs[0].r*g.scale>=8);assert.ok(arcs[1].r*g.scale>=3);
  assert.deepEqual(g.points.map(p=>({x:p.x,y:p.y})),before);
+});
+test('search spreads matches and makes dimmed people impossible to select',t=>{
+ const h=graph(t),s=newState(root);h.g.reducedMotion=true;
+ const hit=addPerson(s,{url:'https://www.linkedin.com/in/sjsu-person/',name:'SJSU Person',education:'San Jose State University'},1),miss=addPerson(s,{url:'https://www.linkedin.com/in/other/',name:'Unrelated Person',education:'Stanford University'},1);addEdge(s,root,hit,source);addEdge(s,root,miss,source);h.g.setData(s);h.g.search('sjsu');
+ assert.equal(h.g.isSearchHit(h.g.positions.get(hit)),true);assert.equal(h.g.isSearchHit(h.g.positions.get(miss)),false);
+ const click=id=>{const p=h.g.positions.get(id),e={clientX:h.g.w/2+h.g.offset.x+p.x*h.g.scale,clientY:h.g.h/2+h.g.offset.y+p.y*h.g.scale,pointerId:1};h.handlers.pointerdown(e);h.handlers.pointerup(e);};
+ click(miss);assert.equal(h.selections.at(-1),null);click(hit);assert.equal(h.selections.at(-1),hit);
+ const targets=focusTargets([{id:'a'},{id:'b'},{id:'c'}]);assert.ok(Math.hypot(targets.get('b').x-targets.get('c').x,targets.get('b').y-targets.get('c').y)>58);
+});
+test('filter changes mark removed nodes for a dust transition and fit the survivors',t=>{
+ const h=graph(t),s=newState(root);const a=addPerson(s,{url:'https://www.linkedin.com/in/boston/',location:'Boston'},1),b=addPerson(s,{url:'https://www.linkedin.com/in/paris/',location:'Paris'},1);addEdge(s,root,a,source);addEdge(s,root,b,source);h.g.setData(s);h.g.setFilters({location:'boston'});
+ assert.ok(Number.isFinite(h.g.positions.get(b).snapAt));assert.equal(h.g.isVisible(h.g.positions.get(a)),true);assert.equal(h.g.isVisible(h.g.positions.get(b)),false);assert.ok(h.g.scale>0);
 });

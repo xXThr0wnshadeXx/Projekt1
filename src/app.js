@@ -1,8 +1,8 @@
-import {locationOf,fieldOf,matchesFilters,keywordTerms} from './filters.js';
+import {locationOf,fieldsOf,matchesFilters,keywordTerms} from './filters.js';
 import {profileURL,options,route} from './core.js';
 import {createLibrary} from './library.js';
 import {NetworkGraph} from './graph.js';
-import {COMPANION_ID} from './companion.js';
+import {COMPANION_ID,COMPANION_VERSION} from './companion.js';
 import {rankPeople} from './search.js';
 const $=id=>document.getElementById(id),EXTENSION=Boolean(globalThis.chrome?.runtime?.id&&globalThis.chrome?.storage?.local),KEY='orbitNetwork';
 let state=null,selected=null,view='graph',toastTimer=null,bridgeConnected=false,refreshing=false,remoteRevision=null,companionVersion=null,inspectorSerial=0;
@@ -78,11 +78,11 @@ $('resume').onclick=async()=>{try{await send({type:'RESUME',config:config()});aw
 $('show-tab').onclick=async()=>{try{await send({type:'SHOW_TAB'});}catch(e){toast(e.message);}};
 $('clear-button').onclick=async()=>{if(!confirm('Reset your account network? Orbit removes this account’s contribution, but keeps people and links that teammates also contributed. This cannot be undone.'))return;try{if(hasCollector())await send({type:'CLEAR'});else localStorage.removeItem(KEY);const response=await fetch('/api/account/network/reset',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:'{}'}),data=await response.json();if(!response.ok)throw Error(data.error||'The account network could not be reset.');library.resetCaches();collectionState=null;state=null;selected=null;render();toast(`Account network reset · ${data.connectionContributions||0} contributed links reviewed.`);}catch(e){toast(e.message);}};
 for(const name of ['graph','directory','coverage'])$(`tab-${name}`).onclick=()=>switchView(name);
-$('search').oninput=()=>{graph.search($('search').value);if(view==='directory')renderPeople();};$('fit').onclick=()=>graph.fit();$('zoom-in').onclick=()=>{graph.zoomTarget=null;graph.zoom(1.08);};$('zoom-out').onclick=()=>{graph.zoomTarget=null;graph.zoom(1/1.08);};
+$('search').oninput=()=>{graph.search($('search').value);if(selected){const point=graph.positions.get(selected);if(point&&!graph.isSearchHit(point)){selected=null;graph.focus(null);$('inspector').close();}}if(view==='directory')renderPeople();};$('fit').onclick=()=>graph.fit();$('zoom-in').onclick=()=>{graph.zoomTarget=null;graph.zoom(1.08);};$('zoom-out').onclick=()=>{graph.zoomTarget=null;graph.zoom(1/1.08);};
 if(EXTENSION){set('connection-mode','CHROME COLLECTOR CONNECTED');send({type:'WORKSPACE_ACTIVE',active:true}).catch(()=>{});chrome.storage.onChanged.addListener((changes,area)=>{if(area==='local'&&changes[KEY])refresh().catch(e=>toast(e.message));});}else{set('connection-mode','COMPANION NOT CONNECTED');show('install-note',true);}
 await refresh();if(state){$('profile-url').value=state.root;$('max-nodes').value=state.config.maxNodes;$('depth').value=state.config.depth;$('delay').value=Math.max(120,state.config.delay||120);}else if(globalThis.ORBIT_PROFILE){$('profile-url').value=globalThis.ORBIT_PROFILE;await library.loadAccount(globalThis.ORBIT_PROFILE);}
 
-async function connectCompanion(quiet=false){try{set('connection-mode','CONNECTING COMPANION…');if(!globalThis.chrome?.runtime?.sendMessage)throw Error('Install the companion in Chrome, then reload this Site.');const ping=await send({type:'PING'});companionVersion=ping.version;remoteRevision=null;bridgeConnected=true;await send({type:'WORKSPACE_ACTIVE',active:true});show('update-note',companionVersion!=='2.3.0');set('connection-mode','COMPANION READY · AUTOSAVE ON');show('install-note',false);await refresh();if(state){$('profile-url').value=state.root;$('max-nodes').value=state.config.maxNodes;$('depth').value=state.config.depth;$('delay').value=Math.max(120,state.config.delay||120);}if(!quiet)toast('Companion connected. This account network saves to shared D1 automatically.');}catch(e){set('connection-mode','COMPANION NOT CONNECTED');show('install-note',true);if(!quiet)toast(e.message);}}
+async function connectCompanion(quiet=false){try{set('connection-mode','CONNECTING COMPANION…');if(!globalThis.chrome?.runtime?.sendMessage)throw Error('Install the companion in Chrome, then reload this Site.');const ping=await send({type:'PING'});companionVersion=ping.version;remoteRevision=null;bridgeConnected=true;await send({type:'WORKSPACE_ACTIVE',active:true});show('update-note',companionVersion!==COMPANION_VERSION);set('connection-mode',companionVersion===COMPANION_VERSION?'COMPANION READY · AUTOSAVE ON':`COMPANION ${companionVersion||'UNKNOWN'} · UPDATE AVAILABLE`);show('install-note',false);await refresh();if(state){$('profile-url').value=state.root;$('max-nodes').value=state.config.maxNodes;$('depth').value=state.config.depth;$('delay').value=Math.max(120,state.config.delay||120);}if(!quiet)toast(companionVersion===COMPANION_VERSION?'Companion connected. This account network saves to shared D1 automatically.':`Companion ${companionVersion||'unknown'} connected, but ${COMPANION_VERSION} is ready to install.`);}catch(e){set('connection-mode','COMPANION NOT CONNECTED');show('install-note',true);if(!quiet)toast(e.message);}}
 $('connect-companion').onclick=()=>connectCompanion();
 if(!EXTENSION)connectCompanion(true);
 setInterval(()=>{if((EXTENSION||bridgeConnected)&&document.visibilityState==='visible')refresh().catch(()=>{bridgeConnected=false;set('connection-mode','COMPANION DISCONNECTED');show('install-note',true);render();});},500);
@@ -95,25 +95,20 @@ graph.onZoom=scale=>{if($('zoom-level'))set('zoom-level',`${Math.round(scale*100
 graph.onZoom(graph.scale);
 
 function activeKeywords(){return keywordTerms($('filter-keywords').value);}
-function activeFilters(){return {location:$('filter-location').value,field:$('filter-field').value,keywords:activeKeywords(),keywordOnly:$('filter-keywords-only').checked,first:$('degree-first').checked,second:$('degree-second').checked,extended:$('degree-extended').checked};}
+function activeFilters(){return {location:$('filter-location').value.trim(),field:$('filter-field').value.trim(),keywords:activeKeywords(),first:$('degree-first').checked,second:$('degree-second').checked,extended:$('degree-extended').checked};}
 function refreshFilterOptions(){
   const people=Object.values(state?.nodes||{});
-  for(const [id,key,label] of [['filter-location',locationOf,'All locations'],['filter-field',fieldOf,'All fields']]){
-    const select=$(id),value=select.value,counts=new Map();for(const p of people){const k=key(p);counts.set(k,(counts.get(k)||0)+1);}
-    const cityQuery=id==='filter-location'?$('location-search').value.trim().toLowerCase():'';
-    const values=[...counts.keys()].filter(v=>!cityQuery||v.toLowerCase().includes(cityQuery)||v===value).sort((a,b)=>a.localeCompare(b));if(value&&!counts.has(value))values.push(value);
-    const signature=JSON.stringify([cityQuery,...counts]);if(select.dataset.signature===signature)continue;select.dataset.signature=signature;
-    select.replaceChildren(Object.assign(el('option',label),{value:''}));
-    for(const v of values)select.append(Object.assign(el('option',`${v} (${counts.get(v)||0})`),{value:v}));select.value=value;
-  }
-  set('filter-count',`${people.filter(p=>matchesFilters(p,activeFilters())).length.toLocaleString()} of ${people.length.toLocaleString()} people match · use Fit to frame the groups`);
+  const locations=new Map(),sectors=new Map();for(const p of people){const location=locationOf(p);locations.set(location,(locations.get(location)||0)+1);for(const field of fieldsOf(p))sectors.set(field,(sectors.get(field)||0)+1);}
+  const fillSuggestions=(id,counts,limit)=>{const list=$(id),signature=JSON.stringify([...counts]);if(list.dataset.signature===signature)return;list.dataset.signature=signature;list.replaceChildren();for(const [value,count] of [...counts].sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0])).slice(0,limit))list.append(Object.assign(el('option'),{value,label:`${value} · ${count}`}));};
+  fillSuggestions('location-options',locations,16);fillSuggestions('field-options',sectors,16);
+  const filters=activeFilters(),matched=people.filter(p=>matchesFilters(p,filters)).length,active=[filters.location&&`location “${filters.location}”`,filters.field&&`sector “${filters.field}”`,filters.keywords.length&&`profile “${filters.keywords.join(', ')}”`].filter(Boolean);
+  set('filter-count',`${matched.toLocaleString()} of ${people.length.toLocaleString()} people visible${active.length?` · ${active.join(' · ')}`:' · no filters applied'}`);
 }
-function applyFilters(){const filters=activeFilters(),requested=$('group-by').value,groupBy=requested==='keyword'&&!filters.keywords.length?'none':requested;graph.setFilters(filters,groupBy,filters.keywords);refreshFilterOptions();if(selected&&state?.nodes[selected]&&!matchesFilters(state.nodes[selected],filters)){selected=null;graph.focus(null);$('inspector-content').replaceChildren(el('h3','Select a visible person'),el('p','Your filters changed which people are shown.'));}if(view==='directory')renderPeople();}
+function applyFilters(){const filters=activeFilters();graph.setFilters(filters);refreshFilterOptions();if(selected&&state?.nodes[selected]&&!matchesFilters(state.nodes[selected],filters)){selected=null;graph.focus(null);$('inspector-content').replaceChildren(el('h3','Select a visible person'),el('p','Your filters changed which people are shown.'));}if(view==='directory')renderPeople();}
 $('filter-toggle').onclick=()=>{const open=$('map-filters').hidden;show('map-filters',open);$('filter-toggle').setAttribute('aria-expanded',String(open));};
-for(const id of ['filter-location','filter-field','group-by','filter-keywords-only','degree-first','degree-second','degree-extended'])$(id).onchange=applyFilters;
-$('filter-keywords').oninput=applyFilters;
-$('location-search').oninput=refreshFilterOptions;
-$('reset-filters').onclick=()=>{$('filter-location').value='';$('filter-field').value='';$('filter-keywords').value='';$('filter-keywords-only').checked=false;for(const id of ['degree-first','degree-second','degree-extended'])$(id).checked=true;$('location-search').value='';$('group-by').value='none';applyFilters();};
+for(const id of ['filter-location','filter-field','filter-keywords'])$(id).oninput=applyFilters;
+for(const id of ['degree-first','degree-second','degree-extended'])$(id).onchange=applyFilters;
+$('reset-filters').onclick=()=>{for(const id of ['filter-location','filter-field','filter-keywords'])$(id).value='';for(const id of ['degree-first','degree-second','degree-extended'])$(id).checked=true;applyFilters();};
 
 $('cancel-build').onclick=async()=>{try{await send({type:'CANCEL'});await refresh();toast('This collection run stopped. Every discovered person already saved remains in your account network.');}catch(e){toast(e.message);}};
 $('filter-lines').onchange=e=>{graph.showAllConnections=e.target.checked;graph.draw();};
