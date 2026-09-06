@@ -156,7 +156,7 @@ for(const id of ['filter-location','filter-field','filter-keywords'])$(id).oninp
 for(const id of ['filter-relationship','max-distance'])$(id).onchange=applyFilters;
 $('reset-filters').onclick=()=>{for(const id of ['filter-location','filter-field','filter-keywords'])$(id).value='';$('filter-relationship').value='all';$('max-distance').value='6';applyFilters();};
 
-$('cancel-build').onclick=async()=>{if(!confirm('Clear the pending collection queue? Every person and relationship already saved will stay in your map.'))return;try{await send({type:'CANCEL'});await refresh();toast('Pending work cleared. Every saved person and relationship is still in your map.');}catch(e){toast(e.message);}};
+$('cancel-build').onclick=async()=>{if(!confirm('Clear the current and queued collection work? Every person and relationship already saved will stay, and you can start again later from the saved map.'))return;try{await send({type:'CANCEL'});await refresh();toast('Remaining collection work cleared. Every saved person and relationship is still in your map.');}catch(e){toast(e.message);}};
 $('filter-lines').onchange=e=>{graph.showAllConnections=e.target.checked;graph.draw();};
 
 function openWorkspaceSettings(settings){
