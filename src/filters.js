@@ -10,5 +10,3 @@ export function groupTargets(points,by){
  ordered.forEach(([name,members],i)=>{const cx=(i%columns-(columns-1)/2)*cell,cy=(Math.floor(i/columns)-(rows-1)/2)*cell;members.sort((a,b)=>a.id.localeCompare(b.id)).forEach((p,j)=>{const r=12*Math.sqrt(j),angle=j*2.3999632297;targets.set(p.id,{x:cx+Math.cos(angle)*r,y:cy+Math.sin(angle)*r});});labels.push({name,count:members.length,x:cx,y:cy-cell/2+20});});
  return {targets,labels};
 }
-
-export function matchesName(person,query=''){return (person?.name||'').toLocaleLowerCase().includes(query.trim().toLocaleLowerCase());}

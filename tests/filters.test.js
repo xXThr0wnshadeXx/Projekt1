@@ -16,13 +16,3 @@ test('grouping is deterministic and spring motion overshoots then settles exactl
  assert.equal(springProgress(0),0);assert.ok(springProgress(.3)>1);assert.equal(springProgress(1),1);
  for(const p of a.targets.values())assert.ok(Number.isFinite(p.x)&&Number.isFinite(p.y));
 });
-
-
-test('name search ignores casing and outside whitespace, and clearing restores everyone',async()=>{
- const {matchesName}=await import('../src/filters.js');
- const people=[{name:'Alex Rivera'},{name:'Sam Chen',headline:'Alex'}];
- assert.deepEqual(people.filter(p=>matchesName(p,'  RIVERA ')),[people[0]]);
- assert.equal(people.filter(p=>matchesName(p,'Alex')).length,1);
- assert.equal(people.filter(p=>matchesName(p,'   ')).length,2);
- assert.equal(people.filter(p=>matchesName(p,'Nobody')).length,0);
-});
