@@ -2,7 +2,7 @@
 const fields=[['Technology',/\b(software|developer|programmer|data scientist|engineering|engineer|technology|cybersecurity|IT)\b/i],['Finance',/\b(finance|financial|banking|investor|investment|accountant|accounting)\b/i],['Healthcare',/\b(healthcare|medical|physician|doctor|nurse|clinical|health)\b/i],['Education & research',/\b(student|professor|teacher|education|research|university|academic)\b/i],['Design & creative',/\b(design|designer|creative|artist|writer|ux|ui)\b/i],['Marketing & sales',/\b(marketing|sales|brand|advertising|communications)\b/i],['Operations & people',/\b(operations|recruiter|recruiting|human resources|logistics|supply chain)\b/i],['Legal',/\b(lawyer|legal|attorney|law)\b/i]];
 export function locationOf(p){return p.location?.trim().replace(/\s+/g,' ').toLowerCase()||'Not specified';}
 export function fieldOf(p){return p.industry?.trim()||p.field?.trim()||fields.find(([,pattern])=>pattern.test(p.headline||''))?.[0]||(p.headline?.trim()?'Other / unclassified':'Not specified');}
-export function matchesFilters(p,{location='',field=''}={}){return (!location||locationOf(p)===location)&&(!field||fieldOf(p)===field);}
+export function matchesFilters(p,{location='',field='',first=true,second=true,extended=true}={}){return (p.depth===1?first:p.depth===2?second:p.depth>2?extended:true)&& (!location||locationOf(p)===location)&&(!field||fieldOf(p)===field);}
 export function springProgress(t){if(t>=1)return 1;if(t<=0)return 0;return 1-Math.exp(-7*t)*Math.cos(10*t);}
 export function groupTargets(points,by){
  const groups=new Map();for(const p of points){const key=by==='location'?locationOf(p):fieldOf(p);if(!groups.has(key))groups.set(key,[]);groups.get(key).push(p);}

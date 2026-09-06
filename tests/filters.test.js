@@ -16,3 +16,12 @@ test('grouping is deterministic and spring motion overshoots then settles exactl
  assert.equal(springProgress(0),0);assert.ok(springProgress(.3)>1);assert.equal(springProgress(1),1);
  for(const p of a.targets.values())assert.ok(Number.isFinite(p.x)&&Number.isFinite(p.y));
 });
+test('degree toggles combine with location and preserve the starting profile',()=>{
+ const filters={first:false,second:true,extended:false,location:'boston'};
+ assert.equal(matchesFilters({depth:1,location:'Boston'},filters),false);
+ assert.equal(matchesFilters({depth:2,location:'Boston'},filters),true);
+ assert.equal(matchesFilters({depth:2,location:'Paris'},filters),false);
+ assert.equal(matchesFilters({depth:3,location:'Boston'},filters),false);
+ assert.equal(matchesFilters({depth:0,location:'Boston'},filters),true);
+ assert.equal(matchesFilters({depth:1},{}),true);
+});
