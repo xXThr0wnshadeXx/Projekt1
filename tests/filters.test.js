@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {fieldOf,fieldsOf,locationOf,locationMatches,fieldMatches,matchesFilters,groupTargets,springProgress,keywordTerms,keywordMatches,keywordGroupOf} from '../src/filters.js';
+import {fieldOf,fieldsOf,locationOf,locationLabelOf,locationMatches,fieldMatches,matchesFilters,groupTargets,springProgress,keywordTerms,keywordMatches,keywordGroupOf} from '../src/filters.js';
 test('filters combine location and estimated field without losing unknown profiles',()=>{
  const person={location:'  New   York ',headline:'Software developer'};
  assert.equal(locationOf(person),'new york');assert.equal(fieldOf(person),'Technology');
+ assert.equal(locationLabelOf(person),'New York');assert.equal(locationLabelOf({}),'Not specified');
  assert.ok(matchesFilters(person,{location:'new york',field:'Technology'}));
  assert.equal(matchesFilters(person,{location:'new york',field:'Finance'}),false);
  assert.equal(fieldOf({}),'Not specified');assert.equal(fieldOf({headline:'Making things happen'}),'Other / unclassified');
@@ -11,6 +12,10 @@ test('filters combine location and estimated field without losing unknown profil
  assert.equal(fieldOf({headline:'Biology student at SJSU'}),'Healthcare & life sciences');
  assert.equal(fieldOf({education:'Pre-medical studies',skills:'Genomics'}),'Healthcare & life sciences');
  assert.equal(fieldOf({headline:'Biomedical engineering researcher'}),'Healthcare & life sciences');
+});
+test('location clusters keep every person while consolidating an unreadable long tail',()=>{
+ const points=Array.from({length:30},(_,i)=>({id:String(i),location:`Place ${i}`})),grouped=groupTargets(points,'location');
+ assert.equal(grouped.targets.size,30);assert.equal(grouped.totalGroups,30);assert.equal(grouped.labels.length,12);assert.equal(grouped.labels.at(-1).name,'Other locations');assert.equal(grouped.labels.at(-1).count,19);
 });
 test('facet search is fuzzy and one person can belong to several useful sectors',()=>{
  const person={depth:2,location:'San Francisco Bay Area',headline:'Biomedical software engineer',education:'San Jose State University',skills:['genomics','machine learning']};

@@ -2,6 +2,7 @@ import {normalizeSearch,queryExpansions,scorePerson} from './search.js';
 // Categories are display estimates, never asserted profile facts.
 const fields=[['Healthcare & life sciences',/\b(healthcare|health care|health sciences?|medicine|medical|med school|pre[- ]?med(?:ical)?|physician|doctor|nurs(?:e|ing)|clinical|hospital|pharma(?:cy|ceutical)?|dent(?:al|istry|ist)|public health|life sciences?|bio|biology|biological|biochemistry|biotech(?:nology)?|biomedical|neuroscience|genetics?|genomics?|epidemiology|immunology|microbiology|physiology|anatomy)\b/i],['Technology',/\b(software|developer|programmer|data scientist|engineering|engineer|technology|cybersecurity|IT|machine learning|artificial intelligence)\b/i],['Finance',/\b(finance|financial|banking|investor|investment|accountant|accounting)\b/i],['Education & research',/\b(student|professor|teacher|education|research|university|academic)\b/i],['Design & creative',/\b(design|designer|creative|artist|writer|ux|ui)\b/i],['Marketing & sales',/\b(marketing|sales|brand|advertising|communications)\b/i],['Operations & people',/\b(operations|recruiter|recruiting|human resources|logistics|supply chain)\b/i],['Legal',/\b(lawyer|legal|attorney|law)\b/i]];
 export function locationOf(p){return p.location?.trim().replace(/\s+/g,' ').toLowerCase()||'Not specified';}
+export function locationLabelOf(p){const clean=p.location?.trim().replace(/\s+/g,' ');return clean||'Not specified';}
 export function fieldsOf(p){
  const text=[p.headline,p.about,p.experience,p.education,p.skills,p.keywords].flat().filter(Boolean).join(' '),out=[];
  for(const value of [p.industry,p.field]){const clean=String(value||'').trim();if(clean&&!out.some(item=>normalizeSearch(item)===normalizeSearch(clean)))out.push(clean);}
@@ -32,8 +33,17 @@ export function matchesFilters(p,{location='',field='',keywords=[],keywordOnly=f
 }
 export function springProgress(t){if(t>=1)return 1;if(t<=0)return 0;return 1-Math.exp(-7*t)*Math.cos(10*t);}
 export function groupTargets(points,by,keywords=[]){
- const groups=new Map();for(const p of points){const key=by==='location'?locationOf(p):by==='keyword'?keywordGroupOf(p,keywords):fieldOf(p);if(!groups.has(key))groups.set(key,[]);groups.get(key).push(p);}
- const ordered=[...groups].sort(([a],[b])=>a.localeCompare(b)),columns=Math.ceil(Math.sqrt(ordered.length)),maxSize=Math.max(1,...ordered.map(([,p])=>p.length)),cell=Math.max(220,Math.sqrt(maxSize)*26+100),rows=Math.ceil(ordered.length/columns),targets=new Map(),labels=[];
- ordered.forEach(([name,members],i)=>{const cx=(i%columns-(columns-1)/2)*cell,cy=(Math.floor(i/columns)-(rows-1)/2)*cell;members.sort((a,b)=>a.id.localeCompare(b.id)).forEach((p,j)=>{const r=12*Math.sqrt(j),angle=j*2.3999632297;targets.set(p.id,{x:cx+Math.cos(angle)*r,y:cy+Math.sin(angle)*r});});labels.push({name,count:members.length,x:cx,y:cy-cell/2+20});});
- return {targets,labels};
+ const groups=new Map();
+ for(const p of points){
+  const key=by==='location'?locationOf(p):by==='keyword'?keywordGroupOf(p,keywords):fieldOf(p);
+  if(!groups.has(key))groups.set(key,{name:by==='location'?locationLabelOf(p):key,members:[]});
+  groups.get(key).members.push(p);
+ }
+ let ordered=[...groups.values()].sort((a,b)=>b.members.length-a.members.length||a.name.localeCompare(b.name));
+ // A long tail of one-person locations makes the map unreadable. Keep the
+ // strongest clusters and place every remaining person in one honest catch-all.
+ if(by==='location'&&ordered.length>12){const kept=ordered.slice(0,11),rest=ordered.slice(11).flatMap(group=>group.members);ordered=[...kept,{name:'Other locations',members:rest}];}
+ const columns=Math.max(1,Math.ceil(Math.sqrt(ordered.length*1.55))),rows=Math.ceil(ordered.length/columns),maxSize=Math.max(1,...ordered.map(group=>group.members.length)),cellX=Math.max(260,Math.sqrt(maxSize)*30+130),cellY=Math.max(220,Math.sqrt(maxSize)*27+115),targets=new Map(),labels=[];
+ ordered.forEach(({name,members},i)=>{const cx=(i%columns-(columns-1)/2)*cellX,cy=(Math.floor(i/columns)-(rows-1)/2)*cellY,sorted=[...members].sort((a,b)=>a.id.localeCompare(b.id));sorted.forEach((p,j)=>{const r=14*Math.sqrt(j),angle=j*2.3999632297;targets.set(p.id,{x:cx+Math.cos(angle)*r,y:cy+Math.sin(angle)*r});});const radius=Math.max(28,14*Math.sqrt(Math.max(0,sorted.length-1))+18);labels.push({name,count:sorted.length,x:cx,y:cy-radius-28});});
+ return {targets,labels,totalGroups:groups.size};
 }

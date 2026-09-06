@@ -109,3 +109,8 @@ h1,h2,h3,.brand,.hero h1,.signup-card h3,.metrics strong,.panel-heading h2{font-
 }
 @media(max-width:730px){.hero h1{font-size:clamp(40px,10vw,58px)}.steps article{padding:20px}.art-you{font-size:32px}}
 @media(prefers-reduced-motion:reduce){.scroll-revealed,.hero-art,.art-person{animation:none!important}.steps article:hover{transform:none}}
+
+/* A compact map arrangement switch keeps grouping separate from filtering. */
+.map-arrangement{display:flex;align-items:center;gap:3px;margin-left:auto;padding:3px;border:1px solid #494a43;border-radius:7px;background:#171814}.map-arrangement span{padding:0 8px;color:#9e9d91;font-size:12px;letter-spacing:.04em}.map-arrangement button{min-height:34px;padding:6px 10px;border:0;background:transparent;color:#aaa99e;font-size:13px}.map-arrangement button:hover{background:#2e2f29}.map-arrangement button[aria-pressed=true]{background:#e4e1d4;color:#24241d;box-shadow:0 1px 5px #0005}.toolbar #filter-toggle{margin-left:0}
+@media(max-width:900px){.map-arrangement{order:3;margin-left:0}.toolbar #search{order:4;flex:1 1 260px}}
+@media(max-width:560px){.map-arrangement{width:100%}.map-arrangement span{margin-right:auto}.map-arrangement button{flex:1}.toolbar #search{flex-basis:100%}}

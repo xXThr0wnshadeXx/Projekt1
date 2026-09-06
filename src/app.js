@@ -5,7 +5,7 @@ import {NetworkGraph} from './graph.js';
 import {COMPANION_ID,COMPANION_VERSION} from './companion.js';
 import {rankPeople} from './search.js';
 const $=id=>document.getElementById(id),EXTENSION=Boolean(globalThis.chrome?.runtime?.id&&globalThis.chrome?.storage?.local),KEY='orbitNetwork';
-let state=null,selected=null,view='graph',toastTimer=null,bridgeConnected=false,refreshing=false,remoteRevision=null,companionVersion=null,inspectorSerial=0;
+let state=null,selected=null,view='graph',toastTimer=null,bridgeConnected=false,refreshing=false,remoteRevision=null,companionVersion=null,inspectorSerial=0,mapArrangement='none';
 let runSample=null,lastReveal=null,collectionState=null,libraryMode=false;
 const library=createLibrary({getCollection:()=>collectionState,showGraph:(s,accountView=false)=>{libraryMode=!accountView;state=s;selected=null;render();graph.fit();},showCollection:()=>{libraryMode=false;state=collectionState;selected=null;render();}});
 const hasCollector=()=>EXTENSION||bridgeConnected;
@@ -102,10 +102,14 @@ function refreshFilterOptions(){
   const fillSuggestions=(id,counts,limit)=>{const list=$(id),signature=JSON.stringify([...counts]);if(list.dataset.signature===signature)return;list.dataset.signature=signature;list.replaceChildren();for(const [value,count] of [...counts].sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0])).slice(0,limit))list.append(Object.assign(el('option'),{value,label:`${value} · ${count}`}));};
   fillSuggestions('location-options',locations,16);fillSuggestions('field-options',sectors,16);
   const filters=activeFilters(),matched=people.filter(p=>matchesFilters(p,filters)).length,active=[filters.location&&`location “${filters.location}”`,filters.field&&`sector “${filters.field}”`,filters.keywords.length&&`profile “${filters.keywords.join(', ')}”`].filter(Boolean);
-  set('filter-count',`${matched.toLocaleString()} of ${people.length.toLocaleString()} people visible${active.length?` · ${active.join(' · ')}`:' · no filters applied'}`);
+  const visibleLocations=new Set(people.filter(p=>matchesFilters(p,filters)).map(locationOf)).size,arranged=mapArrangement==='location'?` · grouped across ${visibleLocations.toLocaleString()} recorded ${visibleLocations===1?'location':'locations'}`:'';
+  set('filter-count',`${matched.toLocaleString()} of ${people.length.toLocaleString()} people visible${active.length?` · ${active.join(' · ')}`:' · no filters applied'}${arranged}`);
 }
-function applyFilters(){const filters=activeFilters();graph.setFilters(filters);refreshFilterOptions();if(selected&&state?.nodes[selected]&&!matchesFilters(state.nodes[selected],filters)){selected=null;graph.focus(null);$('inspector-content').replaceChildren(el('h3','Select a visible person'),el('p','Your filters changed which people are shown.'));}if(view==='directory')renderPeople();}
+function applyFilters(){const filters=activeFilters();graph.setFilters(filters,mapArrangement,activeKeywords());refreshFilterOptions();if(selected&&state?.nodes[selected]&&!matchesFilters(state.nodes[selected],filters)){selected=null;graph.focus(null);$('inspector-content').replaceChildren(el('h3','Select a visible person'),el('p','Your filters changed which people are shown.'));}if(view==='directory')renderPeople();}
+function arrangeMap(by){mapArrangement=by;for(const [id,value] of [['arrange-network','none'],['arrange-location','location']])$(id).setAttribute('aria-pressed',String(value===by));applyFilters();toast(by==='location'?'People are grouped by recorded location. Filters and search still work inside the clusters.':'People returned to their observed connection paths.');}
 $('filter-toggle').onclick=()=>{const open=$('map-filters').hidden;show('map-filters',open);$('filter-toggle').setAttribute('aria-expanded',String(open));};
+$('arrange-network').onclick=()=>arrangeMap('none');
+$('arrange-location').onclick=()=>arrangeMap('location');
 for(const id of ['filter-location','filter-field','filter-keywords'])$(id).oninput=applyFilters;
 for(const id of ['degree-first','degree-second','degree-extended'])$(id).onchange=applyFilters;
 $('reset-filters').onclick=()=>{for(const id of ['filter-location','filter-field','filter-keywords'])$(id).value='';for(const id of ['degree-first','degree-second','degree-extended'])$(id).checked=true;applyFilters();};
