@@ -60,6 +60,28 @@ test('co-mentions, follows, shared employment, pronouns, slugs and unsupported d
   ]) assert.equal(extractPublicDocument(document(text)).assertions.length, 0, text);
 });
 
+test('ordinary negative contractions with either apostrophe suppress the whole assertion context without changing text', () => {
+  const contractions = ["isn't", "aren't", "wasn't", "weren't", "don't", "doesn't", "didn't", "hasn't", "haven't", "hadn't",
+    "can't", "couldn't", "won't", "wouldn't", "shouldn't", "mustn't", "needn't", "daren't", "ain't", "shan't"];
+  for (const contraction of contractions) for (const apostrophe of ["'", '’']) {
+    const text = `Person Alpha is a friend of Person Beta. They ${contraction.replace("'", apostrophe)} friends.`;
+    const doc = document(text), before = structuredClone(doc);
+    const extracted = extractPublicDocument(doc), fragments = extractPublicClaimFragments(doc);
+    assert.deepEqual(extracted.assertions, [], text); assert.deepEqual(extracted.mentions, [], text);
+    assert.deepEqual(extracted.issues, ['AMBIGUOUS_CONTEXT'], text);
+    assert.deepEqual(fragments.proposals, [], text); assert.deepEqual(fragments.citations, [], text);
+    assert.deepEqual(doc, before, 'text, digest, revision and metadata remain unmodified');
+  }
+  for (const text of ["Person Alpha is a friend of Person Beta. This isn't true.",
+    "Person Alpha is a friend of Person Beta. They aren't friends.", 'Person Alpha is a friend of Person Beta. They aren’t friends.',
+    "Person Alpha works at Organization Alpha. This isn't true.", 'Person Alpha works at Organization Alpha. This ISN’T true.']) {
+    assert.equal(extractPublicDocument(document(text)).assertions.length, 0, text);
+  }
+  const positive = document('Person O’Neil is a friend of Person Beta.');
+  assert.equal(extractPublicDocument(positive).assertions.length, 1);
+  assert.equal(extractPublicDocument(positive).mentions[0].excerpt.supportingExcerpt, 'Person O’Neil');
+});
+
 test('affiliations remain context and unknown dates are not replaced with publication or fetch time', async () => {
   const out = await produce('Person Alpha works at Organization Alpha. Person Beta worked at Organization Alpha.');
   const e = out.stageRequest.envelope;

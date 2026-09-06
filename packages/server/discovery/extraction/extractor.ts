@@ -61,6 +61,9 @@ const affiliation = new RegExp(`^(${name}) (works at|worked at) (${token}(?: ${t
 // Abstain on the whole document when context could negate, quote or qualify a matched sentence.
 // Deliberately conservative: unrelated qualifying language can suppress otherwise valid claims.
 const qualified = /["“”«»?`]|\b(?:not|never|no|neither|nor|den(?:y|ies|ied|ial)|false(?:hoods?)?|untrue|rumou?r|alleged|allegedly|reportedly|possibly|perhaps|maybe|might|may|could|would|if|fiction(?:al)?|hypothetical|example|satire|claim(?:s|ed)?|disputed|unverified|incorrect|retracted|fabricated|fake|debunked|suppose|imagine)\b/iu;
+// Match ordinary contracted negatives without rewriting source text or its citation offsets.
+// ca+n / wo+n / sha+n cover can't, won't and shan't; both apostrophe forms are source data.
+const negativeContraction = /\b(?:is|are|was|were|do|does|did|has|have|had|ca|could|wo|would|should|must|need|dare|ai|sha)n['’]t\b/iu;
 
 /** Offline, bounded extraction from exact retrieval text. Unsupported syntax produces no facts.
  * No coreference, same-name linking, reverse edges, closeness scores or willingness inference. */
@@ -68,7 +71,7 @@ export function extractPublicDocument(document: RetrievedPublicDocument, maxAsse
   validateRetrievedDocument(document);
   if (!Number.isSafeInteger(maxAssertions) || maxAssertions < 1 || maxAssertions > 16) throw new DiscoveryError('INVALID_INPUT');
   const out: DocumentExtraction = {version: EXTRACTION_VERSION, documentId: document.id, documentRevision: document.revision, mentions: [], assertions: [], issues: []};
-  if (qualified.test(document.normalizedText)) {out.issues.push('AMBIGUOUS_CONTEXT'); return out;}
+  if (qualified.test(document.normalizedText) || negativeContraction.test(document.normalizedText)) {out.issues.push('AMBIGUOUS_CONTEXT'); return out;}
   const addMention = (value: string, start: number): string => {
     const excerpt = selectDocumentExcerpt(document, start, start + value.length);
     const id = `mention_${hash([document.id, document.revision, start, value])}`;

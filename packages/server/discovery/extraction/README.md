@@ -16,7 +16,7 @@ This server-only module executes offline on the **exact** `RetrievedPublicDocume
 
 Dates on assertions are always `{start:null,end:null}` in this version. Date-bearing sentences are unsupported rather than silently dropping their dates. Valid source publication dates retain their supplied precision; publication/retrieval times never become relationship dates.
 
-Sentence length is at most 500 UTF-16 units. Unsupported clauses, incomplete sentences, pronouns, single-token names, initials, lowercase names, co-mentions, follows, inferred shared-employer links and willingness statements produce no claim. A document containing recognized negation, uncertainty, quotations, questions or fictional-context markers is conservatively withheld in full. This abstention may suppress valid statements elsewhere on the same page. These lexical guards are not a general semantic verifier: source lies and linguistic context outside this small grammar still require review. `DIRECT_EXPLICIT` means the complete source sentence matches the explicit grammar, never that the claim is confirmed.
+Sentence length is at most 500 UTF-16 units. Unsupported clauses, incomplete sentences, pronouns, single-token names, initials, lowercase names, co-mentions, follows, inferred shared-employer links and willingness statements produce no claim. A document containing recognized negation (including ordinary negative contractions with straight or typographic apostrophes), uncertainty, quotations, questions or fictional-context markers is conservatively withheld in full. This guard reads the original text without rewriting it. This abstention may suppress valid statements elsewhere on the same page. These lexical guards are not a general semantic verifier: source lies and linguistic context outside this small grammar still require review. `DIRECT_EXPLICIT` means the complete source sentence matches the explicit grammar, never that the claim is confirmed.
 
 Structured HTML attributes, scripts and JSON-LD are absent from the retrieval normalizer's text. This version does not claim to extract them. A future model port would require its own bounded exact-evidence validation; no unconfigured port is presented as working extraction.
 
@@ -62,7 +62,9 @@ At most 5 documents, 1 MiB each, 50 proposals and 100 citations are returned. Th
 
 ## Checks and integration gates
 
-Run `npm run build:server` and `node --test tests/discovery-extraction.test.mjs tests/discovery-sources.test.mjs tests/discovery-tavily.test.mjs` (47 checks).
+Run `npm run build:server` and `node --test tests/discovery-extraction.test.mjs tests/discovery-sources.test.mjs tests/discovery-tavily.test.mjs` (48 checks).
+
+`node tests/discovery-extraction-planner.mjs /absolute/path/to/built/discovery/planning/index.js` checks the actual planner seam: four contracted denials and two uncontracted controls produce zero direct assertions/expansions; the positive control retains bounded exploration with exact citations and unresolved claims. Verified against planner commit `4b31e4f0796e14f0f2ad4b2dd0a998ac35aa8cd0`.
 
 `node tests/discovery-extraction-stage.mjs /absolute/path/to/built/public-facts/validation.js` checks actual producer output against the independently built facts validator and rejects six invalid excerpt/offset/digest/identity-role/review/search mutations. It uses anonymous fixtures and no database. Verified against facts commit `e8bccea3b9c02f4b588929c7412b043f064509af`.
 
