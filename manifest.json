@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Orbit \u2014 LinkedIn Network Mapper",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Build a local, evidence-backed connection graph from LinkedIn pages you can view.",
   "minimum_chrome_version": "120",
   "permissions": [

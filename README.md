@@ -4,7 +4,7 @@ Orbit collects visible connection relationships through a local Chrome companion
 
 - **Team repository:** [xXThr0wnshadeXx/Projekt1](https://github.com/xXThr0wnshadeXx/Projekt1)
 - **Hosted application:** [Orbit](https://orbit-network-mapper.doublejav.chatgpt.site/)
-- **Current application / companion version:** `2.0.0`
+- **Current application / companion version:** `2.1.0`
 
 The repository is named `Projekt1`; the application is named **Orbit**. Both the source and the hosted application are public. Anyone can open the interface and download the companion. **Sign in with ChatGPT** inside Orbit to contribute to the shared team library. Public viewing does not grant database writes, deployment permissions, or access to the signed-in workspace. Ask the project owner for development/deployment access when needed.
 
@@ -329,3 +329,16 @@ including the companion IMPORT message handler. Use the saved library to find
 and view database records. The local preview still has no database backend.
 Earlier import/export instructions above describe the original 2.0.0 baseline
 and no longer apply to the current interface.
+
+## Multiple maps (companion 2.1.0)
+
+Use **Your maps on this device** to return to a collection, or **New map** to
+start another. Switching pauses a running build and preserves its checkpoint.
+Only one map collects at a time; the request cooldown carries across maps.
+**Cancel build** stops the queue and retains discovered people as a viewable map.
+Cancelled builds cannot resume; start a new map to collect again. Maps are stored
+in the Chrome profile, independently of the shared database library.
+
+Filtered views reduce connection-line clutter by default. **Show all connections**
+restores the full visible edge set. Labels avoid overlapping where possible.
+Reload the updated companion to enable map switching and cancellation.

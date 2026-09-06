@@ -2,7 +2,7 @@ import {newState,options,profileURL,listURL,sameList,sameConnectionOwner,addPers
 import {inspectLinkedIn,advanceLinkedIn} from './collector.js';
 import {SITE_ORIGIN} from './companion.js';
 
-const KEY='orbitNetwork',ALARM='orbit-collect',VERSION='2.0.0';
+const KEY='orbitNetwork',ALARM='orbit-collect',VERSION='2.1.0';
 const POLL=1000,SETTLE=200,LOAD_TIMEOUT=60000,UNCHANGED_TIMEOUT=15000;
 let chain=Promise.resolve(),cached,timer=null,timerAt=Infinity;
 const serialize=fn=>{const p=chain.then(fn);chain=p.catch(()=>{});return p;};
@@ -180,12 +180,36 @@ async function tick(){
   }catch(error){await pause(s,error.message||'Collection paused after an unexpected error.');}
   finally{await schedule(s);}
 }
+async function archiveCurrent(){
+ const s=await read();if(!s)return;
+ if(s.status==='running')await pause(s,'Paused while switching maps. Resume when ready.');
+ const maps=(await chrome.storage.local.get('orbitMaps')).orbitMaps||{};
+ maps[s.id]=s;await chrome.storage.local.set({orbitMaps:maps,orbitNextRequestAt:Math.max(s.nextRequestAt||0,(await chrome.storage.local.get('orbitNextRequestAt')).orbitNextRequestAt||0)});
+}
 async function command(message){
   if(message.type==='PING')return {ok:true,name:'Orbit',version:VERSION};
   if(message.type==='GET_STATE'){const s=await read(),revision=s?`${s.id}:${s.revision||0}:${s.updatedAt}`:'empty';return message.revision===revision?{ok:true,unchanged:true,revision}:{ok:true,state:s,revision};}
+  if(message.type==='LIST_MAPS'){
+    const maps=(await chrome.storage.local.get('orbitMaps')).orbitMaps||{},s=await read();if(s)maps[s.id]=s;
+    return {ok:true,maps:Object.values(maps).map(s=>({id:s.id,name:s.nodes[s.root]?.name||'Untitled map',status:s.status,count:Object.keys(s.nodes).length}))};
+  }
+  if(message.type==='NEW_MAP'||message.type==='SWITCH_MAP'){
+    const maps=(await chrome.storage.local.get('orbitMaps')).orbitMaps||{};
+    if(message.type==='SWITCH_MAP'&&!maps[message.id]&&(await read())?.id!==message.id)throw Error('Map not found.');
+    if(message.type==='SWITCH_MAP'&&(await read())?.id===message.id)return {ok:true};
+    await archiveCurrent();await schedule(null);
+    if(message.type==='NEW_MAP'){cached=null;await chrome.storage.local.remove(KEY);}
+    else {maps[message.id].nextRequestAt=Math.max(maps[message.id].nextRequestAt||0,(await chrome.storage.local.get('orbitNextRequestAt')).orbitNextRequestAt||0);await save(maps[message.id]);await schedule(maps[message.id]);}
+    return {ok:true};
+  }
+  if(message.type==='CANCEL'){
+    const s=await read();if(s&&['running','paused','limit'].includes(s.status)){
+      s.status='cancelled';s.queue=[];for(const w of workers(s))w.current=null;
+      log(s,'Build cancelled. Discovered people are kept in this map.');await save(s);await schedule(s);
+    }return {ok:true};
+  }
   if(message.type==='START'){
-    const old=await read();if(old&&['running','paused','limit'].includes(old.status))throw Error('Export or clear the current collection before starting another.');
-    const s=newState(message.url,message.config);s.engineVersion=2;await save(s);await schedule(s);await tick();return {ok:true};
+    const s=newState(message.url,message.config);await archiveCurrent();s.nextRequestAt=(await chrome.storage.local.get('orbitNextRequestAt')).orbitNextRequestAt||0;s.engineVersion=2;await save(s);await schedule(s);await tick();return {ok:true};
   }
   if(message.type==='PAUSE'){const s=await read();if(s?.status==='running')await pause(s,'Paused by you. Your progress and queue are saved.');return {ok:true};}
   if(message.type==='RESUME'){
@@ -197,7 +221,7 @@ async function command(message){
     // Slower mode drains existing lanes before assigning new work to its single lane.
     log(s,'Resumed collection');await save(s);await schedule(s);wake(0);return {ok:true};
   }
-  if(message.type==='CLEAR'){const s=await read();if(s?.status==='running')throw Error('Pause collection before clearing it.');clearTimeout(timer);timer=null;await chrome.alarms.clear(ALARM);cached=null;await chrome.storage.local.remove(KEY);return {ok:true};}
+  if(message.type==='CLEAR'){const s=await read();if(s?.status==='running')throw Error('Pause collection before clearing it.');clearTimeout(timer);timer=null;await chrome.alarms.clear(ALARM);const maps=(await chrome.storage.local.get('orbitMaps')).orbitMaps||{};if(s)delete maps[s.id];await chrome.storage.local.set({orbitMaps:maps});cached=null;await chrome.storage.local.remove(KEY);return {ok:true};}
   if(message.type==='SHOW_TAB'){const s=await read(),w=s&&workers(s).find(w=>w.current&&w.tabId);const id=s?.attentionTabId||w?.tabId||s?.tabId;if(id)await chrome.tabs.update(id,{active:true});else throw Error('No collection tab is open yet.');return {ok:true};}
   throw Error('Unknown command.');
 }
