@@ -5,7 +5,7 @@ import type {PublicFactsStore} from './public-facts/contracts.js';
 import {PublicSourceProvisioner} from './storage/public-source-provision.js';
 import {DiscoveryApplication} from './discovery/composition.js';
 import {PgDiscoveryReceipts,type DiscoveryReceipts} from './discovery/receipts.js';
-import {migrateDiscoveryStorage} from './discovery/migrate.js';
+import {migrateDiscoveryStorage,migrateDiscoveryStaging} from './discovery/migrate.js';
 import type {DiscoverySourcesOptions} from './discovery/providers/service.js';
 import {FactReviewService} from './facts/service.js';
 import {PgFactStore} from './facts/postgres.js';
@@ -85,7 +85,7 @@ export async function createApplication(options:ApplicationOptions={}) {
   const ready=async(signal:AbortSignal)=>Boolean(storage&&oauth&&options.search)&&!signal.aborted&&await storage!.probe(signal);
   const facts=storage?.facts?new FactReviewService({auth,facts:storage.facts}):undefined;
   const publicFacts=storage?.publicFacts?new PublicFactsService({auth,publicFacts:storage.publicFacts}):undefined;
-  const discovery=storage?.discoveryReceipts&&options.discovery?new DiscoveryApplication({auth,receipts:storage.discoveryReceipts,...options.discovery}):undefined;
+  const discovery=storage?.discoveryReceipts&&storage.publicSources&&publicFacts&&options.discovery?new DiscoveryApplication({auth,receipts:storage.discoveryReceipts,publicSources:storage.publicSources,publicFacts,...options.discovery}):undefined;
   const api=createApiHandler({auth,service,browserOrigin:config.browserOrigin,...(oauth?{oauth}:{}),...(contacts?{contacts}:{}),...(imports?{imports}:{}),...(facts?{facts}:{}),...(discovery?{discovery}:{}),...(publicFacts?{publicFacts}:{})});
   const handler=config.production?await createProductionHandler({apiHandler:api,webRoot:config.webRoot,readiness:ready}):api;
   const server=createServer(handler);server.requestTimeout=25000;server.headersTimeout=10000;
@@ -112,7 +112,7 @@ export async function openPostgresStorage(databaseUrl:string):Promise<Applicatio
   discoveryReceipts:new PgDiscoveryReceipts(pool),
   publicFacts:new PgPublicFactsStore(pool),
   publicSources:new PublicSourceProvisioner(pool),
-  migrate:async()=>{await migratePrivateStorage(pool,resolve('migrations/001_private_storage.sql'));await migrateContactsStorage(pool,resolve('migrations/002_contacts_grants.sql'));await migrateFactsStorage(pool,resolve('migrations/003_fact_reviews.sql'));await migratePublicFactsStorage(pool,resolve('migrations/004_public_fact_staging.sql'));await migrateDiscoveryStorage(pool,resolve('migrations/005_discovery_receipts.sql'));await store.pruneExpiredAuth(Date.now());await store.pruneExpiredContactsTransactions(Date.now());},
+  migrate:async()=>{await migratePrivateStorage(pool,resolve('migrations/001_private_storage.sql'));await migrateContactsStorage(pool,resolve('migrations/002_contacts_grants.sql'));await migrateFactsStorage(pool,resolve('migrations/003_fact_reviews.sql'));await migratePublicFactsStorage(pool,resolve('migrations/004_public_fact_staging.sql'));await migrateDiscoveryStorage(pool,resolve('migrations/005_discovery_receipts.sql'));await migrateDiscoveryStaging(pool,resolve('migrations/007_discovery_staging.sql'));await store.pruneExpiredAuth(Date.now());await store.pruneExpiredContactsTransactions(Date.now());},
   close:()=>pool.end(),
   probe:async(signal)=>{
    if(signal.aborted)return false;
