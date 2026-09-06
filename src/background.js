@@ -6,6 +6,7 @@ import {normalizePolicy,nextAction,reserveAction,backoffPolicy,blockPolicy,retry
 const KEY='orbitNetwork',ALARM='orbit-collect',VERSION=COMPANION_VERSION;
 const POLL=1000,SETTLE=200,LOAD_TIMEOUT=60000,UNCHANGED_TIMEOUT=15000,WORKSPACE_LEASE=24*60*60*1000;
 const REFRESH_AFTER=24*60*60*1000,REFRESH_BATCH=24;
+const PROFILE_REFRESH_AFTER=7*24*60*60*1000,SHARED_KINDS=new Set(['profile','connections','comments']);
 const POLICY_KEY='orbitCollectionPolicy';
 let policy,storageFailed=false;
 let chain=Promise.resolve(),cached,timer=null,timerAt=Infinity,workspaceTabs=new Map();
@@ -81,12 +82,56 @@ async function schedule(s){
 const pause=async(s,reason,w)=>{s.attentionTabId=w?.tabId||null;s.status='paused';log(s,reason);try{await save(s);}finally{await schedule(s);}};
 function finishBranch(s,w,status,reason){const b=w.current.job.detailsOnly?((s.profileChecks||={})[w.current.job.owner]||={}):w.current.job.kind==='posts'?s.commentCoverage?.[w.current.job.owner]:s.branches[w.current.job.owner];if(b){b.status=status;b.reason=reason;b.checkedAt=new Date().toISOString();}log(s,reason);w.current=null;}
 function limit(s){s.status='limit';log(s,'Person limit reached. Increase the limit and resume to expand further.');}
+function applySharedGraph(s,payload){
+  if(!payload||profileURL(payload.root)!==s.root)return false;
+  const coverage={},hints={};
+  for(const item of Array.isArray(payload.coverage)?payload.coverage.slice(0,9000):[]){
+    const personId=profileURL(item.personId),kind=String(item.kind||''),checked=Date.parse(item.checkedAt||'');
+    if(!personId||!SHARED_KINDS.has(kind)||!Number.isFinite(checked)||checked>Date.now()+300000)continue;
+    if(kind==='profile'&&item.status!=='checked'||kind!=='profile'&&item.status!=='exhausted')continue;
+    const key=`${kind}|${personId}`,previous=coverage[key];if(previous&&Date.parse(previous.checkedAt)>=checked)continue;
+    coverage[key]={personId,kind,status:String(item.status||''),scope:String(item.scope||''),checkedAt:new Date(checked).toISOString(),contributor:String(item.contributor||'a teammate').slice(0,200),details:item.details&&typeof item.details==='object'?item.details:{}};
+  }
+  for(const item of Array.isArray(payload.nodes)?payload.nodes.slice(0,3000):[]){const id=profileURL(item.id||item.url),depth=Number(item.depth);if(!id||id===s.root||!Number.isInteger(depth)||depth<1||depth>6)continue;hints[id]={id,url:id,name:String(item.name||'').slice(0,200),headline:String(item.headline||'').slice(0,1000),location:String(item.location||'').slice(0,300),depth};}
+  s.sharedCoverage=coverage;s.sharedHints=hints;return true;
+}
+function freshShared(s,personId,kind,now=Date.now()){
+  if(kind==='connections'&&personId===s.root)return null;
+  const value=s.sharedCoverage?.[`${kind}|${personId}`],checked=Date.parse(value?.checkedAt||''),maxAge=kind==='profile'?PROFILE_REFRESH_AFTER:REFRESH_AFTER;
+  return Number.isFinite(checked)&&now-checked<maxAge?value:null;
+}
+function reuseSharedMarkers(s,person,now=Date.now()){
+  const profile=freshShared(s,person.id,'profile',now),connections=freshShared(s,person.id,'connections',now),comments=freshShared(s,person.id,'comments',now),marker=value=>({status:'shared',sourceStatus:value.status,shared:true,checkedAt:value.checkedAt,contributor:value.contributor,details:value.details,reason:`Fresh coverage reused from ${value.contributor}.`});
+  if(profile&&!(s.profileChecks||={})[person.id])s.profileChecks[person.id]=marker(profile);
+  if(connections&&!s.branches[person.id])s.branches[person.id]=marker(connections);
+  if(comments&&!(s.commentCoverage||={})[person.id])s.commentCoverage[person.id]={...marker(comments),discoveryVersion:1,posts:[],profiles:[],comments:0};
+}
+function pruneSharedJobs(s,now=Date.now()){
+  const keep=[];for(const job of s.queue||[]){
+    if(job.owner===s.root){keep.push(job);continue;}
+    if(job.kind==='list'&&freshShared(s,job.owner,'connections',now))continue;
+    if(job.kind==='posts'&&freshShared(s,job.owner,'comments',now))continue;
+    if(job.kind==='profile'&&job.detailsOnly&&freshShared(s,job.owner,'profile',now))continue;
+    if(job.kind==='profile'&&!job.refresh&&!job.detailsOnly&&freshShared(s,job.owner,'connections',now)){if(!freshShared(s,job.owner,'profile',now))keep.push({...job,detailsOnly:true});continue;}
+    keep.push(job);
+  }s.queue=keep;
+}
+function queueSharedCandidates(s,minDepth=1){
+  if(!Number.isInteger(s.nodeCount))s.nodeCount=Object.keys(s.nodes||{}).length;
+  let added=0;for(const person of Object.values(s.sharedHints||{}).sort((a,b)=>a.depth-b.depth||a.id.localeCompare(b.id))){
+    if(person.depth<minDepth||person.depth>=s.config.depth||s.nodes[person.id])continue;
+    const covered=Boolean(freshShared(s,person.id,'profile')&&freshShared(s,person.id,'connections')&&(!s.config.comments||freshShared(s,person.id,'comments')));if(covered)continue;
+    if(s.nodeCount>=s.config.maxNodes){limit(s);break;}s.nodes[person.id]={...person,sharedOnly:true};s.nodeCount++;added++;
+  }return added;
+}
 function queueUnexplored(s,minDepth=0){
-   s.queue=s.queue.filter(job=>job.kind!=='profile'||job.refresh||job.detailsOnly||!['exhausted','hidden','mutuals_only','incomplete'].includes(s.branches[job.owner]?.status));
+   pruneSharedJobs(s);
+   s.queue=s.queue.filter(job=>job.kind!=='profile'||job.refresh||job.detailsOnly||!['exhausted','hidden','mutuals_only','incomplete','shared'].includes(s.branches[job.owner]?.status));
    const jobs=[...s.queue,...(s.deferredJobs||[]),...workers(s).map(w=>w.current?.job).filter(Boolean)],busyProfiles=new Set(jobs.filter(job=>job.kind==='profile').map(job=>job.owner)),busyAny=new Set(jobs.map(job=>job.owner));
    let added=0,repairs=0;
   for(const person of Object.values(s.nodes).sort((a,b)=>a.depth-b.depth||a.id.localeCompare(b.id))){
     if(person.depth<minDepth||person.depth>=s.config.depth)continue;
+     reuseSharedMarkers(s,person);
      if(!s.branches[person.id]&&!busyProfiles.has(person.id)){
        s.queue.push({kind:'profile',owner:person.id,depth:person.depth});busyProfiles.add(person.id);busyAny.add(person.id);added++;continue;
     }
@@ -122,7 +167,7 @@ function prepareIncrementalRefresh(s,now=Date.now()){
   const candidates=Object.values(s.nodes).filter(person=>person.depth<s.config.depth).map(person=>{
     const branch=s.branches?.[person.id],checked=Date.parse(branch?.checkedAt||'');
     return {person,branch,checked:Number.isFinite(checked)?checked:-Infinity};
-  }).filter(item=>!item.branch||now-item.checked>=REFRESH_AFTER).sort((a,b)=>{
+  }).filter(item=>!freshShared(s,item.person.id,'connections',now)&&(!item.branch||now-item.checked>=REFRESH_AFTER)).sort((a,b)=>{
     if(a.person.id===s.root)return -1;if(b.person.id===s.root)return 1;
     if(Boolean(a.branch)!==Boolean(b.branch))return a.branch?1:-1;
     return a.checked-b.checked||a.person.depth-b.person.depth||a.person.id.localeCompare(b.person.id);
@@ -374,7 +419,7 @@ async function archiveCurrent(){
  maps[s.id]=s;await chrome.storage.local.set({orbitMaps:maps,orbitNextRequestAt:Math.max(s.nextRequestAt||0,(await chrome.storage.local.get('orbitNextRequestAt')).orbitNextRequestAt||0)});
 }
 async function command(message){
-  if(message.type==='PING')return {ok:true,name:'Orbit',version:VERSION,capabilities:['exploreNext']};
+  if(message.type==='PING')return {ok:true,name:'Orbit',version:VERSION,capabilities:['exploreNext','sharedCoverage']};
   if(message.type==='WORKSPACE_ACTIVE'){
     const s=await read();if(!s)return {ok:true};s.workspaceManaged=true;
     if(message.active===false){s.workspaceLeaseUntil=0;if(s.status==='running'){s.pauseKind='workspace_closed';await pause(s,'Orbit paused because the Site was closed. Reopen it to continue from this exact checkpoint.');}else await save(s);return {ok:true};}
@@ -388,6 +433,10 @@ async function command(message){
     return {ok:true};
   }
   if(message.type==='GET_STATE'){const s=await read(),revision=s?`${s.id}:${s.revision||0}:${s.updatedAt}`:'empty';return message.revision===revision?{ok:true,unchanged:true,revision}:{ok:true,state:s,revision};}
+  if(message.type==='SHARED_GRAPH'){
+    const s=await read();if(!s)return {ok:true,accepted:false};if(!applySharedGraph(s,message.shared))throw Error('The shared graph does not match the active account network.');
+    for(const person of Object.values(s.nodes))reuseSharedMarkers(s,person);pruneSharedJobs(s);await save(s);return {ok:true,accepted:true};
+  }
   if(message.type==='LIST_MAPS'){
     const maps=(await chrome.storage.local.get('orbitMaps')).orbitMaps||{},s=await read();if(s)maps[s.id]=s;
     return {ok:true,maps:Object.values(maps).map(s=>({id:s.id,name:s.nodes[s.root]?.name||'Untitled map',status:s.status,count:Object.keys(s.nodes).length}))};
@@ -431,12 +480,13 @@ async function command(message){
     if((await readPolicy(s)).blocked)throw Error(policy.blocked.reason);
     const config=options(message.config||s.config);if(Object.keys(s.nodes).length>=config.maxNodes)throw Error('Increase the people limit in Map settings before exploring further.');
     s.config={...config,delay:Math.max(120,config.delay),depth:Math.max(2,s.config.depth,config.depth)};
+    if(message.shared&&!applySharedGraph(s,message.shared))throw Error('The shared graph does not match the active account network.');
     // Keep the direct-list checkpoint available for a future refresh. Do not
     // replay it when the user explicitly chooses to explore known connections.
     s.deferredJobs||=[];
     for(const w of workers(s))if(w.current?.job.owner===s.root){s.deferredJobs.push({...w.current.job,replayURL:w.current.resumeURL});w.current=null;}
     s.deferredJobs.push(...s.queue.filter(job=>job.owner===s.root));s.queue=s.queue.filter(job=>job.owner!==s.root);
-    queueUnexplored(s,1);
+    queueSharedCandidates(s,1);queueUnexplored(s,1);
     if(!s.queue.length&&!workers(s).some(w=>w.current)){
       s.status='complete';log(s,'All saved people within this depth have been explored. Increase to 3rd degree in Map settings, or wait for a daily refresh.');await save(s);await schedule(s);return {ok:true,status:s.status,reason:s.reason};
     }

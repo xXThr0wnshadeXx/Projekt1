@@ -77,6 +77,20 @@ test('resume renews the Site lease and expands saved people despite incomplete d
   assert.equal(response.ok,true);assert.equal(response.status,'running');assert.ok(h.data.orbitNetwork.workspaceLeaseUntil>1000000);assert.equal(h.data.orbitNetwork.current.job.owner,a);assert.equal(h.data.orbitNetwork.branches[root].status,'incomplete');assert.equal(h.data.orbitNetwork.queue.some(job=>job.owner===root),false);
 });
 
+test('shared teammate coverage skips duplicate branches and seeds only unfinished remote people',async t=>{
+  const checkedAt=new Date(1000000).toISOString(),s=newState(root,{depth:2,delay:0});s.status='complete';s.queue=[];s.nodes[a]={...person('a'),id:a,depth:1};s.nodeCount=2;s.branches[root]={status:'exhausted',pages:5,profiles:[a],checkedAt};s.profileChecks={[root]:{checkedAt}};s.workers=[{tabId:null,current:null}];
+  const h=await harness(t,s),shared={root,nodes:[{...person('a'),id:a,depth:1},{...person('b'),id:b,depth:1}],coverage:[
+    {personId:root,kind:'connections',status:'exhausted',checkedAt,contributor:'Nicolas'},
+    {personId:a,kind:'profile',status:'checked',checkedAt,contributor:'Nicolas'},
+    {personId:a,kind:'connections',status:'exhausted',checkedAt,contributor:'Nicolas'},
+    {personId:b,kind:'profile',status:'checked',checkedAt,contributor:'Nicolas'}
+  ]};
+  const accepted=await h.command({type:'SHARED_GRAPH',shared});assert.equal(accepted.accepted,true);assert.equal(h.data.orbitNetwork.branches[a].status,'shared');assert.equal(h.data.orbitNetwork.branches[root].pages,5);
+  h.snapshots={[b]:profile(person('b'),list('b')),[list('b')]:page(list('b'),[])};
+  const response=await h.command({type:'EXPLORE_NEXT',root,config:{depth:2,delay:0},shared});assert.equal(response.status,'running');assert.equal(h.data.orbitNetwork.current.job.owner,b);assert.equal(h.requests.length,1);assert.equal(h.navigations[0],b);assert.equal(h.data.orbitNetwork.nodes[b].sharedOnly,true);
+  for(let i=0;i<12;i++)await h.tick();assert.equal(h.data.orbitNetwork.nodes[b].sharedOnly,undefined);assert.equal(h.data.orbitNetwork.status,'complete');assert.equal(h.navigations.includes(a),false);
+});
+
 test('a changed viewer-degree filter keeps the same owner and records adjusted coverage',async t=>{
   const h=await harness(t),requested=list('root')+'&network=%5B%22F%22%2C%22S%22%5D',actual=list('root')+'&page=1';
   h.snapshots={[root]:profile(person('root'),requested),[requested]:page(actual,[person('a')])};

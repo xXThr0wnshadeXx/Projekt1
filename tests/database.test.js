@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
 import {readFileSync,readdirSync} from 'node:fs';
-import {ingest,stats,search,neighborhood,listImports,shortestPath,resetContribution,activity} from '../server/database.js';
+import {ingest,stats,search,neighborhood,listImports,shortestPath,resetContribution,activity,sharedCoverage} from '../server/database.js';
 function database(){
   const raw=new DatabaseSync(':memory:');for(const f of readdirSync(new URL('../drizzle/',import.meta.url)).filter(f=>f.endsWith('.sql')))raw.exec(readFileSync(new URL('../drizzle/'+f,import.meta.url),'utf8'));
   const db={prepare(sql){return {sql,args:[],bind(...args){this.args=args;return this;},async all(){return {results:raw.prepare(sql).all(...this.args)};},async first(){return raw.prepare(sql).get(...this.args)||null;}};},async batch(statements){raw.exec('BEGIN');try{const results=statements.map(s=>({results:raw.prepare(s.sql).all(...s.args)}));raw.exec('COMMIT');return results;}catch(e){raw.exec('ROLLBACK');throw e;}}};return {db,raw};
@@ -97,4 +97,32 @@ test('long comment histories save in bounded batches without losing observations
   const chunks=splitEvidence(edge);assert.deepEqual(chunks.map(e=>e.evidence.length),[20,20,5]);
   await ingest(db,'shared',{nodes:[a,b],edges:chunks});await ingest(db,'shared',{edges:chunks});
   assert.equal(raw.prepare('SELECT COUNT(*) n FROM evidence').get().n,45);assert.equal((await stats(db,'shared')).connections,1);
+});
+
+test('teammates share only complete reusable coverage and keep one canonical graph',async()=>{
+  const {db,raw}=database(),root=person('root').id,a=person('a').id;
+  await ingest(db,'shared',{nodes:[person('root'),person('a')],edges:[edge('root','a')],coverage:[{personId:a,kind:'connections',status:'exhausted',checkedAt:'2026-09-06T10:00:00Z',details:{pages:4}}]},'shreev');
+  await ingest(db,'shared',{nodes:[person('root'),person('a')],edges:[edge('a','root')],coverage:[{personId:a,kind:'connections',status:'incomplete',checkedAt:'2026-09-06T11:00:00Z',details:{pages:2,filterChanged:true}}]},'nicolas');
+  assert.equal(raw.prepare('SELECT COUNT(*) n FROM people WHERE owner=?').get('shared').n,2);assert.equal(raw.prepare('SELECT COUNT(*) n FROM connections WHERE owner=?').get('shared').n,1);
+  assert.equal(raw.prepare('SELECT reusable FROM collection_coverage WHERE contributor_id=?').get('nicolas').reusable,0);
+  let coverage=await sharedCoverage(db,'shared',[root,a]);assert.equal(coverage.length,1);assert.equal(coverage[0].contributor,'shreev');assert.equal(coverage[0].details.pages,4);
+  await ingest(db,'shared',{coverage:[{personId:a,kind:'connections',status:'exhausted',checkedAt:'2026-09-06T12:00:00Z',details:{pages:6}}]},'nicolas');
+  coverage=await sharedCoverage(db,'shared',[a]);assert.equal(coverage[0].contributor,'nicolas');assert.equal(coverage[0].details.pages,6);
+  await resetContribution(db,'shared','nicolas');coverage=await sharedCoverage(db,'shared',[a]);assert.equal(coverage[0].contributor,'shreev');
+});
+
+test('coverage validation rejects orphans and filtered lists never suppress another collector',async()=>{
+  const {db,raw}=database(),a=person('a').id;
+  await assert.rejects(ingest(db,'shared',{coverage:[{personId:a,kind:'profile',status:'checked',checkedAt:new Date().toISOString()}]},'shreev'),/save its people first/);
+  await ingest(db,'shared',{nodes:[person('a')],coverage:[]},'shreev');
+  await assert.rejects(ingest(db,'shared',{coverage:[{personId:a,kind:'profile',status:'exhausted',checkedAt:new Date().toISOString()}]},'shreev'),/coverage status/);
+  await ingest(db,'shared',{coverage:[{personId:a,kind:'connections',status:'exhausted',checkedAt:new Date().toISOString(),details:{filterChanged:true}}]},'shreev');
+  assert.equal(raw.prepare('SELECT reusable FROM collection_coverage').get().reusable,0);assert.deepEqual(await sharedCoverage(db,'shared',[a]),[]);
+});
+
+test('shared coverage is returned with neighborhoods and advances their revision',async()=>{
+  const {db}=database(),root=person('root').id,a=person('a').id;
+  await ingest(db,'shared',{nodes:[person('root'),person('a')],edges:[edge('root','a')]},'shreev');const before=await neighborhood(db,'shared',root,2,100);
+  const checkedAt=new Date(Date.now()+1000).toISOString();await ingest(db,'shared',{coverage:[{personId:a,kind:'profile',status:'checked',checkedAt}]},'nicolas');
+  const after=await neighborhood(db,'shared',root,2,100,before.updatedAt);assert.equal(after.unchanged,undefined);assert.equal(after.updatedAt,checkedAt);assert.equal(after.coverage[0].personId,a);assert.equal(after.coverage[0].kind,'profile');
 });

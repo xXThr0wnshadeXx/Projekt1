@@ -1,5 +1,13 @@
 import {prepareImport} from './import.js';
 export function splitEvidence(edge){const parts=[];for(let i=0;i<(edge.evidence||[]).length;i+=20)parts.push({...edge,evidence:edge.evidence.slice(i,i+20)});return parts;}
+export function coverageRecords(state){
+  if(!state)return [];
+  const out=[],push=(personId,kind,status,checkedAt,scope='',details={})=>{if(!personId||!Number.isFinite(Date.parse(checkedAt||'')))return;out.push({personId,kind,status,checkedAt,scope,details});};
+  for(const [personId,value] of Object.entries(state.profileChecks||{}))if(!value.shared)push(personId,'profile','checked',value.checkedAt,'',{source:'profile'});
+  for(const [personId,value] of Object.entries(state.branches||{}))if(!value.shared&&['exhausted','incomplete','hidden','mutuals_only'].includes(value.status))push(personId,'connections',value.status,value.checkedAt,value.scope||'',{pages:Number(value.pages)||0,profiles:Array.isArray(value.profiles)?value.profiles.length:0,filterChanged:Boolean(value.filterChanged)});
+  for(const [personId,value] of Object.entries(state.commentCoverage||{}))if(!value.shared&&['exhausted','incomplete','hidden','mutuals_only'].includes(value.status))push(personId,'comments',value.status,value.checkedAt,value.scope||'',{posts:Array.isArray(value.posts)?value.posts.length:0,profiles:Array.isArray(value.profiles)?value.profiles.length:0,comments:Number(value.comments)||0});
+  return out;
+}
 export function mergeAccountGraphs(local,shared,maxDepth=6){
   if(!local)return shared||null;if(!shared||shared.root!==local.root)return local;
   const nodes={...shared.nodes,...local.nodes},edges={...shared.edges};
@@ -11,14 +19,15 @@ export function mergeAccountGraphs(local,shared,maxDepth=6){
   const depths=new Map([[local.root,0]]),queue=[local.root];while(queue.length){const id=queue.shift(),depth=depths.get(id);if(depth>=maxDepth)continue;for(const next of adjacent.get(id)||[])if(!depths.has(next)){depths.set(next,depth+1);queue.push(next);}}
   const connected={};for(const [id,depth] of depths)if(nodes[id])connected[id]={...nodes[id],depth};
   const connectedEdges={};for(const edge of Object.values(edges))if(connected[edge.source]&&connected[edge.target])connectedEdges[edge.id]=edge;
-  return {...local,id:`account:${local.root}`,graphRevision:`${local.revision||0}:${shared.graphRevision||0}:${Object.keys(connectedEdges).length}`,nodes:connected,edges:connectedEdges,cloudView:false,sharedView:true,updatedAt:[local.updatedAt,shared.updatedAt].filter(Boolean).sort().at(-1)};
+  const coverage=new Map();for(const item of [...(shared.coverage||[]),...(local.coverage||[])])coverage.set(`${item.personId}|${item.kind}`,item);
+  return {...local,id:`account:${local.root}`,graphRevision:`${local.revision||0}:${shared.graphRevision||0}:${Object.keys(connectedEdges).length}`,nodes:connected,edges:connectedEdges,branches:{...(shared.branches||{}),...(local.branches||{})},profileChecks:{...(shared.profileChecks||{}),...(local.profileChecks||{})},commentCoverage:{...(shared.commentCoverage||{}),...(local.commentCoverage||{})},coverage:[...coverage.values()],cloudView:false,sharedView:true,updatedAt:[local.updatedAt,shared.updatedAt].filter(Boolean).sort().at(-1)};
 }
 // The hosted page uses its Sites session; no LinkedIn credentials leave Chrome.
 export function createLibrary({getCollection,showGraph,showCollection}){
   const $=id=>document.getElementById(id),enabled=location.protocol==='https:'||location.hostname==='127.0.0.1';
   let pending=null,prepared=null,saving=false,importing=false,timer=null,searchTimer=null,searchSerial=0;
   const accountRevisions=new Map();
-  const savedNodes=new Map(),savedEdges=new Map();
+  const savedNodes=new Map(),savedEdges=new Map(),savedCoverage=new Map();
   async function api(path,body){const r=await fetch('/api/library/'+path,{method:body?'POST':'GET',headers:body?{'Content-Type':'application/json'}:undefined,body:body?JSON.stringify(body):undefined});const data=await r.json();if(r.status===401){$('library-signin').hidden=false;$('library-signin').href='/?return_to=%2Fmap.html#login';$('library-signin').textContent='Sign in to continue ↗';$('library-counts').textContent='Sign in to view the shared team library';}else if(r.ok)$('library-signin').hidden=true;if(!r.ok){const error=Error(data.error||'Library request failed.');error.status=r.status;error.retryAfter=Number(r.headers.get('Retry-After'))||0;throw error;}return data;}
   const status=text=>{$('library-status').textContent=text;};
   const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
@@ -42,9 +51,11 @@ export function createLibrary({getCollection,showGraph,showCollection}){
     try{
       status('Saving discoveries to the shared team library…');
       for(const [field,cache,key] of [['nodes',savedNodes,'nodes'],['edges',savedEdges,'edges']]){
-        const entries=Object.values(snapshot[field]||{}).map(v=>({value:v,signature:JSON.stringify(v)})).filter(v=>cache.get(v.value.id)!==v.signature);
+        const entries=Object.values(snapshot[field]||{}).filter(v=>field!=='nodes'||!v.sharedOnly).map(v=>({value:v,signature:JSON.stringify(v)})).filter(v=>cache.get(v.value.id)!==v.signature);
         for(let i=0;i<entries.length;i+=100){const batch=entries.slice(i,i+100),values=field==='edges'?batch.flatMap(v=>splitEvidence(v.value)):batch.map(v=>v.value);for(let j=0;j<values.length;j+=100)await api('ingest',{nodes:[],edges:[],[key]:values.slice(j,j+100)});for(const e of batch)cache.set(e.value.id,e.signature);}
       }
+      const entries=coverageRecords(snapshot).map(value=>({value,key:`${value.personId}|${value.kind}`,signature:JSON.stringify(value)})).filter(item=>savedCoverage.get(item.key)!==item.signature);
+      for(let i=0;i<entries.length;i+=100){const batch=entries.slice(i,i+100);await api('ingest',{nodes:[],edges:[],coverage:batch.map(item=>item.value)});for(const item of batch)savedCoverage.set(item.key,item.signature);}
       status(`Saved to library · ${new Date().toLocaleTimeString()}`);await refreshStats();
     }catch(error){pending ||= snapshot;status(error.status===401?'Sign in to save this collection to the shared team library.':`Not yet saved: ${error.message}. Will retry.`);}
     finally{saving=false;if(pending){clearTimeout(timer);timer=setTimeout(sync,30000);}}
@@ -55,8 +66,9 @@ export function createLibrary({getCollection,showGraph,showCollection}){
       if(!quiet)status('Loading saved connections…');depth=Math.max(1,Math.min(6,Number(depth)||2));const since=accountView?accountRevisions.get(url)||'':'';const data=await api('graph?url='+encodeURIComponent(url)+`&depth=${depth}&limit=3000${since?`&since=${encodeURIComponent(since)}`:''}`);
       if(!data.found){status('This person is not in the team library yet. Collect a network containing them.');return;}
       if(data.unchanged)return;
-      const nodes=Object.fromEntries(data.nodes.map(p=>[p.id,p])),edges=Object.fromEntries(data.edges.map(e=>[e.id,e]));
-      const shared={schemaVersion:1,id:`library-account:${data.root}`,graphRevision:data.updatedAt||`${data.nodes.length}:${data.edges.length}`,root:data.root,nodes,edges,branches:{},queue:[],status:'imported',cloudView:true,pages:0,config:{maxNodes:3000,depth,delay:120,comments:false},createdAt:data.updatedAt||new Date().toISOString(),updatedAt:data.updatedAt||new Date().toISOString(),reason:data.truncated?'Showing a bounded connected view for responsive rendering.':'Loaded every saved path connected to this account within the selected distance.'};
+      const nodes=Object.fromEntries(data.nodes.map(p=>[p.id,p])),edges=Object.fromEntries(data.edges.map(e=>[e.id,e])),branches={},profileChecks={},commentCoverage={};
+      for(const item of data.coverage||[]){const value={status:'shared',sourceStatus:item.status,shared:true,checkedAt:item.checkedAt,contributor:item.contributor,scope:item.scope,details:item.details,reason:`Fresh ${item.kind} coverage reused from ${item.contributor||'a teammate'}.`};if(item.kind==='connections')branches[item.personId]=value;else if(item.kind==='profile')profileChecks[item.personId]=value;else if(item.kind==='comments')commentCoverage[item.personId]=value;}
+      const shared={schemaVersion:1,id:`library-account:${data.root}`,graphRevision:data.updatedAt||`${data.nodes.length}:${data.edges.length}`,root:data.root,nodes,edges,branches,profileChecks,commentCoverage,coverage:data.coverage||[],queue:[],status:'imported',cloudView:true,pages:0,config:{maxNodes:3000,depth,delay:120,comments:false},createdAt:data.updatedAt||new Date().toISOString(),updatedAt:data.updatedAt||new Date().toISOString(),reason:data.truncated?'Showing a bounded connected view for responsive rendering.':'Loaded every saved path connected to this account within the selected distance.'};
       if(accountView&&data.updatedAt)accountRevisions.set(url,data.updatedAt);showGraph(shared,accountView);
       $('back-collection').hidden=accountView;if(!quiet)status(data.truncated?'Account network loaded · bounded view for responsive rendering':'Account network loaded from D1 · no LinkedIn request needed');return shared;
     }catch(error){status(error.message);}
@@ -93,5 +105,5 @@ export function createLibrary({getCollection,showGraph,showCollection}){
   if(enabled)refreshStats().then(()=>status('Autosave ready · every changed person and connection merges into shared D1')).catch(error=>{if(error.status===401)status('Sign in to contribute to the shared team library.');else{$('library-counts').textContent='Library unavailable';status('Open the hosted Orbit site to use the shared team library.');}});
   else status('Use the hosted Orbit site for permanent storage.');
   setInterval(()=>{if(pending&&!saving&&!importing)sync();},30000);
-  return {queue,loadAccount:(url,depth=6)=>lookup(url,true,depth,true),resetCaches(){pending=null;savedNodes.clear();savedEdges.clear();accountRevisions.clear();}};
+  return {queue,loadAccount:(url,depth=6)=>lookup(url,true,depth,true),resetCaches(){pending=null;savedNodes.clear();savedEdges.clear();savedCoverage.clear();accountRevisions.clear();}};
 }

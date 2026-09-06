@@ -57,6 +57,13 @@
       "when": 1788707492652,
       "tag": "0007_comment_evidence",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1788713735284,
+      "tag": "0008_shared_collection_coverage",
+      "breakpoints": true
     }
   ]
 }

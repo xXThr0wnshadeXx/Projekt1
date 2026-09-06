@@ -3,8 +3,8 @@ import {buildKeywords,ftsQuery,rankPeople} from '../src/search.js';
 const MAX_BATCH=100;
 const short=(v,n)=>String(v||'').slice(0,n);
 export function validateBatch(data){
-  const inputNodes=data.nodes||[],inputEdges=data.edges||[],imports=data.imports||[],records=data.records||[];
-  if(![inputNodes,inputEdges,imports,records].every(Array.isArray)||[inputNodes,inputEdges,imports,records].some(values=>values.length>MAX_BATCH))throw Error('Save at most 100 records of each type per batch.');
+  const inputNodes=data.nodes||[],inputEdges=data.edges||[],imports=data.imports||[],records=data.records||[],inputCoverage=data.coverage||[];
+  if(![inputNodes,inputEdges,imports,records,inputCoverage].every(Array.isArray)||[inputNodes,inputEdges,imports,records,inputCoverage].some(values=>values.length>MAX_BATCH))throw Error('Save at most 100 records of each type per batch.');
   const now=new Date().toISOString();
   const nodes=inputNodes.map(p=>{const id=profileURL(p.id||p.url);if(!id)throw Error('Invalid profile URL.');const name=short(p.name,200),node={id,name,search_name:name.toLowerCase(),headline:short(p.headline,1000),location:short(p.location,300),about:short(p.about,4000),experience:short(p.experience,6000),education:short(p.education,4000),skills:short(p.skills,3000),at:now};return {...node,keywords:buildKeywords(node)};});
   const edges=inputEdges.map(e=>{
@@ -15,13 +15,21 @@ export function validateBatch(data){
   });
   const cleanImports=imports.map(item=>{if(!/^[a-f0-9]{64}$/.test(item.id))throw Error('Invalid import identifier.');const metadata=JSON.stringify(item.metadata??{});if(metadata.length>200000)throw Error('Import metadata is too large.');return {id:item.id,fileName:short(item.fileName,255),format:short(item.format,100),schemaVersion:short(item.schemaVersion,40),exportedAt:Number.isFinite(Date.parse(item.exportedAt))?new Date(item.exportedAt).toISOString():now,metadata,at:now};});
   const cleanRecords=records.map(item=>{if(!/^[a-f0-9]{64}$/.test(item.importId)||!Number.isInteger(item.index)||item.index<0)throw Error('Invalid preserved source record.');const section=short(item.section,100),value=JSON.stringify(item.data);if(!section||value===undefined||value.length>400000)throw Error('Invalid preserved source record.');return {importId:item.importId,section,index:item.index,value};});
-  return {nodes,edges,imports:cleanImports,records:cleanRecords};
+  const coverage=inputCoverage.map(item=>{
+    const personId=profileURL(item.personId||item.id),kind=String(item.kind||''),status=String(item.status||''),scope=short(item.scope,80),checked=Date.parse(item.checkedAt),details=item.details&&typeof item.details==='object'?item.details:{};
+    if(!personId||!['profile','connections','comments'].includes(kind)||!Number.isFinite(checked)||checked>Date.now()+300000)throw Error('Invalid collection coverage.');
+    const allowed=kind==='profile'?['checked']:['exhausted','incomplete','hidden','mutuals_only'];if(!allowed.includes(status))throw Error('Invalid collection coverage status.');
+    const reusable=kind==='profile'?status==='checked':kind==='connections'?status==='exhausted'&&scope!=='mutuals_only'&&details.filterChanged!==true:status==='exhausted';
+    const detailsJson=JSON.stringify(details);if(detailsJson.length>4000)throw Error('Collection coverage details are too large.');
+    return {personId,kind,status,scope,checkedAt:new Date(checked).toISOString(),reusable:reusable?1:0,detailsJson};
+  });
+  return {nodes,edges,imports:cleanImports,records:cleanRecords,coverage};
 }
 export async function ingest(db,owner,data,contributor=owner){
-  const {nodes,edges,imports,records}=validateBatch(data),nodeJSON=JSON.stringify(nodes),edgeJSON=JSON.stringify(edges),observations=JSON.stringify(edges.flatMap(e=>e.observations.map(o=>({a:e.a,b:e.b,...o})))),importJSON=JSON.stringify(imports),recordJSON=JSON.stringify(records);
+  const {nodes,edges,imports,records,coverage}=validateBatch(data),nodeJSON=JSON.stringify(nodes),edgeJSON=JSON.stringify(edges),observations=JSON.stringify(edges.flatMap(e=>e.observations.map(o=>({a:e.a,b:e.b,...o})))),importJSON=JSON.stringify(imports),recordJSON=JSON.stringify(records),coverageJSON=JSON.stringify(coverage);
   contributor=short(contributor,200);if(!contributor)throw Error('Invalid contributor.');
-  const endpointIds=[...new Set(edges.flatMap(e=>[e.a,e.b]))],incoming=new Set(nodes.map(p=>p.id));
-  if(endpointIds.length){const existing=(await db.prepare('SELECT id FROM people WHERE owner=? AND id IN (SELECT value FROM json_each(?))').bind(owner,JSON.stringify(endpointIds)).all()).results;for(const p of existing)incoming.add(p.id);if(endpointIds.some(id=>!incoming.has(id)))throw Error('Invalid connection: save its people first.');}
+  const endpointIds=[...new Set([...edges.flatMap(e=>[e.a,e.b]),...coverage.map(item=>item.personId)])],incoming=new Set(nodes.map(p=>p.id));
+  if(endpointIds.length){const existing=(await db.prepare('SELECT id FROM people WHERE owner=? AND id IN (SELECT value FROM json_each(?))').bind(owner,JSON.stringify(endpointIds)).all()).results;for(const p of existing)incoming.add(p.id);if(endpointIds.some(id=>!incoming.has(id)))throw Error('Invalid connection or coverage: save its people first.');}
   // JSON batches keep parameter counts bounded and all writes atomic and idempotent.
   await db.batch([
     db.prepare(`INSERT INTO people(owner,id,name,search_name,headline,location,about,experience,education,skills,keywords,first_seen,last_seen)
@@ -50,6 +58,9 @@ export async function ingest(db,owner,data,contributor=owner){
     db.prepare(`INSERT INTO import_records(owner,import_id,section,record_index,data_json)
       SELECT ?,json_extract(value,'$.importId'),json_extract(value,'$.section'),json_extract(value,'$.index'),json_extract(value,'$.value') FROM json_each(?) WHERE 1
       ON CONFLICT(owner,import_id,section,record_index) DO UPDATE SET data_json=excluded.data_json`).bind(owner,recordJSON),
+    db.prepare(`INSERT INTO collection_coverage(owner,person_id,kind,contributor_id,status,scope,checked_at,reusable,details_json)
+      SELECT ?,json_extract(value,'$.personId'),json_extract(value,'$.kind'),?,json_extract(value,'$.status'),json_extract(value,'$.scope'),json_extract(value,'$.checkedAt'),json_extract(value,'$.reusable'),json_extract(value,'$.detailsJson') FROM json_each(?) WHERE 1
+      ON CONFLICT(owner,person_id,kind,contributor_id) DO UPDATE SET status=CASE WHEN excluded.checked_at>=collection_coverage.checked_at THEN excluded.status ELSE collection_coverage.status END,scope=CASE WHEN excluded.checked_at>=collection_coverage.checked_at THEN excluded.scope ELSE collection_coverage.scope END,checked_at=MAX(collection_coverage.checked_at,excluded.checked_at),reusable=CASE WHEN excluded.checked_at>=collection_coverage.checked_at THEN excluded.reusable ELSE collection_coverage.reusable END,details_json=CASE WHEN excluded.checked_at>=collection_coverage.checked_at THEN excluded.details_json ELSE collection_coverage.details_json END`).bind(owner,contributor,coverageJSON),
     db.prepare(`DELETE FROM people_search WHERE owner=? AND id IN (SELECT json_extract(value,'$.id') FROM json_each(?))`).bind(owner,nodeJSON),
     db.prepare(`INSERT INTO people_search(owner,id,name,headline,location,keywords)
       SELECT owner,id,name,headline,location,keywords FROM people WHERE owner=? AND id IN (SELECT json_extract(value,'$.id') FROM json_each(?))`).bind(owner,nodeJSON)
@@ -57,7 +68,7 @@ export async function ingest(db,owner,data,contributor=owner){
   return {saved:true};
 }
 export async function stats(db,owner){
-  const r=await db.prepare('SELECT (SELECT COUNT(*) FROM people WHERE owner=?) people,(SELECT COUNT(*) FROM connections WHERE owner=?) connections,(SELECT COUNT(*) FROM imports WHERE owner=?) imports,(SELECT MAX(last_seen) FROM people WHERE owner=?) lastSaved').bind(owner,owner,owner,owner).first();return r;
+  const r=await db.prepare('SELECT (SELECT COUNT(*) FROM people WHERE owner=?) people,(SELECT COUNT(*) FROM connections WHERE owner=?) connections,(SELECT COUNT(*) FROM imports WHERE owner=?) imports,(SELECT COUNT(*) FROM collection_coverage WHERE owner=? AND reusable=1) reusableCoverage,(SELECT MAX(last_seen) FROM people WHERE owner=?) lastSaved').bind(owner,owner,owner,owner,owner).first();return r;
 }
 export async function listImports(db,owner){
   return (await db.prepare(`SELECT i.id,i.file_name fileName,i.format,i.schema_version schemaVersion,i.exported_at exportedAt,i.last_seen lastSeen,COUNT(r.record_index) records
@@ -91,11 +102,19 @@ async function edgeSources(db,owner,pairs){
     FROM json_each(?) j`).bind(owner,JSON.stringify(pairs)).all()).results;
   return new Map(rows.map(row=>[`${row.a}|${row.b}`,JSON.parse(row.observations||'[]').map(e=>({type:'visible_connection_list',...JSON.parse(e.details||'{}'),url:e.url,observedAt:e.observedAt}))]));
 }
+export async function sharedCoverage(db,owner,ids){
+  if(!ids.length)return [];
+  const rows=(await db.prepare(`SELECT c.person_id personId,c.kind,c.status,c.scope,c.checked_at checkedAt,c.details_json detailsJson,COALESCE(NULLIF(u.display_name,''),u.email,c.contributor_id) contributor
+    FROM collection_coverage c LEFT JOIN users u ON u.id=c.contributor_id
+    WHERE c.owner=? AND c.reusable=1 AND c.person_id IN (SELECT value FROM json_each(?))
+    ORDER BY c.checked_at DESC,c.contributor_id`).bind(owner,JSON.stringify(ids)).all()).results;
+  const seen=new Set(),out=[];for(const row of rows){const key=`${row.personId}|${row.kind}`;if(seen.has(key))continue;seen.add(key);let details={};try{details=JSON.parse(row.detailsJson||'{}');}catch{}out.push({personId:row.personId,kind:row.kind,status:row.status,scope:row.scope,checkedAt:row.checkedAt,contributor:row.contributor,details});}return out;
+}
 export async function neighborhood(db,owner,root,depth=2,limit=1000,since=''){
   root=profileURL(root);if(!root)throw Error('Enter a LinkedIn profile URL.');
   if(!Number.isInteger(depth)||depth<1||depth>6||!Number.isInteger(limit)||limit<10||limit>3000)throw Error('Choose 1–6 layers and 10–3,000 people.');
   const start=await db.prepare('SELECT * FROM people WHERE owner=? AND id=?').bind(owner,root).first();if(!start)return {found:false,nodes:[],edges:[]};
-  const revision=await db.prepare(`SELECT MAX(value) updatedAt FROM (SELECT MAX(last_seen) value FROM people WHERE owner=? UNION ALL SELECT MAX(last_seen) value FROM connections WHERE owner=?)`).bind(owner,owner).first();
+  const revision=await db.prepare(`SELECT MAX(value) updatedAt FROM (SELECT MAX(last_seen) value FROM people WHERE owner=? UNION ALL SELECT MAX(last_seen) value FROM connections WHERE owner=? UNION ALL SELECT MAX(checked_at) value FROM collection_coverage WHERE owner=? AND reusable=1)`).bind(owner,owner,owner).first();
   if(since&&revision?.updatedAt===since)return {found:true,unchanged:true,root,updatedAt:revision.updatedAt};
   const nodes=new Map([[root,{...start,url:root,depth:0}]]),edges=new Map();let frontier=[root],truncated=false,queriesUsed=0;
   for(let layer=1;layer<=depth&&frontier.length;layer++){
@@ -121,7 +140,7 @@ export async function neighborhood(db,owner,root,depth=2,limit=1000,since=''){
   const pairs=[...edges.values()].map(e=>({a:e.source,b:e.target}));
   const sources=await edgeSources(db,owner,pairs);
   for(const edge of edges.values())edge.evidence=sources.get(`${edge.source}|${edge.target}`)||[];
-  return {found:true,root,nodes:[...nodes.values()],edges:[...edges.values()],truncated,depth,limit,updatedAt:revision?.updatedAt||start.last_seen};
+  return {found:true,root,nodes:[...nodes.values()],edges:[...edges.values()],coverage:await sharedCoverage(db,owner,ids),truncated,depth,limit,updatedAt:revision?.updatedAt||start.last_seen};
 }
 export async function shortestPath(db,owner,from,to,maxDepth=6,limit=10000){
   from=profileURL(from);to=profileURL(to);if(!from||!to)throw Error('Choose two valid LinkedIn profiles.');
@@ -152,6 +171,7 @@ export async function resetContribution(db,owner,contributor){
   const observations=(await db.prepare('SELECT a,b,source FROM evidence_contributors WHERE owner=? AND contributor_id=?').bind(owner,contributor).all()).results;
   const ids=JSON.stringify(people.map(row=>row.id)),pairs=JSON.stringify(connections),sources=JSON.stringify(observations);
   await db.batch([
+    db.prepare('DELETE FROM collection_coverage WHERE owner=? AND contributor_id=?').bind(owner,contributor),
     db.prepare('DELETE FROM evidence_contributors WHERE owner=? AND contributor_id=?').bind(owner,contributor),
     db.prepare(`DELETE FROM evidence WHERE owner=? AND EXISTS (SELECT 1 FROM json_each(?) j WHERE evidence.a=json_extract(j.value,'$.a') AND evidence.b=json_extract(j.value,'$.b') AND evidence.source=json_extract(j.value,'$.source')) AND NOT EXISTS (SELECT 1 FROM evidence_contributors ec WHERE ec.owner=evidence.owner AND ec.a=evidence.a AND ec.b=evidence.b AND ec.source=evidence.source)`).bind(owner,sources),
     db.prepare('DELETE FROM connection_contributors WHERE owner=? AND contributor_id=?').bind(owner,contributor),

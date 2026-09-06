@@ -17,6 +17,9 @@ export const connectionContributors=sqliteTable('connection_contributors',{
 export const evidenceContributors=sqliteTable('evidence_contributors',{
   owner:text('owner').notNull(),a:text('a').notNull(),b:text('b').notNull(),source:text('source').notNull(),contributorId:text('contributor_id').notNull(),firstSeen:text('first_seen').notNull(),lastSeen:text('last_seen').notNull()
 },t=>[primaryKey({columns:[t.owner,t.a,t.b,t.source,t.contributorId]}),index('evidence_contributors_account').on(t.contributorId,t.a,t.b)]);
+export const collectionCoverage=sqliteTable('collection_coverage',{
+  owner:text('owner').notNull(),personId:text('person_id').notNull(),kind:text('kind').notNull(),contributorId:text('contributor_id').notNull(),status:text('status').notNull(),scope:text('scope').notNull().default(''),checkedAt:text('checked_at').notNull(),reusable:integer('reusable').notNull().default(0),detailsJson:text('details_json').notNull().default('{}')
+},t=>[primaryKey({columns:[t.owner,t.personId,t.kind,t.contributorId]}),index('collection_coverage_lookup').on(t.owner,t.personId,t.kind,t.reusable,t.checkedAt),index('collection_coverage_contributor').on(t.contributorId,t.personId,t.kind)]);
 export const apiRateLimits=sqliteTable('api_rate_limits',{
   key:text('key').primaryKey(),count:integer('count').notNull(),resetAt:integer('reset_at').notNull()
 });
