@@ -7,6 +7,8 @@ import type {ConfirmFactsRequest, ConfirmFactsResponse, FactActor, FactReviewReq
 import {validateConfirmFacts, validateFactReview} from './contracts.js';
 import {affiliationKey, factDigest, projectConfirmedRelationships} from './projection.js';
 import {checkedFactSnapshot, conflict, denied, invalid, saveFactSnapshot, withFactScope, type FactScopeRow, type FactSourceRow} from './transaction.js';
+import {publicClaimsInstalled, refreshPublicCitationProjection} from '../public-facts/projection.js';
+import {PUBLIC_RELATIONSHIP_PREFIX} from '../public-facts/acceptance-proof.js';
 
 export const MANUAL_ATTESTATION_POLICY = 'manual-attestation-v1';
 export const FACT_WARNINGS = [
@@ -94,6 +96,9 @@ export class PgFactStore implements FactStore {
             strength: change.confirmation.strength, confidence: 1, recencyFactor: 1, state: 'PENDING', evidenceIds: [...observed.evidenceIds], observedLinkIds: [observed.id], updatedAt: now};
           graph.relationships.push(claim);
         } else {
+          // Public citation claims retain their own review basis/policy; never convert them to manual1.
+          const publicOwned = await publicClaimsInstalled(client) && (await client.query('SELECT id FROM public_claim_decisions WHERE scope_id=$1 AND owner_user_id=$2 AND relationship_id=$3 LIMIT 1', [row.id, row.owner_user_id, change.relationshipId])).rowCount;
+          if (change.relationshipId.startsWith(PUBLIC_RELATIONSHIP_PREFIX) || publicOwned) throw denied();
           const existing = graph.relationships.find(r => r.id === change.relationshipId); if (!existing) throw denied();
           claim = existing; relationshipId = claim.id; beforeClaim = structuredClone(claim);
           this.evidence(graph, claim.evidenceIds, 'RELATIONSHIP');
@@ -111,6 +116,8 @@ export class PgFactStore implements FactStore {
       const included = new Set(selections.filter(s => s.include_in_search).map(s => s.relationship_id));
       if (relationshipId) { included.delete(relationshipId); if (includeInSearch) included.add(relationshipId); }
       graph.searchEdges = projectConfirmedRelationships(graph, included);
+      // Rebuild public-owned edges only from their actual ledger and current citation/mapping proof.
+      await refreshPublicCitationProjection(client, row, graph, sources);
       await saveFactSnapshot(client, row, sources, graph);
       const decisionId = randomUUID();
       const changed = <K extends 'people' | 'relationships' | 'searchEdges' | 'evidence' | 'sources'>(key: K): GraphSnapshot[K] => graph[key].filter(value => !before[key].some(p => p.id === value.id && canonicalJson(p) === canonicalJson(value))) as GraphSnapshot[K];

@@ -10,6 +10,7 @@ import {checkedFactSnapshot, conflict, denied, saveFactSnapshot, withFactScope, 
 import type {EndpointView, PublicFactsStore, ReviewPublicFactsRequest, ReviewPublicFactsResponse, ResolvePublicIdentityRequest, ResolvePublicIdentityResponse, StagePublicFactsRequest, StagePublicFactsResponse} from './contracts.js';
 import {validatePublicReview, validatePublicResolution} from './contracts.js';
 import {endpointId, endpointRevision, validatePublicStage} from './validation.js';
+import {latestPublicDecisions, publicClaimsInstalled, refreshPublicCitationProjection} from './projection.js';
 
 export const PUBLIC_CITATION_POLICY = 'public-citation-review-v1';
 type Ref = {id: string; revision: string};
@@ -17,7 +18,7 @@ type EndpointPayload = {endpoint: ClaimEndpoint; documents: Ref[]; evidence: Evi
 type BatchRow = {id: string; source_id: string; source_policy: string; request_digest: string; envelope: PublicSourceEnvelope; endpoint_refs: Ref[]; response: StagePublicFactsResponse};
 type DecisionRow = {id: string; source_id: string; source_policy: string; request_digest: string; endpoint_revision: string; person_id: string; identity_id: string; response: ResolvePublicIdentityResponse};
 const warnings = [
-  'Public proposals remain unreviewed and cannot create search edges in this checkpoint.',
+  'Pending public proposals cannot create search edges; accepted claims require current identity and citation review plus an approved scoring policy.',
   'Resolving a source mention records your explicit identity assignment, not authenticated account ownership.',
   'Publication, retrieval and relationship dates differ; unknown confidence, recency and willingness remain unknown.',
 ];
@@ -98,8 +99,9 @@ export class PgPublicFactsStore implements PublicFactsStore {
           documents: e.documents.filter(d => citations.some(c => c.documentId === d.id)),
           endpoints: [p.subject, ...(p.object ? [p.object] : [])].map(ep => ({id: endpointId(row.id, context.sourceId, ep), revision: endpointRevision(e, ep)}))});
       }
-      // Staging advances the scope version to serialize changing evidence/mapping revisions;
-      // canonical nodes, identities, relationships, affiliations and search edges remain identical.
+      // A new source observation also withdraws traversal that depended on the previous revision.
+      await refreshPublicCitationProjection(client, row, graph, sources);
+      // Staging advances the scope version to serialize changing evidence/mapping revisions.
       await saveFactSnapshot(client, row, sources, graph);
       const id = randomUUID(), response: StagePublicFactsResponse = {batchId: id, scopeId: row.id, graphVersion: graph.graphVersion, duplicate: false, status: 'PENDING_REVIEW'};
       await client.query('INSERT INTO public_fact_batches(id,scope_id,owner_user_id,source_id,batch_key,idempotency_key,request_digest,source_policy,envelope,endpoint_refs,response) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)', [id, row.id, row.owner_user_id, context.sourceId, context.batchId, request.idempotencyKey, digest, context.sourcePolicyVersion, e, JSON.stringify([...endpointRefs.values()]), response]);
@@ -120,9 +122,17 @@ export class PgPublicFactsStore implements PublicFactsStore {
         endpoints.push({endpointId: ref.id, endpointRevision: ref.revision, endpoint: payload.endpoint, latestResolutionDecisionId: decision?.id ?? null,
           resolution: current && liveMapping ? {decisionId: decision.id, personId: decision.person_id} : null, current});
       }
+      // Review must not advertise traversal retained in a stale snapshot after an external dependency change.
+      await refreshPublicCitationProjection(client, row, graph, sources);
+      const decisions = await publicClaimsInstalled(client) ? await latestPublicDecisions(client, row) : [];
+      const proposals = batch.envelope.proposals.map(proposal => {
+        const decision = decisions.find(d => d.source_id === batch.source_id && d.proposal_id === proposal.id && d.proposal_revision === proposal.revision);
+        return decision ? {...proposal, reviewState: decision.decision === 'ACCEPT' ? 'CONFIRMED' as const : 'REJECTED' as const,
+          reviewDecisionId: decision.id, includeInSearch: graph.searchEdges.some(e => e.relationshipId === decision.relationship_id)} : proposal;
+      });
       return {scopeId: row.id, graphVersion: row.graph_version, batchId: batch.id,
         documents: batch.envelope.documents.map(({privatePayloadRef: _private, ...document}) => document), citations: batch.envelope.citations,
-        proposals: batch.envelope.proposals, endpoints, warnings: [...warnings, ...(endpoints.some(ep => !ep.current) ? ['Evidence or endpoint revisions changed. Start from the latest review.'] : [])]};
+        proposals, endpoints, warnings: [...warnings, ...(endpoints.some(ep => !ep.current) ? ['Evidence or endpoint revisions changed. Start from the latest review.'] : [])]};
     });
   }
 
@@ -166,12 +176,13 @@ export class PgPublicFactsStore implements PublicFactsStore {
         graph.identities.push(identity); person.identityIds.push(identityId);
       }
       person.updatedAt = now;
+      await refreshPublicCitationProjection(client, row, graph, sources);
       await saveFactSnapshot(client, row, sources, graph);
       const decisionId = randomUUID();
-      const changed = <K extends 'people' | 'identities' | 'evidence'>(key: K): GraphSnapshot[K] => graph[key].filter(item => !before[key].some(old => old.id === item.id && canonicalJson(old) === canonicalJson(item))) as GraphSnapshot[K];
+      const changed = <K extends 'people' | 'identities' | 'evidence' | 'searchEdges'>(key: K): GraphSnapshot[K] => graph[key].filter(item => !before[key].some(old => old.id === item.id && canonicalJson(old) === canonicalJson(item))) as GraphSnapshot[K];
       const event: GraphBuildEvent = {schemaVersion: 1, jobId: decisionId, scopeId: row.id, seq: 0, type: 'BATCH_COMMITTED', operationKind: 'IDENTITY_LINK',
         baseGraphVersion: row.graph_version, graphVersion: graph.graphVersion, people: changed('people'), identities: changed('identities'), evidence: changed('evidence'),
-        sources: [], relationships: [], observedLinks: [], searchEdges: [], organizations: [], removedPersonIds: [], removedEdgeIds: []};
+        sources: [], relationships: [], observedLinks: [], searchEdges: changed('searchEdges'), organizations: [], removedPersonIds: [], removedEdgeIds: before.searchEdges.filter(e => !graph.searchEdges.some(current => current.id === e.id)).map(e => e.id)};
       validateGraphBuildEvent(event, {jobId: decisionId, scopeId: row.id, afterSeq: -1, before, after: graph, candidateIds: new Set(), proposalIds: new Set()});
       const response: ResolvePublicIdentityResponse = {scopeId: row.id, baseGraphVersion: row.graph_version, graphVersion: graph.graphVersion, decisionId,
         endpointId: request.endpointId, endpointRevision: request.expectedEndpointRevision, personId, identityId, duplicate: false, events: [event]};

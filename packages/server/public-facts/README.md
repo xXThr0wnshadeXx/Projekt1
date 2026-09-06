@@ -1,9 +1,9 @@
-# Public citation staging and explicit identity materialization
+# Public citation staging, identity materialization, and relationship review
 
-This is the first public-citation checkpoint: durable private source text/citations/proposal revisions and
-explicit source-mention→canonical-person decisions. It **does not accept public relationship/affiliation
-claims, compute their scores, or create SearchEdges**. It imports frozen discovery contract68214d3 and
-PUBLIC_ARTICLE enum extensiond79638c without changing them or the existing manual-facts module.
+Durable private source text/citations/proposal revisions support explicit source-mention→canonical-person
+decisions and separate public relationship acceptance. Searchable acceptance requires a trusted server
+scoring policy; there is no default production policy. Affiliation/organization acceptance is not implemented.
+Frozen discovery contract68214d3 and PUBLIC_ARTICLE extensiond79638c remain unchanged.
 
 ## Composition and ports
 
@@ -30,10 +30,10 @@ Exact typed contracts are in `contracts.ts`:
   `{batchId,scopeId,graphVersion,duplicate,status:'PENDING_REVIEW'}`. Document retrieval's NOT_PERSISTED
   status must remain until this succeeds. No provider fetch, extraction or fabricated assertion occurs here.
 - **`review(credential,{scopeId,batchId})`** returns current graphVersion, safe document metadata (no
-  privatePayloadRef), exact short citations, unchanged PENDING proposals and endpoint views. Each endpoint
+  privatePayloadRef), exact short citations, proposals with latest review state and endpoint views. Each endpoint
   includes server-derived endpointId/revision, original unresolved/source-asserted endpoint,
   latestResolutionDecisionId, current:boolean and a valid current resolution or null. It returns no normalized
-  text, raw record envelope, session data or DB handles. Proposals are immutable original records; join their
+  text, raw record envelope, session data or DB handles. Proposal content remains immutable; join its
   sourceIdentity to endpoint views for current resolution rather than treating their initial personId as current.
 - **`resolve(credential,request)`** takes `{scopeId,expectedGraphVersion,idempotencyKey,confirm:true,
   endpointId,expectedEndpointRevision,expectedResolutionDecisionId,disposition}` and personId only for
@@ -47,7 +47,64 @@ An existing accepted source identity cannot be reassigned to another person or a
 source mention can be explicitly re-reviewed by LINK_EXISTING to the same mapped person; NEW_PERSON
 cannot duplicate its accepted source identity. A full unlink/reassignment/revert flow is not implemented.
 New intermediates **may be discovered outside all prior contact lists**: explicitly create/bind them here
-before later public-claim acceptance. Neither relationship endpoint must be root after that future acceptance.
+before public-claim acceptance. Neither relationship endpoint must be root.
+
+## Public relationship acceptance
+
+Apply migration006 with `migratePublicClaimDecisions(pool, absolutePathToMigration006)` after001/004;
+003 is needed only for the existing manual fact service. Migration005 belongs to backend receipts.
+Compose `PublicClaimReviewService({auth, claims:new PgPublicClaimStore(pool,{policy})})` from
+`acceptance.ts`; HTTP composition must enforce the existing authenticated same-origin/CSRF boundary.
+`policy` is an optional trusted server-only `PublicCitationPolicy` from `acceptance-contracts.ts`.
+
+`review(credential, request)` atomically accepts or rejects 1–10 immutable proposals:
+
+```ts
+const request = {scopeId, expectedGraphVersion, idempotencyKey, confirm:true,
+  decisions:[{sourceId, proposalId, proposalRevision, decision:'ACCEPT', includeInSearch:true,
+    bindings:{subject:{endpointId, endpointRevision, resolutionDecisionId},
+      object:{endpointId:otherEndpointId, endpointRevision:otherRevision,
+        resolutionDecisionId:otherDecisionId}}, relativeStrength:0.5}]};
+// relativeStrength is optional user preference, passed to the approved policy without a default.
+// Reject selector: {sourceId,proposalId,proposalRevision,decision:'REJECT'}.
+```
+
+Use current endpoint views for binding revisions and resolution decision IDs. Both endpoints require
+explicit valid same-scope assignments; equal names never imply a shared identity. The source subject→object
+direction is retained without generating a reverse edge. Only DIRECT_EXPLICIT/CORROBORATED_DIRECT
+interpersonal relationships with known relationshipKind qualify. Context, follows, co-occurrence, inferred
+coemployment, ambiguous claims, and UNKNOWN kinds do not qualify. The trusted producer establishes
+direct support and corroboration; exact retained quotes, roles, hashes, source policies, document/proposal/
+endpoint heads and current canonical mappings are checked again at acceptance and projection.
+
+The response returns reviewId, base/current graphVersion, duplicate, per-proposal decisionId/state/
+relationshipId/searchable, one validated BATCH_COMMITTED/REVIEW event, and warnings. The ledger basis
+is PUBLIC_CITATION_REVIEW; original relationship-role evidence retains its source, dates, and confidence.
+No manual assertion or confidence1 is synthesized. IncludeInSearch:false stores a private review without
+requiring policy or inventing numeric factors; relationshipId is null if no historical canonical claim exists.
+Rejection/opt-out removes traversal; historical provenance remains. Exact retry receipts require the same
+latest claim decisions and current source/identity/citation dependencies. Stale/superseded accepts conflict.
+
+`PublicCitationPolicy` has a version, explicit strength/confidence/recency semantics, and synchronous
+`assess({proposal,citations,documents,relativeStrength})`. Return assessed strength/confidence/recencyFactor
+in (0,1] plus warnings, or null/unassessed nullable factors to fail closed. Missing or unassessed policy returns
+SOURCE_UNAVAILABLE for searchable acceptance. No model score, hardcoded relation weights, retrieval-age
+decay, or willingness probability is introduced. The production policy remains a separately approved gate;
+anonymous test calibration exists only in tests. Store policy version/semantics and assessment with decisions.
+
+Compose `withPublicCitationWarnings(existingEngine)` from `acceptance-search.ts` to annotate returned
+and streamed paths with source-assertion/non-probability/unknown-willingness limitations. It preserves the
+installed search engine, ranks, factors and trace order. Compose alongside existing `withFactWarnings`.
+
+Every source/identity/import mutation that can affect public dependencies must call
+`refreshPublicCitationProjection(client,scopeRow,graph,enabledSourceRows)` inside its locked transaction,
+before saving the snapshot, or drop public traversal/fail closed. Source rows use `{id,policy_version,summary}`.
+The helper proves each latest accepted ledger entry against current dependencies and original stored
+assessment; it does not recalculate scores. Stage, resolve, and manual fact confirmation already call it;
+review performs the same check in its returned view. Other application lifecycle/read composition is owned
+by backend. Removed edges must invalidate cached searches/use a new graphVersion. Prefix alone never
+authorizes projection: a matching current ledger and proof are required. Manual review rejects public-owned
+relationship IDs and rebuilds valid public edges from this proof after rebuilding manual edges.
 
 ## Producer/source provisioning invariants
 
@@ -92,9 +149,9 @@ and OWNER_ASSERTED_ANCHOR endpoints have null personId/decision; neither grants 
 Publication/occurrence dates and precision stay distinct from retrieval. Null public proposal confidence,
 currentness and relationship kind are retained; no numeric defaults are created. Required normalized
 Evidence.confidence may use0 to represent unassessed evidence in a producer; this is never projected as
-positive public relationship confidence. Public scoring/freshness and organization mapping remain separate
-agreements. CONTEXT_ONLY/AMBIGUOUS/co-occurrence may be retained as unreviewed proposals but
-never traverse. Even direct proposals remain PENDING here. CORROBORATED_DIRECT requires at least
+positive public relationship confidence. Production scoring/freshness and organization mapping remain
+separate agreements. CONTEXT_ONLY/AMBIGUOUS/co-occurrence may be retained as unreviewed proposals
+but never traverse. Direct proposals remain PENDING until explicit acceptance. CORROBORATED_DIRECT requires at least
 2 declared independence groups; the producer must establish actual independence, not invent group IDs.
 
 Explicit identity assignment uses the existing Person.identityConfidence convention (1 for the accepted
@@ -120,10 +177,11 @@ failure or session expiry. Older texts/decisions remain private audit history, n
 
 Producer/extractor must create actual proposals from permitted retrieved documents; the source-only
 provider module returns no proposals. Root owns authenticated source orchestration and HTTP/UI ports.
-Route-level public-citation acceptance, citation-aware graph projection, source/identity withdrawal
-invalidation, reassign/revert and Ben/Shreev-approved public score/freshness policy remain unimplemented.
-No live public record, provider query, real person or multi-hop route is claimed by this checkpoint.
+Application-wide projection lifecycle integration, identity reassign/revert, affiliation/organization review,
+and Ben/Shreev-approved production score/freshness policy remain separate gates. Acceptance/projection is
+tested with anonymous injected source fixtures; no live public record/provider query/real route is claimed.
 
-Run `npm run build:server`, typecheck:server/typecheck:graph and focused tests/public-facts*.test.mjs.
+Run `npm run build:server`, typecheck:server/typecheck:graph and focused tests/public-facts*.test.mjs,
+tests/public-claims*.test.mjs and tests/facts*.test.mjs.
 Database suite allows only anonymous postgres://projekt1_test@127.0.0.1:55439/postgres and creates/drops
 a random schema; it must never run against the private live database. Anonymous fixtures are tests only.
