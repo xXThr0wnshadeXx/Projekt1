@@ -3,7 +3,7 @@
 Orbit collects visible connection relationships through a local Chrome companion, draws an interactive network, and saves observed people and relationships to one shared, persistent team library. Collections can overlap: the library merges them so a saved person can be explored without another LinkedIn request.
 
 - **Team repository:** [xXThr0wnshadeXx/Projekt1](https://github.com/xXThr0wnshadeXx/Projekt1)
-- **Hosted application:** [Orbit](https://orbit-network-mapper.doublejav.chatgpt.site/)
+- **Hosted application:** [Orbit](https://orbit-shreev2703-graph-test.cloudy-moose-7621.chatgpt.site/)
 - **Current application / companion version:** `2.0.0`
 
 The repository is named `Projekt1`; the application is named **Orbit**. Both the source and the hosted application are public. Anyone can open the interface and download the companion. **Sign in with ChatGPT** inside Orbit to contribute to the shared team library. Public viewing does not grant database writes, deployment permissions, or access to the signed-in workspace. Ask the project owner for development/deployment access when needed.
