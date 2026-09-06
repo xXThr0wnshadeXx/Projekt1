@@ -2,6 +2,8 @@
 
 Orbit builds an evidence-backed graph from LinkedIn pages that a contributor can already view. A Chrome companion reads those pages locally; one OpenAI Sites deployment hosts the interface, authenticated API, and shared D1 database.
 
+New contributors and new Codex chats should read [PROJECT_HANDOFF.md](PROJECT_HANDOFF.md) for the complete architecture, database, deployment, testing, access, and continuation context.
+
 ## Use Orbit
 
 - **Canonical application:** [orbit-shreev2703-graph-test.shreev2703.chatgpt.site](https://orbit-shreev2703-graph-test.shreev2703.chatgpt.site/)
