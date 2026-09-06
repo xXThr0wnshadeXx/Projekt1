@@ -1,4 +1,4 @@
-import {matchesFilters,groupTargets,springProgress} from './filters.js';
+import {matchesFilters,groupTargets,springProgress,relationshipMatches} from './filters.js';
 import {scorePerson} from './search.js';
 const MIN_SCALE=.001,MAX_SCALE=12,CONTROL_ZOOM_FACTOR=1.5;
 // Concentric rings fill a compact disk. Depth orders the rings; stable IDs order
@@ -24,7 +24,7 @@ export function focusTargets(points,root){
 }
 export class NetworkGraph {
   constructor(canvas,onSelect){
-    this.canvas=canvas;this.ctx=canvas.getContext('2d');this.onSelect=onSelect;this.points=[];this.edges=[];this.positions=new Map();this.showAllConnections=false;this.filters={};this.groupBy="none";this.groupLabels=[];this.treeRoot=null;this.treeNodes=null;this.treeDepths=new Map();this.motion=null;this.scale=1;this.fitScale=1;this.offset={x:0,y:0};this.selected=null;this.query='';this.searchContext=new Set();this.path=new Set();this.neighbors=new Set();this.autoFit=true;this.scrollZoom=false;this.zoomTarget=null;this.zoomTime=null;this.frame=null;this.childCounts=new Map();this.directCount=0;this.dataRevision=0;this.matchRevision=0;this.filterDirty=true;this.searchDirty=true;this.reducedMotion=globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches||false;
+    this.canvas=canvas;this.ctx=canvas.getContext('2d');this.onSelect=onSelect;this.points=[];this.edges=[];this.positions=new Map();this.showAllConnections=false;this.filters={};this.relationshipIds=null;this.relationshipEdges=null;this.groupBy="none";this.groupLabels=[];this.treeRoot=null;this.treeNodes=null;this.treeDepths=new Map();this.motion=null;this.scale=1;this.fitScale=1;this.offset={x:0,y:0};this.selected=null;this.query='';this.searchContext=new Set();this.path=new Set();this.neighbors=new Set();this.autoFit=true;this.scrollZoom=false;this.zoomTarget=null;this.zoomTime=null;this.frame=null;this.childCounts=new Map();this.directCount=0;this.dataRevision=0;this.matchRevision=0;this.filterDirty=true;this.searchDirty=true;this.reducedMotion=globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches||false;
     if(globalThis.document?.fonts)document.fonts.load('15px "Space Grotesk"').then(()=>this.draw()).catch(()=>{});
     this.observer=new ResizeObserver(()=>this.resize());this.observer.observe(canvas.parentElement);
     canvas.addEventListener('wheel',e=>{if(!this.scrollZoom)return;e.preventDefault();const pixels=e.deltaY*(e.deltaMode===1?16:e.deltaMode===2?this.h:1);this.queueZoom(Math.exp(-Math.max(-120,Math.min(120,pixels))*.002),e.offsetX,e.offsetY);},{passive:false});
@@ -41,6 +41,11 @@ export class NetworkGraph {
     if(state.graphRevision!==undefined&&this.graphRevision===state.graphRevision)return;
     this.graphRevision=state.graphRevision;this.dataRevision++;this.filterDirty=true;this.searchDirty=true;
     const nodes=Object.values(state.nodes),adj=new Map();this.edges=Object.values(state.edges);
+    // A bounded shared view can lose nodes when its distance or source changes.
+    this.points=this.points.filter(p=>Boolean(state.nodes[p.id]));
+    for(const id of this.positions.keys())if(!state.nodes[id])this.positions.delete(id);
+    if(this.treeRoot&&!state.nodes[this.treeRoot]){this.treeRoot=null;this.treeNodes=null;this.treeDepths.clear();}
+    if(this.selected&&!state.nodes[this.selected]){this.selected=null;this.path.clear();}
     for(const e of this.edges){for(const [a,b] of [[e.source,e.target],[e.target,e.source]]){if(!adj.has(a))adj.set(a,[]);adj.get(a).push(b);}}
     if(nodes.some(p=>this.positions.has(p.id)&&this.positions.get(p.id).depth!==p.depth)){this.points=[];this.positions.clear();this.childCounts.clear();this.directCount=0;this.autoFit=true;}
     const added=nodes.filter(p=>!this.positions.has(p.id)).sort((a,b)=>a.depth-b.depth),now=performance.now();
@@ -73,13 +78,21 @@ export class NetworkGraph {
     this.zoom(next/this.scale,target.x,target.y);return true;
   }
   nodeRadius(p){return Math.max(p.r,(p.depth===0?8:p.depth===1?4.5:3)/this.scale);}
-  matchesFacet(p){return p.filterMatch!==false;}
+  edgeVisible(edge){return !this.relationshipEdges||this.relationshipEdges.has(edge);}
+  matchesFacet(p){return p.filterMatch!==false&&(!this.relationshipIds||this.relationshipIds.has(p.id));}
   isVisible(p){return this.matchesFacet(p)&&(!this.treeNodes||this.treeNodes.has(p.id));}
   isSearchHit(p){return !this.query||p.searchMatch?.score>0;}
   evaluateFilter(p){return matchesFilters(p,this.filters);}
   evaluateSearch(p){p.nameHit=Boolean(this.query&&scorePerson({name:p.name},this.query).score>0);return this.query?scorePerson(p,this.query):{score:1,reason:''};}
   refreshMatches(){
     if(!this.filterDirty&&!this.searchDirty)return;
+    if(this.filterDirty){
+      this.relationshipIds=null;this.relationshipEdges=null;
+      if(this.filters.relationship&&this.filters.relationship!=='all'){
+        this.relationshipIds=new Set(this.state?.root?[this.state.root]:[]);this.relationshipEdges=new Set();
+        for(const edge of this.edges)if(relationshipMatches(edge,this.filters.relationship)){this.relationshipEdges.add(edge);this.relationshipIds.add(edge.source);this.relationshipIds.add(edge.target);}
+      }
+    }
     for(const p of this.points){if(this.filterDirty)p.filterMatch=this.evaluateFilter(p);if(this.searchDirty)p.searchMatch=this.evaluateSearch(p);}
     this.filterDirty=false;this.searchDirty=false;this.matchRevision++;
   }
@@ -87,7 +100,7 @@ export class NetworkGraph {
   updateSearchContext(){
     this.searchContext.clear();
     const f=this.filters,root=this.state?.root;
-    if(!this.query||!root||this.treeRoot||f.location?.trim()||f.field?.trim()||f.keywords?.length||f.first===false||f.second===false||f.extended===false)return;
+    if(!this.query||!root||this.treeRoot||f.relationship&&f.relationship!=='all'||f.location?.trim()||f.field?.trim()||f.keywords?.length||f.first===false||f.second===false||f.extended===false)return;
     // Match names alone: employer, school, and location searches keep their usual behavior.
     const hits=this.points.filter(p=>p.nameHit);
     if(!hits.length)return;
@@ -123,7 +136,7 @@ export class NetworkGraph {
   }
   buildTree(root,maxDepth=2,maxNodes=600){
     if(!this.positions.has(root))return null;const allowed=new Set(this.points.filter(p=>this.matchesFacet(p)).map(p=>p.id)),adj=new Map();
-    for(const e of this.edges){if(!allowed.has(e.source)||!allowed.has(e.target))continue;if(!adj.has(e.source))adj.set(e.source,[]);if(!adj.has(e.target))adj.set(e.target,[]);adj.get(e.source).push(e.target);adj.get(e.target).push(e.source);}
+    for(const e of this.edges){if(!this.edgeVisible(e)||!allowed.has(e.source)||!allowed.has(e.target))continue;if(!adj.has(e.source))adj.set(e.source,[]);if(!adj.has(e.target))adj.set(e.target,[]);adj.get(e.source).push(e.target);adj.get(e.target).push(e.source);}
     const nodes=new Set([root]),depths=new Map([[root,0]]),queue=[root];while(queue.length&&nodes.size<maxNodes){const id=queue.shift(),depth=depths.get(id);if(depth>=maxDepth)continue;for(const next of (adj.get(id)||[]).sort()){if(nodes.has(next))continue;nodes.add(next);depths.set(next,depth+1);queue.push(next);if(nodes.size>=maxNodes)break;}}
     this.treeRoot=root;this.treeNodes=nodes;this.treeDepths=depths;return {count:nodes.size,direct:[...depths.values()].filter(depth=>depth===1).length,extended:[...depths.values()].filter(depth=>depth===2).length};
   }
@@ -132,7 +145,7 @@ export class NetworkGraph {
   layout(){
     this.refreshMatches();this.updateSearchContext();
     const now=performance.now();this.advanceMotion(now);
-    const visible=this.points.filter(p=>this.isVisible(p)),focused=this.query?visible.filter(p=>this.isSearchVisible(p)):visible,faceted=Boolean(this.filters.location||this.filters.field||this.filters.keywords?.length),tree=this.treeRoot?networkTargets(visible.map(p=>({...p,depth:this.treeDepths.get(p.id)??3})),this.edges,this.treeRoot):null,grouped=!tree&&this.groupBy!=='none'?groupTargets(focused,this.groupBy,this.groupKeywords):null,focus=(!tree&&!grouped&&(this.query||faceted))?focusTargets(focused,this.state?.root):null;
+    const visible=this.points.filter(p=>this.isVisible(p)),focused=this.query?visible.filter(p=>this.isSearchVisible(p)):visible,faceted=Boolean(this.filters.location||this.filters.field||this.filters.keywords?.length||this.filters.relationship&&this.filters.relationship!=='all'),tree=this.treeRoot?networkTargets(visible.map(p=>({...p,depth:this.treeDepths.get(p.id)??3})),this.edges,this.treeRoot):null,grouped=!tree&&this.groupBy!=='none'?groupTargets(focused,this.groupBy,this.groupKeywords):null,focus=(!tree&&!grouped&&(this.query||faceted))?focusTargets(focused,this.state?.root):null;
     this.groupLabels=grouped?.labels||[];
     // Keep dimmed nonmatches outside the result disk so they cannot sit under
     // selectable matches after those matches move toward the center.
@@ -157,10 +170,10 @@ export class NetworkGraph {
   }
   paint(now){
     const ctx=this.ctx;if(!ctx||!this.w||!this.h)return;const zooming=this.advanceZoom(now);ctx.clearRect(0,0,this.w,this.h);ctx.save();ctx.translate(this.w/2+this.offset.x,this.h/2+this.offset.y);ctx.scale(this.scale,this.scale);
-    let animating=this.advanceMotion(now)||zooming,latest=null,visible=0;const faceted=Boolean(this.filters.location||this.filters.field||this.filters.keywords?.length),focused=this.points.filter(p=>this.isVisible(p)&&this.isSearchVisible(p)),focusCount=focused.length;
+    let animating=this.advanceMotion(now)||zooming,latest=null,visible=0;const faceted=Boolean(this.filters.location||this.filters.field||this.filters.keywords?.length||this.filters.relationship&&this.filters.relationship!=='all'),focused=this.points.filter(p=>this.isVisible(p)&&this.isSearchVisible(p)),focusCount=focused.length;
     for(const label of this.groupLabels){const text=`${label.name} · ${label.count}`,fontSize=13/this.scale;ctx.font=`600 ${fontSize}px "Space Grotesk",sans-serif`;ctx.textAlign='center';const width=Math.max(76,text.length*7.2)/this.scale,height=28/this.scale;ctx.globalAlpha=.94;ctx.fillStyle='#292a24';ctx.fillRect(label.x-width/2,label.y-height*.72,width,height);ctx.strokeStyle='#57594e';ctx.lineWidth=1/this.scale;ctx.strokeRect(label.x-width/2,label.y-height*.72,width,height);ctx.fillStyle='#ece8d8';ctx.fillText(text,label.x,label.y+fontSize*.25);}
     // Batch ordinary edges into one canvas stroke, keeping highlighted paths separate.
-    for(const chosen of [false,true]){ctx.strokeStyle=chosen?'#ead779':this.selected?'#41443c':'#747b67';ctx.lineWidth=(chosen?1.6:.85)/this.scale;ctx.globalAlpha=chosen?1:(this.searchContext.size?.65:this.query?.22:.55);ctx.beginPath();for(const e of this.edges){const a=this.positions.get(e.source),b=this.positions.get(e.target);if(!a||!b||!this.isVisible(a)||!this.isVisible(b)||a.bornAt>now||b.bornAt>now)continue;const highlighted=(this.path.has(a.id)&&this.path.has(b.id))||(Boolean(this.selected)&&(a.id===this.selected||b.id===this.selected));if(this.query&&(!this.isSearchVisible(a)||!this.isSearchVisible(b))&&!highlighted)continue;if((faceted||this.groupBy!=='none')&&!this.showAllConnections&&!highlighted&&!(this.searchContext.has(a.id)&&this.searchContext.has(b.id)))continue;if(highlighted!==chosen)continue;ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);}ctx.stroke();}
+    for(const chosen of [false,true]){ctx.strokeStyle=chosen?'#ead779':this.selected?'#41443c':'#747b67';ctx.lineWidth=(chosen?1.6:.85)/this.scale;ctx.globalAlpha=chosen?1:(this.searchContext.size?.65:this.query?.22:.55);ctx.beginPath();for(const e of this.edges){if(!this.edgeVisible(e))continue;const a=this.positions.get(e.source),b=this.positions.get(e.target);if(!a||!b||!this.isVisible(a)||!this.isVisible(b)||a.bornAt>now||b.bornAt>now)continue;const highlighted=(this.path.has(a.id)&&this.path.has(b.id))||(Boolean(this.selected)&&(a.id===this.selected||b.id===this.selected));if(this.query&&(!this.isSearchVisible(a)||!this.isSearchVisible(b))&&!highlighted)continue;if((faceted||this.groupBy!=='none')&&!this.showAllConnections&&!highlighted&&!(this.searchContext.has(a.id)&&this.searchContext.has(b.id)))continue;if(highlighted!==chosen)continue;ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);}ctx.stroke();}
     const labelBoxes=[];
     for(const p of this.points){const shown=this.isVisible(p);if(!shown){if(p.snapAt&&!this.reducedMotion){const progress=(now-p.snapAt)/680;if(progress<0){animating=true;ctx.globalAlpha=.8;ctx.fillStyle=p.depth===0?'#ead779':p.depth===1?'#a8bf83':'#b5a0cb';ctx.beginPath();ctx.arc(p.x,p.y,this.nodeRadius(p),0,Math.PI*2);ctx.fill();}else if(progress<1){animating=true;this.drawDust(p,progress);}else p.snapAt=null;}continue;}const age=now-p.bornAt;if(age<0){animating=true;continue;}visible++;if(!latest||p.bornAt>latest.bornAt)latest=p;const entering=!this.reducedMotion&&age<450;if(entering)animating=true;let reveal=1;if(p.restoreAt&&!this.reducedMotion){const progress=(now-p.restoreAt)/360;if(progress<0){animating=true;continue;}reveal=Math.min(1,progress);if(progress<1)animating=true;else p.restoreAt=null;}const opacity=(entering?Math.min(1,age/180):1)*reveal,hit=this.isSearchVisible(p),selected=p.id===this.selected,muted=this.selected&&!this.neighbors.has(p.id);if(this.query&&this.isSearchHit(p)){ctx.globalAlpha=.18*opacity;ctx.fillStyle='#ead779';ctx.beginPath();ctx.arc(p.x,p.y,this.nodeRadius(p)+9/this.scale,0,Math.PI*2);ctx.fill();}ctx.globalAlpha=(hit?1:.035)*opacity;ctx.fillStyle=!hit?'#5b5d56':muted?'#747474':entering?'#ead779':p.depth===0?'#ead779':p.depth===1?'#a8bf83':'#b5a0cb';ctx.beginPath();ctx.arc(p.x,p.y,(this.nodeRadius(p)+(selected?2/this.scale:0))+(entering?2*(1-age/450):0),0,Math.PI*2);ctx.fill();if(selected||(entering&&!muted)){ctx.strokeStyle=entering?'#b4c5e0':'#f2f0e6';ctx.lineWidth=1/this.scale;ctx.globalAlpha*=entering?1-age/450:1;ctx.beginPath();ctx.arc(p.x,p.y,this.nodeRadius(p)+(entering?5+age/40:6)/this.scale,0,Math.PI*2);ctx.stroke();ctx.globalAlpha=opacity;}
       const grouped=this.groupBy!=='none',treeDepth=this.treeDepths.get(p.id),labelCandidate=hit&&(selected||(!grouped&&p.depth===0)||p.id===this.treeRoot||(this.treeRoot&&treeDepth===1&&focusCount<=80)||(!grouped&&!this.treeRoot&&p.depth===1&&this.points.length<65)||(this.query&&focusCount<=(grouped?18:120))||(!grouped&&!this.treeRoot&&faceted&&focusCount<=80));if(labelCandidate){ctx.font=`${15/this.scale}px "Space Grotesk",sans-serif`;ctx.textAlign='center';ctx.fillStyle=muted?'#898989':'#e9e6d8';const text=(p.name||'Unknown person').slice(0,35),x=p.x*this.scale,y=p.y*this.scale+this.nodeRadius(p)*this.scale+22,w=Math.max(40,text.length*7.7),box={x:x-w/2,y:y-16,w,h:20};if(selected||!labelBoxes.some(b=>box.x<b.x+b.w&&box.x+box.w>b.x&&box.y<b.y+b.h&&box.y+box.h>b.y)){labelBoxes.push(box);ctx.fillText(text,p.x,p.y+this.nodeRadius(p)+22/this.scale);}}

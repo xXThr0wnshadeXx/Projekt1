@@ -87,7 +87,7 @@ test('fit is always 100% and controls make useful progress on very large maps',t
  assert.equal(h.g.zoomTarget,null);assert.ok(Math.abs(h.g.zoomRatio()-1.5)<1e-12);assert.ok(Math.abs(ratios.at(-1)-1.5)<1e-12);
  h.g.stepZoom(-1);assert.ok(Math.abs(h.g.zoomTarget.scale/h.g.fitScale-1)<1e-12);
 });
-test('adaptive branch targets make room for growing second-degree clusters',()=>{
+test('disk targets keep growing second-degree clusters distinct',()=>{
  const points=[{id:'root',depth:0},{id:'a',depth:1},{id:'b',depth:1},...Array.from({length:30},(_,i)=>({id:`child-${i}`,depth:2}))],edges=[{source:'root',target:'a'},{source:'root',target:'b'},...Array.from({length:30},(_,i)=>({source:'a',target:`child-${i}`}))];
  const targets=networkTargets(points,edges,'root');assert.equal(targets.size,points.length);for(const point of targets.values())assert.ok(Number.isFinite(point.x)&&Number.isFinite(point.y));assert.ok(Math.hypot(targets.get('a').x,targets.get('a').y)<Math.hypot(targets.get('b').x,targets.get('b').y)||Math.hypot(targets.get('a').x,targets.get('a').y)>0);
  const seen=[];for(const p of points){const at=targets.get(p.id);for(const other of seen)assert.ok(Math.hypot(at.x-other.x,at.y-other.y)>0);seen.push(at);}
@@ -124,6 +124,12 @@ test('search spreads matches and makes dimmed people impossible to select',t=>{
 test('filter changes mark removed nodes for a dust transition and fit the survivors',t=>{
  const h=graph(t),s=newState(root);const a=addPerson(s,{url:'https://www.linkedin.com/in/boston/',location:'Boston'},1),b=addPerson(s,{url:'https://www.linkedin.com/in/paris/',location:'Paris'},1);addEdge(s,root,a,source);addEdge(s,root,b,source);h.g.setData(s);h.g.setFilters({location:'boston'});
  assert.ok(Number.isFinite(h.g.positions.get(b).snapAt));assert.equal(h.g.isVisible(h.g.positions.get(a)),true);assert.equal(h.g.isVisible(h.g.positions.get(b)),false);assert.ok(h.g.scale>0);
+});
+test('relationship filter limits both visible people and drawable edges before search',t=>{
+ const h=graph(t),s=newState(root),a=addPerson(s,{url:'https://www.linkedin.com/in/listed/'},1),b=addPerson(s,{url:'https://www.linkedin.com/in/commenter/'},1);
+ addEdge(s,root,a,source);addEdge(s,root,b,{type:'comment_interaction',post:'https://www.linkedin.com/feed/update/urn:li:activity:123/',commentId:'urn:li:comment:(activity:123,456)',commenter:b,author:root,observedAt:'2026-09-06T00:00:00Z'});h.g.setData(s);h.g.setFilters({relationship:'comments'});
+ assert.equal(h.g.isVisible(h.g.positions.get(root)),true);assert.equal(h.g.isVisible(h.g.positions.get(a)),false);assert.equal(h.g.isVisible(h.g.positions.get(b)),true);assert.equal(h.g.edgeVisible(Object.values(s.edges).find(edge=>edge.target===a||edge.source===a)),false);
+ h.g.search('listed');assert.equal(h.g.points.filter(point=>h.g.isVisible(point)&&h.g.isSearchVisible(point)).length,0);
 });
 
 test('unfiltered name search retains the starter and real intermediate route only',t=>{
@@ -172,10 +178,10 @@ test('filtering and fuzzy search run once per change, never during paint, zoom o
  assert.equal(filters.mock.callCount(),10000);assert.equal(search.mock.callCount(),0);
  h.g.search('engineer');assert.equal(search.mock.callCount(),10000);
  const frameStart=performance.now();for(let i=0;i<5;i++){h.g.paint(performance.now()+2000);h.g.pickPoint(0,0);h.g.fit();h.g.zoom(1.05);}
- assert.equal(filters.mock.callCount(),10000);assert.equal(search.mock.callCount(),10000);
+ const frameMs=performance.now()-frameStart;assert.equal(filters.mock.callCount(),10000);assert.equal(search.mock.callCount(),10000);
  h.g.setFilters({location:'Boston'});h.g.search('engineer');assert.equal(filters.mock.callCount(),10000);assert.equal(search.mock.callCount(),10000);
  h.g.setFilters({location:'Boston'},'location');assert.equal(filters.mock.callCount(),10000);assert.equal(search.mock.callCount(),10000);
- t.diagnostic(`Synthetic 10k map: filter apply ${filterMs.toFixed(0)}ms; 5 mock-canvas paints + hover/fit/zoom ${(performance.now()-frameStart).toFixed(0)}ms. No fuzzy evaluations during rendering.`);
+ t.diagnostic(`Synthetic 10k map: filter apply ${filterMs.toFixed(0)}ms; 5 mock-canvas paints + hover/fit/zoom ${frameMs.toFixed(0)}ms. No fuzzy evaluations during rendering.`);
 });
 
 test('cached results refresh for metadata changes, new people, graph replacement and tree exit',t=>{
@@ -185,7 +191,8 @@ test('cached results refresh for metadata changes, new people, graph replacement
  addPerson(s,{url:a,location:'Boston',headline:'Software engineer'},1);g.setData(s);assert.equal(g.isVisible(g.positions.get(a)),true);assert.equal(g.isSearchHit(g.positions.get(a)),true);
  const b=addPerson(s,{url:'https://www.linkedin.com/in/cache-b/',name:'Taylor',location:'Boston',headline:'Engineer'},1);addEdge(s,root,b,source);g.setData(s);assert.equal(g.isVisible(g.positions.get(b)),true);assert.equal(g.isSearchHit(g.positions.get(b)),true);
  g.search('');g.setFilters({});g.showTree(a);assert.deepEqual({x:g.positions.get(a).x,y:g.positions.get(a).y},{x:0,y:0});g.clearTree();assert.deepEqual({x:g.positions.get(root).x,y:g.positions.get(root).y},{x:0,y:0});
- const revision=g.matchRevision;g.setData(null);assert.ok(g.matchRevision>revision);g.setData({...s,id:'replacement'});assert.equal(g.points.length,3);assert.equal(g.isVisible(g.positions.get(a)),true);
+ delete s.nodes[b];s.graphRevision++;g.setData(s);assert.equal(g.points.length,2);assert.equal(g.positions.has(b),false);
+ const revision=g.matchRevision;g.setData(null);assert.ok(g.matchRevision>revision);g.setData({...s,id:'replacement'});assert.equal(g.points.length,2);assert.equal(g.isVisible(g.positions.get(a)),true);
 });
 
 test('large filter changes bound particle effects instead of animating every removed node',t=>{

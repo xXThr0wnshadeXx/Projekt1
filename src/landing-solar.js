@@ -15,6 +15,12 @@ export function project(point, angle) {
   const z=point.y*Math.sin(tilt)+depth*Math.cos(tilt), perspective=780/(780-z);
   return {x:x*perspective,y:y*perspective,z,perspective};
 }
+/** The centre node is fixed; every other node travels on its own inclined circular path. */
+export function orbitalPosition(node, seconds=0) {
+  if(!node.orbit)return {x:node.x,y:node.y,z:node.z};
+  const {radius,inclination,phase,speed}=node.orbit,theta=phase+seconds*speed;
+  return {x:Math.cos(theta)*radius,y:Math.sin(theta)*radius*Math.sin(inclination),z:Math.sin(theta)*radius*Math.cos(inclination)};
+}
 export function makeSystem() {
   const nodes=[{x:0,y:0,z:0,r:24,color:colors[0]}], rings=[];
   for(let ring=0;ring<5;ring++){
@@ -22,7 +28,10 @@ export function makeSystem() {
     const position=theta=>({x:Math.cos(theta)*radius,y:Math.sin(theta)*radius*Math.sin(inclination),z:Math.sin(theta)*radius*Math.cos(inclination)});
     for(let i=0;i<=100;i++)points.push(position(i/100*TAU));
     rings.push(points);
-    for(let i=0;i<ring+3;i++)nodes.push({...position(i/(ring+3)*TAU+ring*1.47),r:5+(i*7+ring*3)%8,color:colors[(ring+i+1)%4]});
+    for(let i=0;i<ring+3;i++){
+      const phase=i/(ring+3)*TAU+ring*1.47,orbit={radius,inclination,phase,speed:(.13+ring*.035)*(ring%2?-1:1)};
+      nodes.push({...orbitalPosition({orbit}),r:5+(i*7+ring*3)%8,color:colors[(ring+i+1)%4],orbit});
+    }
   }
   return {nodes,rings};
 }
@@ -32,7 +41,7 @@ if(typeof document!=='undefined'){
   if(ctx){
     const stage=section.querySelector('.solar-stage'),scene=section.querySelector('.solar-scene');
     const preference=matchMedia('(prefers-reduced-motion: reduce)'),system=makeSystem();
-    let width=0,height=0,angle=scrollAngle(0),target=angle,frame=null,last=null,visible=true;
+    let width=0,height=0,angle=scrollAngle(0),target=angle,frame=null,last=null,orbitSeconds=0,inView=true,visible=true;
     function paint(){
       ctx.clearRect(0,0,width,height);
       const unit=Math.min(width/600,height/355),cx=width/2,cy=height*.52;
@@ -42,7 +51,7 @@ if(typeof document!=='undefined'){
       for(const ring of system.rings)for(let i=1;i<ring.length;i++){
         const a=screen(ring[i-1]),b=screen(ring[i]);primitives.push({kind:'line',a,b,z:(a.z+b.z)/2});
       }
-      for(const node of system.nodes)primitives.push({kind:'node',...node,...screen(node)});
+      for(const node of system.nodes)primitives.push({kind:'node',...node,...screen(orbitalPosition(node,orbitSeconds))});
       primitives.sort((a,b)=>a.z-b.z);
       const halo=ctx.createRadialGradient(cx,cy,0,cx,cy,90*unit);
       halo.addColorStop(0,'#ead77916');halo.addColorStop(1,'#ead77900');ctx.fillStyle=halo;ctx.fillRect(0,0,width,height);
@@ -63,9 +72,12 @@ if(typeof document!=='undefined'){
     function tick(now){
       frame=null;
       if(!visible){last=null;return;}
-      angle=preference.matches?scrollAngle(0):easeAngle(angle,target,last===null?16:Math.min(64,now-last));last=now;
+      const elapsed=last===null?0:Math.min(64,now-last);
+      angle=preference.matches?scrollAngle(0):easeAngle(angle,target,elapsed||16);
+      if(!preference.matches)orbitSeconds+=elapsed/1000;
+      last=now;
       paint();
-      if(angle!==target&&!preference.matches)frame=requestAnimationFrame(tick);else last=null;
+      if(!preference.matches)frame=requestAnimationFrame(tick);else last=null;
     }
     function schedule(){if(frame===null&&visible)frame=requestAnimationFrame(tick);}
     function update(){
@@ -83,8 +95,9 @@ if(typeof document!=='undefined'){
     window.addEventListener('pageshow',()=>{update();angle=target;schedule();});
     preference.addEventListener('change',()=>{resize();angle=target;schedule();});
     if('ResizeObserver' in window)new ResizeObserver(resize).observe(scene);
+    document.addEventListener('visibilitychange',()=>{visible=inView&&!document.hidden;if(visible){last=null;update();schedule();}});
     if('IntersectionObserver' in window)new IntersectionObserver(entries=>{
-      visible=entries[0].isIntersecting;if(visible){update();angle=target;schedule();}
+      inView=entries[0].isIntersecting;visible=inView&&!document.hidden;if(visible){last=null;update();angle=target;schedule();}
     }).observe(section);
     resize();angle=target;
   }

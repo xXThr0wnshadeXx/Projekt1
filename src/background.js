@@ -412,12 +412,6 @@ async function tick(){
   }catch(error){await pause(s,error.message||'Collection paused after an unexpected error.');}
   finally{await schedule(s);}
 }
-async function archiveCurrent(){
- const s=await read();if(!s)return;
- if(s.status==='running')await pause(s,'Paused while switching maps. Resume when ready.');
- const maps=(await chrome.storage.local.get('orbitMaps')).orbitMaps||{};
- maps[s.id]=s;await chrome.storage.local.set({orbitMaps:maps,orbitNextRequestAt:Math.max(s.nextRequestAt||0,(await chrome.storage.local.get('orbitNextRequestAt')).orbitNextRequestAt||0)});
-}
 async function command(message){
   if(message.type==='PING')return {ok:true,name:'Orbit',version:VERSION,capabilities:['exploreNext','sharedCoverage']};
   if(message.type==='WORKSPACE_ACTIVE'){
@@ -438,17 +432,10 @@ async function command(message){
     for(const person of Object.values(s.nodes))reuseSharedMarkers(s,person);pruneSharedJobs(s);await save(s);return {ok:true,accepted:true};
   }
   if(message.type==='LIST_MAPS'){
-    const maps=(await chrome.storage.local.get('orbitMaps')).orbitMaps||{},s=await read();if(s)maps[s.id]=s;
-    return {ok:true,maps:Object.values(maps).map(s=>({id:s.id,name:s.nodes[s.root]?.name||'Untitled map',status:s.status,count:Object.keys(s.nodes).length}))};
+    const s=await read();return {ok:true,maps:s?[{id:s.id,name:s.nodes[s.root]?.name||'Account map',status:s.status,count:Object.keys(s.nodes).length}]:[]};
   }
   if(message.type==='NEW_MAP'||message.type==='SWITCH_MAP'){
-    const maps=(await chrome.storage.local.get('orbitMaps')).orbitMaps||{};
-    if(message.type==='SWITCH_MAP'&&!maps[message.id]&&(await read())?.id!==message.id)throw Error('Map not found.');
-    if(message.type==='SWITCH_MAP'&&(await read())?.id===message.id)return {ok:true};
-    await archiveCurrent();await schedule(null);
-    if(message.type==='NEW_MAP'){cached=null;await chrome.storage.local.remove(KEY);}
-    else {maps[message.id].nextRequestAt=Math.max(maps[message.id].nextRequestAt||0,(await chrome.storage.local.get('orbitNextRequestAt')).orbitNextRequestAt||0);await save(maps[message.id]);await schedule(maps[message.id]);}
-    return {ok:true};
+    throw Error('Each account has one persistent map. Change its depth or person limit to expand it.');
   }
   if(message.type==='CANCEL'){
     const s=await read();if(s&&['running','paused','limit'].includes(s.status)){
@@ -457,10 +444,17 @@ async function command(message){
     }return {ok:true};
   }
   if(message.type==='START'){
-    const root=profileURL(message.url),current=await read(),config=options(message.config);
+    const root=profileURL(message.url),current=await read(),config=options(message.config||current?.config);
     if(!root)throw Error('Enter a valid LinkedIn profile URL.');
-    if(current&&root===current.root&&current.status==='running')return {ok:true};
+    if(current&&root===current.root&&current.status==='running'){
+      if(Object.keys(current.nodes).length>config.maxNodes)throw Error('Increase the person limit above the number already saved.');
+      const expanded=config.depth>current.config.depth;current.config={...config,delay:Math.max(120,config.delay||120),depth:Math.max(current.config.depth,config.depth)};
+      const gate=nextAction(await readPolicy(current),current.config.delay,Date.now(),current.runId);current.nextRequestAt=gate.at;current.pacing={...gate,actionsToday:policy.actions.length};
+      for(const w of workers(current))if(w.current?.nextActionAt&&!w.current.retryAt)w.current.nextActionAt=gate.at;
+      queueUnexplored(current);if(expanded)log(current,`Expanded this account map to ${current.config.depth} degrees using its saved network`);await save(current);await schedule(current);wake(0);return {ok:true,status:current.status,reason:current.reason};
+    }
     if(current&&root===current.root&&['paused','limit'].includes(current.status))return command({type:'RESUME',config});
+    if(current&&root!==current.root)throw Error('This account already has one persistent map. Reset it explicitly before changing the starting profile.');
     await acknowledgeRestriction(current);
     if(current&&root===current.root){
       if(Object.keys(current.nodes).length>config.maxNodes)throw Error('Increase the person limit above the number already saved.');
@@ -496,10 +490,10 @@ async function command(message){
   if(message.type==='PAUSE'){const s=await read();if(s?.status==='running'){s.pauseKind='user';await pause(s,'Paused by you. Your progress and queue are saved.');}return {ok:true};}
   if(message.type==='RESUME'){
     const s=await read();if(!s||!['paused','limit'].includes(s.status))throw Error('There is no paused collection to resume.');
-    const config=options(message.config||s.config);config.delay=Math.max(120,config.delay||120);if(config.depth!==s.config.depth)throw Error('Exploration depth is fixed for an existing collection. Start a new map to change it.');
+    const config=options(message.config||s.config);config.delay=Math.max(120,config.delay||120);config.depth=Math.max(s.config.depth,config.depth);
     if(Object.keys(s.nodes).length>=config.maxNodes)throw Error('Increase the person limit above the current number of people.');
     await acknowledgeRestriction(s);
-    s.config=config;s.engineVersion=5;s.status='running';s.pauseKind=null;s.attentionTabId=null;if(s.workspaceManaged)s.workspaceLeaseUntil=Date.now()+WORKSPACE_LEASE;
+    const expanded=config.depth>s.config.depth;s.config=config;s.engineVersion=5;s.status='running';s.pauseKind=null;s.attentionTabId=null;if(s.workspaceManaged)s.workspaceLeaseUntil=Date.now()+WORKSPACE_LEASE;
      for(const w of workers(s)){
        const c=w.current;if(!c)continue;
        const person=s.nodes[c.job.owner],comments=s.commentCoverage?.[c.job.owner];
@@ -514,7 +508,7 @@ async function command(message){
        }else {c.since=Date.now();c.candidate=null;c.nextActionAt=0;}
      }
     queueUnexplored(s);
-    log(s,'Resumed from the saved page and remaining queue');await save(s);await schedule(s);await tick();return {ok:true,status:s.status,reason:s.reason};
+    log(s,expanded?`Expanded this account map to ${config.depth} degrees and resumed from saved data`:'Resumed from the saved page and remaining queue');await save(s);await schedule(s);await tick();return {ok:true,status:s.status,reason:s.reason};
   }
   if(message.type==='CLEAR'){const s=await read();if(s?.status==='running')throw Error('Pause collection before clearing it.');clearTimeout(timer);timer=null;await chrome.alarms.clear(ALARM);const maps=(await chrome.storage.local.get('orbitMaps')).orbitMaps||{};if(s)delete maps[s.id];await chrome.storage.local.set({orbitMaps:maps});cached=null;await chrome.storage.local.remove(KEY);return {ok:true};}
   if(message.type==='SHOW_TAB'){const s=await read(),w=s&&workers(s).find(w=>w.current&&w.tabId);const id=s?.attentionTabId||w?.tabId||s?.tabId;if(id)await chrome.tabs.update(id,{active:true});else throw Error('No collection tab is open yet.');return {ok:true};}

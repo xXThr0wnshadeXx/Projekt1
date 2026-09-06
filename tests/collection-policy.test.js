@@ -9,6 +9,7 @@ test('reservations enforce the minimum interval even with a zero requested delay
   assert.equal(reserveAction(p,0,121000).actions.length,2);
   assert.equal(reserveAction({},600,1000).nextAt,601000);
   assert.equal(nextAction(p,600,121000).at,601000); // Slowing down applies to the next action too.
+  const oldFiveMinute=reserveAction({},300,1000);assert.equal(nextAction(oldFiveMinute,120,1001).at,121000); // A newly selected two-minute interval replaces an ordinary five-minute reservation.
 });
 test('rolling budgets release only when an action ages out, not at a clock boundary',()=>{
   const now=2*DAY,actions=Array.from({length:HOURLY_ACTIONS},(_,i)=>now-1000*(HOURLY_ACTIONS-i));

@@ -32,7 +32,7 @@ test('first two actions start promptly, later actions obey two-minute spacing; r
   await h.elapse(Date.parse(s.branches[root].checkedAt)-Date.now()+24*60*60*1000+1);
   h.snapshots={[root]:{kind:'blocked',url:root,reason:'LinkedIn verification required'}};
   const refresh=await h.command({type:'START',url:root});assert.equal(refresh.status,'running');await h.tick();await h.tick();assert.equal(h.data.orbitNetwork.status,'paused');assert.equal(h.alarms.size,0);
-  assert.equal((await h.command({type:'RESUME',config:{maxNodes:1000,depth:3,delay:0}})).ok,false);
+  assert.equal((await h.command({type:'RESUME',config:{maxNodes:1000,depth:3,delay:0}})).ok,false); // Restriction latch, never the depth change, blocks this resume.
   assert.equal(h.listeners.external({type:'GET_STATE'},{url:'https://evil.example/'},()=>{}),false);
   assert.equal(h.listeners.message({type:'CLEAR'},{id:'test-extension',url:'https://www.linkedin.com/'},()=>{}),false);
   const result=await h.command({type:'GET_STATE'});assert.ok(result.state);assert.equal((await h.command({type:'GET_STATE',revision:result.revision})).unchanged,true);
@@ -75,6 +75,11 @@ test('resume renews the Site lease and expands saved people despite incomplete d
   const s=newState(root,{depth:2,delay:0});s.status='paused';s.pauseKind='coverage';s.workspaceManaged=true;s.workspaceLeaseUntil=0;s.branches[root]={status:'incomplete',pages:1,profiles:[a],url:list('root')};s.nodes[a]={...person('a'),id:a,depth:1};s.queue=[{kind:'profile',owner:a,depth:1}];s.workers=[{tabId:null,current:null}];
   completeDetails(s);const h=await harness(t,s);h.snapshots={[root]:profile(person('root'),list('root'))};const response=await h.command({type:'RESUME',config:{maxNodes:1000,depth:2,delay:0}});
   assert.equal(response.ok,true);assert.equal(response.status,'running');assert.ok(h.data.orbitNetwork.workspaceLeaseUntil>1000000);assert.equal(h.data.orbitNetwork.current.job.owner,a);assert.equal(h.data.orbitNetwork.branches[root].status,'incomplete');assert.equal(h.data.orbitNetwork.queue.some(job=>job.owner===root),false);
+});
+test('raising depth resumes and expands the same map instead of creating another',async t=>{
+  const s=newState(root,{depth:1,delay:120});s.status='paused';s.pauseKind='user';s.queue=[];s.workers=[{tabId:null,current:null}];s.nodes[a]={...person('a'),id:a,depth:1};s.nodeCount=2;s.branches[root]={status:'exhausted',pages:1,profiles:[a],url:list('root')};
+  const h=await harness(t,s),id=s.id;h.snapshots={[a]:profile(person('a'),null)};const response=await h.command({type:'RESUME',config:{maxNodes:1000,depth:3,delay:120}});
+  const active=[h.data.orbitNetwork.current?.job,...h.data.orbitNetwork.queue].filter(Boolean);assert.equal(response.ok,true);assert.equal(h.data.orbitNetwork.id,id);assert.equal(h.data.orbitNetwork.config.depth,3);assert.ok(active.some(job=>job.owner===a));assert.ok(h.data.orbitNetwork.log.some(entry=>/Expanded this account map to 3 degrees/.test(entry.message)));
 });
 
 test('shared teammate coverage skips duplicate branches and seeds only unfinished remote people',async t=>{
@@ -141,15 +146,12 @@ test('a stalled Next retries the control without reloading or recounting the pag
   await h.command({type:'START',url:root,config:{depth:1}});for(let i=0;i<40;i++)await h.tick(2000);
   assert.equal(h.data.orbitNetwork.pages,1);assert.equal(h.advances,3);assert.equal(h.requests.length,5);assert.equal(h.data.orbitNetwork.status,'complete');assert.equal(h.data.orbitNetwork.branches[root].status,'incomplete');
 });
-test('maps keep independent checkpoints, cancellation stops work, and switching preserves pacing',async t=>{
- const h=await harness(t);await h.command({type:'START',url:root});const first=h.data.orbitNetwork.id,next=h.data.orbitNetwork.nextRequestAt;
- assert.equal((await h.command({type:'NEW_MAP'})).ok,true);assert.equal(h.data.orbitNetwork,undefined);assert.equal(h.data.orbitMaps[first].status,'paused');assert.equal(h.alarms.size,0);
- await h.command({type:'START',url:a});const second=h.data.orbitNetwork.id;assert.notEqual(first,second);assert.ok(h.data.orbitNetwork.nextRequestAt>=next);
- await h.command({type:'CANCEL'});assert.equal(h.data.orbitNetwork.status,'cancelled');assert.ok(h.data.orbitNetwork.nodes[a]);assert.equal(h.data.orbitNetwork.queue.length,0);assert.equal(h.alarms.size,0);
- const calls=h.requests.length;await h.tick();assert.equal(h.requests.length,calls);
- await h.command({type:'SWITCH_MAP',id:first});assert.equal(h.data.orbitNetwork.id,first);assert.equal(h.data.orbitNetwork.status,'paused');assert.equal(h.data.orbitMaps[second].status,'cancelled');
- assert.equal((await h.command({type:'LIST_MAPS'})).maps.length,2);
+test('each account keeps one persistent map and rejects implicit replacement',async t=>{
+ const h=await harness(t);await h.command({type:'START',url:root});const first=h.data.orbitNetwork.id;
+ assert.equal((await h.command({type:'NEW_MAP'})).ok,false);assert.equal(h.data.orbitNetwork.id,first);
+ assert.equal((await h.command({type:'START',url:a})).ok,false);assert.equal(h.data.orbitNetwork.id,first);
  assert.equal((await h.command({type:'SWITCH_MAP',id:'missing'})).ok,false);assert.equal(h.data.orbitNetwork.id,first);
+ const maps=(await h.command({type:'LIST_MAPS'})).maps;assert.equal(maps.length,1);assert.equal(maps[0].id,first);
 });
 
 test('own list counts actual paced scrolls, never idle polls, and avoids reloads at a stall',async t=>{

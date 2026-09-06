@@ -51,6 +51,23 @@ export function matchesFilters(p,{location='',field='',keywords=[],keywordOnly=f
  const terms=keywordTerms(keywords),within=p.depth===undefined||p.depth===0||p.depth<=Number(maxDepth||6),depth=p.depth===1?first:p.depth===2?second:p.depth>2?extended:true;
  return within&&depth&&(!location||locationMatches(p,location))&&(!field||fieldMatches(p,field))&&(!terms.length||keywordMatches(p,terms).length>0);
 }
+export function relationshipTypes(edge){
+ const types=new Set((edge?.evidence||[]).map(item=>item?.type||'visible_connection_list'));
+ return {listed:types.has('visible_connection_list'),comments:types.has('comment_interaction')};
+}
+export function relationshipMatches(edge,mode='all'){
+ const {listed,comments}=relationshipTypes(edge);
+ if(mode==='connections')return listed;
+ if(mode==='comments')return comments;
+ if(mode==='both')return listed&&comments;
+ return true;
+}
+export function relationshipNodeIds(state,mode='all'){
+ if(!state||mode==='all')return null;
+ const ids=new Set(state.root?[state.root]:[]);
+ for(const edge of Object.values(state.edges||{}))if(relationshipMatches(edge,mode)){ids.add(edge.source);ids.add(edge.target);}
+ return ids;
+}
 export function springProgress(t){if(t>=1)return 1;if(t<=0)return 0;return 1-Math.exp(-7*t)*Math.cos(10*t);}
 export function groupTargets(points,by,keywords=[]){
  const groups=new Map();

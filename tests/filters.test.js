@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {fieldOf,fieldsOf,locationOf,locationLabelOf,locationMatches,fieldMatches,matchesFilters,groupTargets,springProgress,keywordTerms,keywordMatches,keywordGroupOf} from '../src/filters.js';
+import {fieldOf,fieldsOf,locationOf,locationLabelOf,locationMatches,fieldMatches,matchesFilters,groupTargets,springProgress,keywordTerms,keywordMatches,keywordGroupOf,relationshipMatches,relationshipNodeIds} from '../src/filters.js';
+
+test('relationship evidence filters connections, comments, and overlap without duplicates',()=>{
+ const listed={source:'root',target:'a',evidence:[{}]},comments={source:'a',target:'b',evidence:[{type:'comment_interaction'}]},both={source:'b',target:'c',evidence:[{}, {type:'comment_interaction'}]},state={root:'root',edges:{listed,comments,both}};
+ assert.equal(relationshipMatches(listed,'connections'),true);assert.equal(relationshipMatches(listed,'comments'),false);assert.equal(relationshipMatches(both,'both'),true);
+ assert.deepEqual(relationshipNodeIds(state,'comments'),new Set(['root','a','b','c']));assert.equal(relationshipNodeIds(state,'all'),null);
+});
 test('filters combine location and estimated field without losing unknown profiles',()=>{
  const person={location:'  New   York ',headline:'Software developer'};
  assert.equal(locationOf(person),'new york');assert.equal(fieldOf(person),'Technology');
