@@ -60,7 +60,7 @@ function renderLive(){
   const count=Object.keys(state.nodes).length;
   if(!runSample||runSample.id!==state.id)runSample={id:state.id,at:Date.now(),count};
   const lanes=(state.workers||[{current:state.current}]).filter(w=>w.current),names=lanes.map(w=>state.nodes[w.current.job.owner]?.name||'profile');
-  const rootBranch=state.branches?.[state.root],directReady=['exhausted'].includes(rootBranch?.status),phase=lanes.some(w=>w.current.job.kind==='posts')?'Collecting visible commenter-to-author links':directReady?'Exploring further relationship paths':'Collecting visible connections and post comments';
+  const rootBranch=state.branches?.[state.root],directReady=['exhausted'].includes(rootBranch?.status),phase=lanes.some(w=>w.current.job.kind==='posts')?'Finding commenters on saved connections’ posts':directReady?'Exploring further relationship paths':'Collecting visible connections and post comments';
   const waiting=lanes.some(w=>w.current.navPending||w.current.advancePending||w.current.retryAt),deadlines=[{at:state.nextRequestAt||0,reason:state.pacing?.reason||'LinkedIn pacing'},...lanes.flatMap(w=>[{at:w.current.nextActionAt||0,reason:state.pacing?.reason||'LinkedIn pacing'},{at:w.current.retryAt||0,reason:'Retry backoff'}])],deadline=deadlines.sort((a,b)=>b.at-a.at)[0],waitSeconds=Math.max(0,Math.ceil((deadline.at-Date.now())/1000));
   const retrying=lanes.find(w=>w.current.retryAt),recent=lastReveal&&Date.now()-lastReveal.at<2500;
   set('live-title',waiting&&waitSeconds?`${deadline.reason} · next LinkedIn action in ${waitSeconds}s`:retrying?`Retrying ${state.nodes[retrying.current.job.owner]?.name||'a page'} · waiting before retry`:recent?`Added ${lastReveal.person.name}`:names.length?`Exploring ${names[0]}’s connections${names.length>1?` + ${names.length-1} more`:''}`:'Preparing the next connection list');
@@ -75,7 +75,7 @@ function render(){
   const directPeople=Object.values(state?.nodes||{}).filter(p=>p.depth===1),unexplored=directPeople.filter(p=>!state.branches?.[p.id]).length;
   show('expansion-controls',!libraryMode&&directPeople.length>0);
   set('expansion-summary',`${directPeople.length} direct connections saved · ${unexplored} connections’ lists not explored yet`);
-  $('explore-next').disabled=!hasCollector()||state?.cloudView;
+  $('explore-next').disabled=!hasCollector()||state?.cloudView;$('explore-posts').disabled=!hasCollector()||state?.cloudView;
   const nodes=Object.values(state?.nodes||{}),edges=Object.values(state?.edges||{}),branches=Object.values(state?.branches||{}),complete=state?.status==='complete',paused=['paused','limit'].includes(state?.status);set('people-count',state?nodes.length.toLocaleString():'—');set('edge-count',state?edges.length.toLocaleString():'—');set('branch-count',state?branches.filter(b=>b.pages>0).length.toLocaleString():'—');set('page-count',state?(state.pages||0).toLocaleString():'—');set('network-title',state?`${state.nodes[state.root]?.name||'Starting profile'}’s account network`:'Your account network');set('run-badge',statuses[state?.status]||'Not started');$('run-badge').className=`badge ${state?.status||''}`;set('status-label',statuses[state?.status]||'Ready to explore');$('status-dot').className=state?.status||'';set('status-reason',state?.reason||'Discoveries periodically save to your account and merge safely into the team graph.');set('pause-reason',paused?(state.reason||'Collection paused. Open the collection tab, then resume.'):'');show('pause-reason',paused);const actionLabel=complete?'Check for new connections ↗':paused?'Resume and expand this map ↗':state?.status==='running'?'Apply map settings ↗':'Continue collecting ↗';set('workspace-build',actionLabel);set('start',actionLabel);show('empty-graph',!state);show('collector-controls',hasCollector()&&Boolean(state)&&state.status!=='imported');show('pause',state?.status==='running');show('resume',paused);show('show-tab',Boolean(state?.tabId));show('clear-button',!libraryMode&&Boolean(state)&&state.status!=='running');$('workspace-build').disabled=libraryMode;$('start').disabled=libraryMode;$('profile-url').disabled=Boolean(collectionState);set('updated-label',state?`${state.sharedView?'Database-first account map':state.cloudView?'Account network rebuilt from D1':'Account checkpoint autosaved'} · ${new Date(state.updatedAt).toLocaleString()}`:'Shared team library');set('visible-label',state?`${nodes.filter(p=>p.depth===1).length.toLocaleString()} direct · ${nodes.filter(p=>p.depth>1).length.toLocaleString()} connected through shared paths`:'One persistent account network');graph.setData(state);refreshFilterOptions();if(view==='directory')renderPeople();if(view==='coverage')renderCoverage();
 }
 function switchView(name){view=name;for(const key of ['graph','directory','coverage']){show(`view-${key}`,key===name);$(`tab-${key}`).setAttribute('aria-selected',String(key===name));}if(name==='directory')renderPeople();if(name==='coverage')renderCoverage();if(name==='graph')graph.resize();}
@@ -162,14 +162,17 @@ $('workspace-build').onclick=()=>{
  if(!$('setup-form').checkValidity()){openWorkspaceSettings(true);$('setup-form').reportValidity();return;}
  $('setup-form').requestSubmit();
 };
-$('explore-next').onclick=async()=>{
-  const button=$('explore-next');button.disabled=true;
+async function exploreSaved(postsFirst=false){
+  const button=$(postsFirst?'explore-posts':'explore-next');button.disabled=true;
   try{
     const ping=await send({type:'PING'});
     companionCapabilities=ping.capabilities||[];
-    if(!companionCapabilities.includes('exploreNext')||!companionCapabilities.includes('sharedCoverage')){show('update-note',true);set('update-version',`Update companion ${ping.version||'unknown'} to ${COMPANION_VERSION} to explore the next layer.`);throw Error('Update the existing unpacked companion folder, click Reload in Chrome Extensions, then reload Orbit. Do not remove the extension: its local checkpoint must be kept.');}
-    const settings=config();settings.depth=Math.max(2,settings.depth);$('depth').value=settings.depth;
-    const response=await send({type:'EXPLORE_NEXT',root:state.root,config:settings,shared:sharedPayload()});remoteRevision=null;await refresh();
-    toast(response.status==='running'?'Exploring saved people’s connections. Your direct-list checkpoint is kept.':response.reason);
+    if(!companionCapabilities.includes('exploreNext')||!companionCapabilities.includes('sharedCoverage')||postsFirst&&!companionCapabilities.includes('quickPosts')){show('update-note',true);set('update-version',`Update companion ${ping.version||'unknown'} to ${COMPANION_VERSION} to explore the next layer.`);throw Error('Update the existing unpacked companion folder, click Reload in Chrome Extensions, then reload Orbit. Do not remove the extension: its local checkpoint must be kept.');}
+    const settings=config();settings.depth=Math.max(2,settings.depth);$('depth').value=settings.depth;if(postsFirst){settings.comments=true;$('collect-comments').checked=true;}
+    const response=await send({type:postsFirst?'EXPLORE_POSTS':'EXPLORE_NEXT',root:state.root,config:settings,shared:sharedPayload()});remoteRevision=null;await refresh();
+    toast(response.status==='running'?(postsFirst?'Checking your direct connections’ recent posts first. Discoveries save as they arrive.':'Exploring saved people’s connections. Your direct-list checkpoint is kept.'):response.reason);
   }catch(error){toast(error.message);}finally{button.disabled=!hasCollector()||Boolean(state?.cloudView);}
 };
+
+$('explore-next').onclick=()=>exploreSaved();
+$('explore-posts').onclick=()=>exploreSaved(true);

@@ -8,8 +8,8 @@ New contributors and new Codex chats should read [PROJECT_HANDOFF.md](PROJECT_HA
 
 - **Canonical application:** [orbit-shreev2703-graph-test.shreev2703.chatgpt.site](https://orbit-shreev2703-graph-test.shreev2703.chatgpt.site/)
 - **Repository:** [xXThr0wnshadeXx/Projekt1](https://github.com/xXThr0wnshadeXx/Projekt1)
-- **Companion download:** [download the current ZIP](https://orbit-shreev2703-graph-test.shreev2703.chatgpt.site/downloads/orbit-network-mapper.zip?v=2.8.2)
-- **Current application and companion version:** `2.8.2`
+- **Companion download:** [download the current ZIP](https://orbit-shreev2703-graph-test.shreev2703.chatgpt.site/downloads/orbit-network-mapper.zip?v=2.8.3)
+- **Current application and companion version:** `2.8.3`
 
 This is the single supported hosted application and database. Do not use the retired Turso setup or the older `doublejav.chatgpt.site` deployment.
 
@@ -55,6 +55,14 @@ The extension is a background collection companion; the permanent knowledge grap
 ## One account, one network
 
 Orbit maintains one continuously growing network for each signed-in account. Resuming an unfinished collection keeps its exact page, queue, and checkpoint; duplicate starts leave an active collection alone. A finished map becomes **Check for new connections**. Orbit never clears its saved coverage or requeues the whole known network: after 24 hours it checks the 24 stalest eligible branches, prioritizes the starting account, and rotates through the remainder on later runs. Newly discovered people still expand outward to the chosen degree. Reopening the Site starts a due daily batch, while reopening an unfinished run resumes exactly where it stopped. Every changed person and relationship is periodically upserted into the shared team graph. **Reset my account network** is deliberately kept in Settings and removes only that account’s contribution—overlapping records supported by teammates remain.
+
+### Direct-connection post pass (2.8.3)
+
+After the starter's connection list is captured, enabling **Find commenters after direct connections** with at least 2nd-degree coverage queues saved direct connections' activity pages immediately, before their profile details or connection lists. **Find commenters** starts the same pass for an existing account map, enables comment collection, and preserves interrupted list checkpoints and the current pacing budget.
+
+The first pass checks up to three recent authored posts per connection, with at most six paced comment/scroll actions and two expansions per post. It opens other posts before spending more work on one thread. Deeper comment jobs follow the other direct connections; partial coverage is marked incomplete. Commenters become observed two-hop paths through the post author, never asserted LinkedIn friendships. Existing people keep their shortest known depth, and repeated evidence is deduplicated. Empty/private activity and LinkedIn restrictions remain visible in Coverage.
+
+Each newly recorded comment batch uses the existing automatic D1 upload. The first-two-actions allowance, two-minute minimum thereafter, hourly/daily budgets, and restriction stops remain unchanged. Faster progress comes from skipping preliminary profile navigation and prioritizing broader post coverage.
 
 ### Shared connected maps and reusable teammate coverage (2.7.0)
 

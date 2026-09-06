@@ -16,7 +16,7 @@ async function harness(t,initial,saved={}){
   t.mock.method(Date,'now',()=>now);
   t.mock.method(globalThis,'setTimeout',()=>({unref(){}}));t.mock.method(globalThis,'clearTimeout',()=>{});
   const event=name=>({addListener(fn){listeners[name]=fn;}});
-  globalThis.chrome={runtime:{id:'test-extension',getURL:p=>`chrome-extension://test-extension/${p}`,onMessage:event('message'),onMessageExternal:event('external'),onStartup:event('startup'),onInstalled:event('installed')},storage:{local:{async get(k){return structuredClone({[k]:data[k]});},async set(v){Object.assign(data,structuredClone(v));},async remove(k){delete data[k];}}},alarms:{async create(k,v){alarms.set(k,v);},async clear(k){alarms.delete(k);},async get(k){return alarms.get(k);},onAlarm:event('alarm')},tabs:{onUpdated:event('updated'),async create(v){requests.push(now);navigations.push(v.url);const tab={id:++nextTab,status:'complete',lastAccessed:now,windowId:1,...v};tabs.set(tab.id,tab);return tab;},async get(id){if(!tabs.has(id))throw Error('No tab');return tabs.get(id);},async update(id,v){if(v.url){requests.push(now);navigations.push(v.url);}Object.assign(tabs.get(id),v);return tabs.get(id);}},windows:{async update(id,v){return {id,...v};}},scripting:{async executeScript({target,func}){if(func.name==='advanceComments'){requests.push(now);onComments?.(tabs.get(target.tabId));return [{result:'expanded'}];}if(func.name==='advanceLinkedIn'){requests.push(now);advances++;onAdvance?.(tabs.get(target.tabId));return [{result:'next'}];}const value=snapshots[tabs.get(target.tabId).url];if(value instanceof Error)throw value;return [{result:structuredClone(value)}];}},action:{onClicked:event('action')},webRequest:{onHeadersReceived:event('headers')}};
+  globalThis.chrome={runtime:{id:'test-extension',getURL:p=>`chrome-extension://test-extension/${p}`,onMessage:event('message'),onMessageExternal:event('external'),onStartup:event('startup'),onInstalled:event('installed')},storage:{local:{async get(k){return structuredClone({[k]:data[k]});},async set(v){Object.assign(data,structuredClone(v));},async remove(k){delete data[k];}}},alarms:{async create(k,v){alarms.set(k,v);},async clear(k){alarms.delete(k);},async get(k){return alarms.get(k);},onAlarm:event('alarm')},tabs:{onUpdated:event('updated'),async create(v){requests.push(now);navigations.push(v.url);const tab={id:++nextTab,status:'complete',lastAccessed:now,windowId:1,...v};tabs.set(tab.id,tab);return tab;},async get(id){if(!tabs.has(id))throw Error('No tab');return tabs.get(id);},async update(id,v){if(v.url){requests.push(now);navigations.push(v.url);}Object.assign(tabs.get(id),v);return tabs.get(id);}},windows:{async update(id,v){return {id,...v};}},scripting:{async executeScript({target,func,args}){if(func.name==='advanceComments'){requests.push(now);onComments?.(tabs.get(target.tabId),args);return [{result:'expanded'}];}if(func.name==='advanceLinkedIn'){requests.push(now);advances++;onAdvance?.(tabs.get(target.tabId));return [{result:'next'}];}const value=snapshots[tabs.get(target.tabId).url];if(value instanceof Error)throw value;return [{result:structuredClone(value)}];}},action:{onClicked:event('action')},webRequest:{onHeadersReceived:event('headers')}};
   await import(`../src/background.js?test=${serial++}`);
   const command=msg=>new Promise(resolve=>listeners.message(msg,{id:'test-extension',url:'chrome-extension://test-extension/index.html'},resolve));
   const flush=async()=>{for(let i=0;i<30;i++)await new Promise(r=>setImmediate(r));};
@@ -362,13 +362,13 @@ test('resume repairs skipped posts once without replaying mutual lists or droppi
   const s=newState(root,{depth:2,comments:true});s.status='paused';s.queue=[{kind:'profile',owner:a,depth:1}];s.workers=[{tabId:null,current:null}];
   s.branches[root]={status:'incomplete',scope:'mutuals_only',pages:1,profiles:[a],url:list('root')};s.nodes[a]={...person('a'),id:a,depth:1};
   s.nodes[root].location='Example City';s.commentCoverage={[root]:{status:'hidden',url:null,profiles:[],comments:0,posts:[]}};
-  const h=await harness(t,s),url=root+'recent-activity/all/';
-  h.snapshots={[url]:{kind:'posts',url,owner:root,cards:[],empty:true},[a]:profile(person('a'),null)};
-  await h.command({type:'RESUME'});assert.equal(h.data.orbitNetwork.current.job.kind,'posts');assert.equal(h.data.orbitNetwork.current.job.owner,root);assert.ok(h.data.orbitNetwork.queue.some(job=>job.owner===a));
+  const h=await harness(t,s),url=root+'recent-activity/all/',direct=a+'recent-activity/posts/';
+  h.snapshots={[direct]:{kind:'posts',url:direct,owner:a,cards:[],empty:true},[url]:{kind:'posts',url,owner:root,cards:[],empty:true},[a]:profile(person('a'),null)};
+  await h.command({type:'RESUME'});assert.equal(h.data.orbitNetwork.current.job.kind,'posts');assert.equal(h.data.orbitNetwork.current.job.owner,a);assert.ok(h.data.orbitNetwork.queue.some(job=>job.owner===a));
   await h.command({type:'PAUSE'});await h.command({type:'RESUME'});
-  assert.equal(h.data.orbitNetwork.queue.filter(job=>job.kind==='posts').length,0);
+  assert.equal(h.data.orbitNetwork.queue.filter(job=>job.kind==='posts'&&job.owner===a).length,0);
   for(let i=0;i<20;i++)await h.tick();
-  assert.equal(h.data.orbitNetwork.status,'complete');assert.equal(h.data.orbitNetwork.commentCoverage[root].status,'exhausted');assert.equal(h.data.orbitNetwork.branches[root].pages,1);assert.equal(h.requests.length,2);
+  assert.equal(h.data.orbitNetwork.status,'complete');assert.equal(h.data.orbitNetwork.commentCoverage[root].status,'exhausted');assert.equal(h.data.orbitNetwork.branches[root].pages,1);assert.equal(h.requests.length,3);
 });
 
 test('partial mutual-only results continue to verified deeper relationships',async t=>{
@@ -381,18 +381,18 @@ test('partial mutual-only results continue to verified deeper relationships',asy
 
 
 test('first-degree post comments are captured before crawling that person’s connection list',async t=>{
-  const h=await harness(t,newState(root,{depth:2,comments:true})),activity=a+'recent-activity/all/',commenter=person('commenter');
+  const h=await harness(t,newState(root,{depth:2,comments:true})),activity=a+'recent-activity/posts/',commenter=person('commenter');
   const comment={commenter,author:a,post:'https://www.linkedin.com/feed/update/urn:li:activity:123/',commentId:'urn:li:comment:(activity:123,456)',observedAt:'2026-09-06T00:00:00Z'};
   h.snapshots={[root]:profile(person('root'),list('root')),[list('root')]:page(list('root'),[person('a'),person('b')]),[a]:{...profile(person('a'),list('a')),activityUrl:activity},[activity]:{kind:'posts',url:activity,owner:a,cards:[{urn:'urn:li:activity:123',author:a,post:comment.post,comments:[comment],control:null}]},[list('a')]:page(list('a'),[],{hasNext:true})};
   await h.command({type:'START',url:root});for(let i=0;i<18;i++)await h.tick();
-  const s=h.data.orbitNetwork;assert.deepEqual(route(s,commenter.url),[root,a,commenter.url]);assert.equal(s.branches[a].pages,0);assert.equal(s.branches[b],undefined);assert.equal(s.commentCoverage[a].posts.length,1);
+  const s=h.data.orbitNetwork;assert.deepEqual(route(s,commenter.url),[root,a,commenter.url]);assert.equal(s.branches[a],undefined);assert.equal(s.branches[b],undefined);assert.equal(s.commentCoverage[a].posts.length,1);
   for(let i=2;i<h.requests.length;i++)assert.ok(h.requests[i]-h.requests[i-1]>=120000);
 });
 test('resume repairs first-degree locations and skipped posts once, preserving completed lists',async t=>{
   const s=newState(root,{depth:2,comments:true});s.status='paused';s.queue=[];s.workers=[{tabId:null,current:null}];s.nodes[a]={...person('a'),id:a,depth:1,location:''};
   s.branches[root]={status:'exhausted',pages:1,profiles:[a],url:list('root')};s.branches[a]={status:'exhausted',pages:7,profiles:[],url:list('a')};completeDetails(s);delete s.profileChecks[a];s.commentCoverage[a]={status:'hidden',url:null,posts:[],profiles:[],comments:0};
-  const h=await harness(t,s),activity=a+'recent-activity/all/';h.snapshots={[a]:{...profile({...person('a'),location:'Example City',headline:'Engineer'},list('a')),activityUrl:activity},[activity]:{kind:'posts',url:activity,owner:a,cards:[],empty:true}};
-  await h.command({type:'RESUME'});assert.equal(h.data.orbitNetwork.current.job.detailsOnly,true);
+  const h=await harness(t,s),activity=a+'recent-activity/posts/';h.snapshots={[a]:{...profile({...person('a'),location:'Example City',headline:'Engineer'},list('a')),activityUrl:activity},[activity]:{kind:'posts',url:activity,owner:a,cards:[],empty:true}};
+  await h.command({type:'RESUME'});assert.equal(h.data.orbitNetwork.current.job.kind,'posts');
   for(let i=0;i<20;i++)await h.tick();const after=h.data.orbitNetwork;
   assert.equal(after.status,'complete');assert.equal(after.nodes[a].location,'Example City');assert.equal(after.commentCoverage[a].status,'exhausted');assert.equal(after.branches[a].pages,7);assert.equal(after.branches[a].status,'exhausted');assert.equal(h.requests.length,2);
   await h.command({type:'START',url:root});assert.equal(h.requests.length,2);assert.equal(h.data.orbitNetwork.status,'complete');
@@ -412,7 +412,7 @@ test('coverage counts inspected posts even when no commenter is readable',async 
 
 
 test('all queued first-degree post checks precede their long connection lists',async t=>{
-  const h=await harness(t,newState(root,{depth:2,comments:true})),first=a+'recent-activity/all/',second=b+'recent-activity/all/';
+  const h=await harness(t,newState(root,{depth:2,comments:true})),first=a+'recent-activity/posts/',second=b+'recent-activity/posts/';
   h.snapshots={[root]:profile(person('root'),list('root')),[list('root')]:page(list('root'),[person('a'),person('b')]),[a]:{...profile(person('a'),list('a')),activityUrl:first},[b]:{...profile(person('b'),list('b')),activityUrl:second},[first]:{kind:'posts',url:first,owner:a,cards:[],empty:true},[second]:{kind:'posts',url:second,owner:b,cards:[],empty:true},[list('a')]:page(list('a'),[],{hasNext:true})};
   await h.command({type:'START',url:root});for(let i=0;i<36;i++)await h.tick();
   assert.ok(h.navigations.indexOf(first)>-1);assert.ok(h.navigations.indexOf(second)>h.navigations.indexOf(first));assert.ok(h.navigations.indexOf(list('a'))>h.navigations.indexOf(second));
@@ -426,4 +426,56 @@ test('updating during a long first-degree list resumes skipped posts before repl
   s.workers=[{tabId:1,current:{job:{kind:'list',owner:a,depth:1,url:list('a')},resumeURL:savedURL,lastSignature:'saved',since:0}}];
   const h=await harness(t,s);h.tabs.set(1,{id:1,url:savedURL,status:'complete'});h.snapshots={[activity]:{kind:'posts',url:activity,owner:a,cards:[],empty:true}};
   await h.command({type:'RESUME'});const after=h.data.orbitNetwork;assert.equal(after.current.job.kind,'posts');assert.equal(after.current.job.owner,a);assert.equal(after.queue.find(job=>job.kind==='list').replayURL,savedURL);assert.equal(after.branches[a].pages,4);assert.deepEqual(after.branches[a].seenPages,['saved']);
+});
+
+test('direct list completes before posts; a broad post pass precedes profile enrichment and deep comments',async t=>{
+ const h=await harness(t),first=a+'recent-activity/posts/',second=b+'recent-activity/posts/',own=root+'recent-activity/all/';
+ const makeCards=author=>[123,124,125].map((n,i)=>({urn:`urn:li:activity:${n}`,author,post:`https://www.linkedin.com/feed/update/urn:li:activity:${n}/`,control:'open',comments:[]}));
+ const cards=makeCards(a),requests=[];
+ const snapshots={[root]:{...profile(person('root'),list('root')),activityUrl:own},[list('root')]:page(list('root'),[person('a'),person('b')]),[first]:{kind:'posts',url:first,owner:a,cards},[second]:{kind:'posts',url:second,owner:b,cards:[],empty:true}};
+ h.snapshots=snapshots;h.onComments=(_tab,[_url,request])=>{requests.push(request);const card=cards.find(c=>c.urn===request.urn);if(card){card.control='more';card.comments.push({commenter:person(`reader-${card.urn.split(':').at(-1)}`),author:a,post:card.post,commentId:`urn:li:comment:(activity:${card.urn.split(':').at(-1)},${500+requests.length})`,observedAt:'2026-09-06T00:00:00Z'});}};
+ await h.command({type:'START',url:root,config:{depth:2,comments:true}});
+ for(let i=0;i<100&&!h.navigations.includes(second);i++){const c=h.data.orbitNetwork.current;if(c?.job.kind==='posts'&&c.candidate&&!c.navPending)await h.elapse(120000);else await h.tick();}
+ const s=h.data.orbitNetwork;
+ assert.deepEqual(h.navigations.slice(0,4),[root,list('root'),first,second]);
+ assert.equal(h.navigations.includes(a),false);assert.equal(h.navigations.includes(list('a')),false);assert.equal(h.navigations.includes(own),false);
+ assert.equal(requests.length,6);assert.equal(new Set(requests.slice(0,3).map(r=>r.urn)).size,3,'opens different posts before exhausting replies on one');
+ for(const n of [123,124,125]){const id=person(`reader-${n}`).url;assert.equal(s.nodes[id].depth,2);assert.deepEqual(route(s,id),[root,a,id]);}
+ assert.equal(s.commentCoverage[a].quickPass.actions,6);assert.equal(s.commentCoverage[a].status,'incomplete');assert.ok(s.queue.some(j=>j.owner===a&&j.deepComments));
+ for(let i=2;i<h.requests.length;i++)assert.ok(h.requests[i]-h.requests[i-1]>=120000);
+});
+
+test('Find commenters enables posts on a saved map, preserves checkpoints and cannot reset pacing',async t=>{
+ const s=newState(root,{depth:1,comments:false});s.status='paused';s.runId='saved-run';s.nodes[a]={...person('a'),id:a,depth:1};s.branches[root]={status:'exhausted',pages:4,profiles:[a]};s.branches[a]={status:'collecting',pages:7,profiles:[],url:list('a')};s.queue=[];
+ s.workers=[{tabId:1,current:{job:{kind:'list',owner:a,depth:1,url:list('a')},resumeURL:list('a')+'&page=7',since:0}}];
+ const policy={actions:[999000],nextAt:1119000,startup:{id:'saved-run',used:2}},h=await harness(t,s,{orbitCollectionPolicy:policy});h.tabs.set(1,{id:1,url:list('a')+'&page=7',status:'complete'});
+ assert.ok((await h.command({type:'PING'})).capabilities.includes('quickPosts'));
+ const result=await h.command({type:'EXPLORE_POSTS',root});assert.equal(result.ok,true);
+ const after=h.data.orbitNetwork;assert.equal(after.config.comments,true);assert.equal(after.config.depth,2);assert.equal(after.id,s.id);assert.equal(after.runId,'saved-run');assert.equal(after.current.job.kind,'posts');assert.equal(after.current.job.owner,a);assert.equal(after.current.navPending,true);assert.equal(h.requests.length,0);
+ assert.ok(after.queue.some(j=>j.kind==='list'&&j.owner===a&&j.replayURL===list('a')+'&page=7'));assert.equal(after.branches[a].pages,7);assert.equal(h.data.orbitCollectionPolicy.startup.used,2);
+});
+
+test('Find commenters refuses a restriction without navigating or resetting the collection',async t=>{
+ const s=newState(root,{comments:false});s.status='paused';s.pauseKind='restriction';s.reason='LinkedIn verification required';s.nodes[a]={...person('a'),id:a,depth:1};
+ const h=await harness(t,s,{orbitCollectionPolicy:{blocked:{reason:s.reason,at:1000000},nextAt:2000000,actions:[]}});
+ const response=await h.command({type:'EXPLORE_POSTS',root});assert.equal(response.ok,false);assert.equal(h.requests.length,0);assert.equal(h.data.orbitNetwork.config.comments,false);assert.equal(h.data.orbitNetwork.status,'paused');
+});
+
+test('comment snapshots preserve existing first-degree people and deduplicate a repeated commenter',async t=>{
+ const s=newState(root,{depth:2,comments:true});s.status='paused';s.queue=[];s.nodes[a]={...person('a'),id:a,depth:1};s.nodes[b]={...person('b'),id:b,depth:1};s.branches[root]={status:'exhausted',profiles:[a,b],pages:1};completeDetails(s);delete s.commentCoverage[a];
+ // Existing direct edges remain direct when the same people also comment.
+ s.edges[`${root}|${b}`]={source:root,target:b,evidence:[{url:list('root')}]};s.edges[`${root}|${a}`]={source:root,target:a,evidence:[{url:list('root')}]};
+ const h=await harness(t,s),url=a+'recent-activity/posts/',comment={commenter:person('b'),author:a,post:'https://www.linkedin.com/feed/update/urn:li:activity:123/',commentId:'urn:li:comment:(activity:123,456)',observedAt:'2026-09-06T00:00:00Z'};
+ h.snapshots={[url]:{kind:'posts',url,owner:a,cards:[{urn:'urn:li:activity:123',post:comment.post,author:a,comments:[comment,comment],control:null}]}};
+ await h.command({type:'EXPLORE_POSTS',root});for(let i=0;i<6;i++)await h.tick();const after=h.data.orbitNetwork;
+ assert.equal(Object.keys(after.nodes).length,3);assert.equal(after.nodes[b].depth,1);assert.equal(after.commentCoverage[a].comments,1);assert.equal(after.commentCoverage[a].profiles.length,1);
+});
+
+test('quick-pass action budget survives pause and browser restart',async t=>{
+ const s=newState(root,{depth:2,comments:true});s.status='paused';s.runId='saved-run';s.nodes[a]={...person('a'),id:a,depth:1};s.branches[root]={status:'exhausted',pages:1,profiles:[a]};s.queue=[];
+ const url=a+'recent-activity/posts/',postPass={posts:['urn:li:activity:123'],actions:5,perPost:{'urn:li:activity:123':2}};
+ s.commentCoverage={[a]:{status:'collecting',discoveryVersion:1,posts:[],comments:0,profiles:[]}};s.workers=[{tabId:1,current:{job:{kind:'posts',owner:a,depth:1,url,postPass},since:0,resumeURL:url}}];
+ const h=await harness(t,s);h.tabs.set(1,{id:1,url,status:'complete'});h.snapshots={[url]:{kind:'posts',url,owner:a,cards:[],empty:false}};
+ await h.command({type:'RESUME'});assert.deepEqual(h.data.orbitNetwork.current.job.postPass,postPass);
+ h.listeners.startup();await h.flush();const saved=h.data.orbitNetwork;assert.equal(saved.status,'paused');assert.deepEqual(saved.queue.find(j=>j.owner===a&&j.kind==='posts').postPass,postPass);
 });

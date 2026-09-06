@@ -5,6 +5,7 @@ import {normalizePolicy,nextAction,reserveAction,backoffPolicy,blockPolicy,retry
 
 const KEY='orbitNetwork',ALARM='orbit-collect',VERSION=COMPANION_VERSION;
 const POLL=1000,SETTLE=200,LOAD_TIMEOUT=60000,UNCHANGED_TIMEOUT=15000,WORKSPACE_LEASE=24*60*60*1000;
+const QUICK_POSTS=3,QUICK_COMMENT_ACTIONS=6;
 const REFRESH_AFTER=24*60*60*1000,REFRESH_BATCH=24;
 const PROFILE_REFRESH_AFTER=7*24*60*60*1000,SHARED_KINDS=new Set(['profile','connections','comments']);
 const POLICY_KEY='orbitCollectionPolicy';
@@ -124,6 +125,33 @@ function queueSharedCandidates(s,minDepth=1){
     if(s.nodeCount>=s.config.maxNodes){limit(s);break;}s.nodes[person.id]={...person,sharedOnly:true};s.nodeCount++;added++;
   }return added;
 }
+// Seed post jobs from saved direct connections, avoiding a profile visit per
+// author. Do this only after the starter's list finishes (or an explicit skip).
+function queueDirectPosts(s,force=false){
+  if(!s.config.comments||s.config.depth<2)return;
+  if(!force&&workers(s).some(w=>w.current?.job.owner===s.root&&w.current.job.kind!=='posts'))return;
+  if(!force&&!['exhausted','hidden','mutuals_only','incomplete','shared'].includes(s.branches[s.root]?.status))return;
+  const direct=new Set(s.branches[s.root]?.profiles||[]);
+  for(const edge of Object.values(s.edges))if((edge.source===s.root||edge.target===s.root)&&edge.evidence?.some(e=>(e.type||'visible_connection_list')==='visible_connection_list'))direct.add(edge.source===s.root?edge.target:edge.source);
+  const people=[...direct].map(id=>s.nodes[id]).filter(p=>p?.depth===1&&!p.sharedOnly);
+  const key=JSON.stringify([s.config.depth,people.map(p=>p.id)]);if(s.directPostSeedKey===key)return;
+  const occupied=new Set([...s.queue,...(s.deferredJobs||[]),...workers(s).map(w=>w.current?.job).filter(Boolean)].filter(job=>job.kind==='posts').map(job=>job.owner));
+  for(const person of people){
+    reuseSharedMarkers(s,person);
+    queueComments(s,{owner:person.id,depth:1},{activityUrl:activityURL(person.id+'recent-activity/posts/',person.id)},occupied);
+  }
+  s.directPostSeedKey=key;
+}
+function sortJobs(s){
+  const rank=job=>job.owner===s.root&&job.kind!=='posts'?0:job.kind==='posts'&&job.depth===1&&!job.deepComments?1:job.kind==='posts'?2:3;
+  s.queue.sort((a,b)=>rank(a)-rank(b)||(a.depth??0)-(b.depth??0));
+}
+function finishQuickPosts(s,w,reason){
+  const job=w.current.job,coverage=s.commentCoverage[job.owner],{postPass,...next}=job;
+  coverage.quickPass={posts:postPass.posts.length,actions:postPass.actions,checkedAt:new Date().toISOString()};
+  finishBranch(s,w,'incomplete',reason+' Deeper comment collection is queued after the other direct connections.');
+  s.queue.push({...next,deepComments:true});
+}
 function queueUnexplored(s,minDepth=0){
    pruneSharedJobs(s);
    s.queue=s.queue.filter(job=>job.kind!=='profile'||job.refresh||job.detailsOnly||!['exhausted','hidden','mutuals_only','incomplete','shared'].includes(s.branches[job.owner]?.status));
@@ -192,23 +220,27 @@ async function navigate(s,w,job,replayURL=job.replayURL){
   if(!tab)tab=await chrome.tabs.create({url,active:false});else tab=await chrome.tabs.update(tab.id,{url});
   w.tabId=tab.id;log(s,`Exploring ${s.nodes[job.owner]?.name||'profile'}’s ${job.kind==='posts'?'post comments':'connections'}`);await save(s);
 }
-function queueComments(s,job,snap){
+function queueComments(s,job,snap,occupied){
   if(!s.config.comments)return;
   s.commentCoverage||={};
   const previous=s.commentCoverage[job.owner]||{};
   const repair=!previous.discoveryVersion&&['hidden','incomplete'].includes(previous.status);
   if(previous.status&&!job.refresh&&!repair&&previous.status!=='queued')return;
-  if([...s.queue,...(s.deferredJobs||[])].some(item=>item.kind==='posts'&&item.owner===job.owner)||workers(s).some(w=>w.current?.job.kind==='posts'&&w.current.job.owner===job.owner))return;
+  if(occupied?occupied.has(job.owner):[...s.queue,...(s.deferredJobs||[])].some(item=>item.kind==='posts'&&item.owner===job.owner)||workers(s).some(w=>w.current?.job.kind==='posts'&&w.current.job.owner===job.owner))return;
   const url=activityURL(snap.activityUrl,job.owner);
   s.commentCoverage[job.owner]={...previous,discoveryVersion:1,status:url?'queued':'hidden',posts:previous.posts||[],comments:previous.comments||0,profiles:previous.profiles||[],url,reason:url?'Queued visible post comments.':'No visible post activity link.'};
-  if(url)s.queue.push({kind:'posts',owner:job.owner,depth:job.depth,url,refresh:Boolean(job.refresh)});
+  if(url){s.queue.push({kind:'posts',owner:job.owner,depth:job.depth,url,refresh:Boolean(job.refresh)});occupied?.add(job.owner);}
   else s.commentCoverage[job.owner].checkedAt=new Date().toISOString();
 }
 async function collectComments(s,w,snap){
   const c=w.current,job=c.job,now=Date.now();
   if(snap.kind!=='posts'||!activityURL(snap.url,job.owner)||snap.owner!==job.owner){if(now-c.since<4000)return;await recover(s,w,'The activity page changed owner. No comment links were recorded.');return;}
   const coverage=s.commentCoverage[job.owner];coverage.status='collecting';
-  const cards=snap.cards.filter(card=>card.author===job.owner);
+  const quick=job.depth===1&&!job.deepComments;
+  const pass=quick?(job.postPass||={posts:[],actions:0,perPost:{}}):null;
+  const allCards=snap.cards.filter(card=>card.author===job.owner);
+  if(pass)for(const card of allCards)if(pass.posts.length<QUICK_POSTS&&!pass.posts.includes(card.urn))pass.posts.push(card.urn);
+  const cards=pass?allCards.filter(card=>pass.posts.includes(card.urn)):allCards;
   const signature=JSON.stringify(cards.map(card=>[card.urn,card.control,card.comments.map(c=>c.commentId).sort()]));
   if(c.candidate!==signature){c.candidate=signature;c.stableSince=now;return;}
   if(now-c.stableSince<SETTLE)return;
@@ -225,14 +257,20 @@ async function collectComments(s,w,snap){
     if(signature===c.actionSignature)c.stalls=(c.stalls||0)+1;
     else c.stalls=0;
     c.awaitingComments=false;
+    if(pass&&(c.stalls||0)>=1){finishQuickPosts(s,w,'Saved visible commenters; moving to the next direct connection.');await save(s);return;}
     if((c.stalls||0)>=3){finishBranch(s,w,'incomplete','Post comments stopped changing after three paced actions. Visible evidence is saved.');await save(s);return;}
+  }
+  if(pass&&(pass.actions>=QUICK_COMMENT_ACTIONS||pass.posts.length>=QUICK_POSTS&&!cards.some(card=>card.control&&(pass.perPost[card.urn]||0)<2))){
+    finishQuickPosts(s,w,`Saved a first pass through ${pass.posts.length} recent posts.`);await save(s);return;
   }
   // Bound each author's work so one long post cannot consume the entire run.
   if((c.commentActions||0)>=20){finishBranch(s,w,'incomplete','Saved visible post comments; this profile reached its 20-action collection budget.');await save(s);return;}
-  const card=cards.find(card=>card.control);
+  const available=cards.filter(card=>card.control&&(!pass||(pass.perPost[card.urn]||0)<2));
+  const card=pass?available.sort((a,b)=>(pass.perPost[a.urn]||0)-(pass.perPost[b.urn]||0))[0]:available[0];
   const request=card?{action:card.control,urn:card.urn}:{action:'scroll'};
   if(now<(s.nextRequestAt||0))return;
   if(!await permit(s)){await save(s);return;}
+  if(pass){pass.actions++;if(card)pass.perPost[card.urn]=(pass.perPost[card.urn]||0)+1;}
   c.commentActions=(c.commentActions||0)+1;c.awaitingComments=true;c.actionSignature=signature;c.since=now;
   // Save intent before expansion; a suspended worker consumes new comments on resume.
   await save(s);
@@ -268,7 +306,7 @@ async function recover(s,w,reason){
   await save(s);
 }
 async function step(s,w,assign=true){
-  if(!w.current){if(!assign)return;s.queue.sort((a,b)=>(a.depth??0)-(b.depth??0)||({posts:0,profile:1,list:2}[a.kind]??3)-({posts:0,profile:1,list:2}[b.kind]??3));const job=s.queue.shift();if(job)await navigate(s,w,job);return;}
+  if(!w.current){if(!assign)return;queueDirectPosts(s);sortJobs(s);const job=s.queue.shift();if(job)await navigate(s,w,job);return;}
   if(w.current.navPending){if(Date.now()>=(s.nextRequestAt||0))await navigate(s,w,w.current.job,w.current.resumeURL);return;}
   if(w.current.retryAt){if(Date.now()>=w.current.retryAt)await navigate(s,w,w.current.job,w.current.resumeURL);return;}
   const c=w.current,job=c.job,tab=await chrome.tabs.get(w.tabId).catch(()=>null),now=Date.now();
@@ -301,7 +339,7 @@ async function step(s,w,assign=true){
       const listJob={kind:'list',owner:job.owner,depth:job.depth,url,refresh:Boolean(job.refresh)};
       const postIndex=s.queue.findIndex(item=>item.kind==='posts'&&item.owner===job.owner);
       // Inspect this person's posts before a long connection list can starve them.
-      if(postIndex>=0){const [posts]=s.queue.splice(postIndex,1);s.queue.unshift(listJob);await navigate(s,w,posts);}
+      if(job.owner!==s.root&&postIndex>=0){const [posts]=s.queue.splice(postIndex,1);s.queue.unshift(listJob);await navigate(s,w,posts);}
       else await navigate(s,w,listJob);
     }
     return;
@@ -393,7 +431,6 @@ async function tick(){
     if(Object.keys(s.nodes).length>=s.config.maxNodes){limit(s);await save(s);return;}
     // Expand observed paths even if the source list was only partially visible.
     // Coverage remains partial; it does not invalidate the edges already seen.
-    s.queue.sort((a,b)=>(a.depth??0)-(b.depth??0)||({posts:0,profile:1,list:2}[a.kind]??3)-({posts:0,profile:1,list:2}[b.kind]??3));
     for(const [i,w] of workers(s).entries()){
       if(s.status!=='running')break;
       const assign=s.config.delay===0||i===0;
@@ -406,6 +443,7 @@ async function tick(){
         else throw error;
       }
     }
+    if(s.status==='running'&&s.workers.every(w=>!w.current))queueDirectPosts(s);
     if(s.status==='running'&&!s.queue.length&&s.workers.every(w=>!w.current)){
       s.status='complete';s.lastCompletedAt=new Date().toISOString();log(s,s.refreshing?'Incremental refresh finished. Saved checkpoints remain ready for the next daily check.':'Available collection queue finished. Check Coverage for hidden or incomplete lists.');s.refreshing=false;await save(s);
     }
@@ -413,7 +451,7 @@ async function tick(){
   finally{await schedule(s);}
 }
 async function command(message){
-  if(message.type==='PING')return {ok:true,name:'Orbit',version:VERSION,capabilities:['exploreNext','sharedCoverage']};
+  if(message.type==='PING')return {ok:true,name:'Orbit',version:VERSION,capabilities:['exploreNext','sharedCoverage','quickPosts']};
   if(message.type==='WORKSPACE_ACTIVE'){
     const s=await read();if(!s)return {ok:true};s.workspaceManaged=true;
     if(message.active===false){s.workspaceLeaseUntil=0;if(s.status==='running'){s.pauseKind='workspace_closed';await pause(s,'Orbit paused because the Site was closed. Reopen it to continue from this exact checkpoint.');}else await save(s);return {ok:true};}
@@ -466,26 +504,30 @@ async function command(message){
     }
     const s=newState(message.url,config);s.nextRequestAt=Math.max(current?.nextRequestAt||0,(await chrome.storage.local.get('orbitNextRequestAt')).orbitNextRequestAt||0);s.engineVersion=5;await startRun(s);await save(s);await schedule(s);await tick();return {ok:true};
   }
-  if(message.type==='EXPLORE_NEXT'){
+  if(message.type==='EXPLORE_NEXT'||message.type==='EXPLORE_POSTS'){
+    const postsFirst=message.type==='EXPLORE_POSTS';
     const s=await read();if(!s)throw Error('Collect your connections first.');
     if(message.root&&profileURL(message.root)!==s.root)throw Error('Open your active account network before exploring further.');
     if(!Object.values(s.nodes).some(p=>p.depth===1))throw Error('No first-degree people are saved yet. Continue collecting your connections first.');
     if(['restriction','login','errors'].includes(s.pauseKind))throw Error(s.reason||'Resolve the collection pause, then press Resume.');
     if((await readPolicy(s)).blocked)throw Error(policy.blocked.reason);
     const config=options(message.config||s.config);if(Object.keys(s.nodes).length>=config.maxNodes)throw Error('Increase the people limit in Map settings before exploring further.');
-    s.config={...config,delay:Math.max(120,config.delay),depth:Math.max(2,s.config.depth,config.depth)};
+    s.config={...config,comments:postsFirst||config.comments,delay:Math.max(120,config.delay),depth:Math.max(2,s.config.depth,config.depth)};
     if(message.shared&&!applySharedGraph(s,message.shared))throw Error('The shared graph does not match the active account network.');
     // Keep the direct-list checkpoint available for a future refresh. Do not
     // replay it when the user explicitly chooses to explore known connections.
     s.deferredJobs||=[];
     for(const w of workers(s))if(w.current?.job.owner===s.root){s.deferredJobs.push({...w.current.job,replayURL:w.current.resumeURL});w.current=null;}
     s.deferredJobs.push(...s.queue.filter(job=>job.owner===s.root));s.queue=s.queue.filter(job=>job.owner!==s.root);
-    queueSharedCandidates(s,1);queueUnexplored(s,1);
+    if(postsFirst)for(const w of workers(s))if(w.current&&!(w.current.job.kind==='posts'&&w.current.job.depth===1&&!w.current.job.deepComments)){
+      s.queue.unshift({...w.current.job,replayURL:w.current.resumeURL});w.current=null;
+    }
+    queueSharedCandidates(s,1);queueDirectPosts(s,true);queueUnexplored(s,1);
     if(!s.queue.length&&!workers(s).some(w=>w.current)){
       s.status='complete';log(s,'All saved people within this depth have been explored. Increase to 3rd degree in Map settings, or wait for a daily refresh.');await save(s);await schedule(s);return {ok:true,status:s.status,reason:s.reason};
     }
     if(!s.runId)await startRun(s);s.status='running';s.refreshing=false;s.pauseKind=null;s.attentionTabId=null;if(s.workspaceManaged)s.workspaceLeaseUntil=Date.now()+WORKSPACE_LEASE;
-    log(s,'Exploring connections of saved people · direct-list checkpoint kept');await save(s);await schedule(s);await tick();return {ok:true,status:s.status,reason:s.reason};
+    log(s,postsFirst?'Checking direct connections’ recent posts first · saved checkpoints kept':'Exploring connections of saved people · direct-list checkpoint kept');await save(s);await schedule(s);await tick();return {ok:true,status:s.status,reason:s.reason};
   }
   if(message.type==='PAUSE'){const s=await read();if(s?.status==='running'){s.pauseKind='user';await pause(s,'Paused by you. Your progress and queue are saved.');}return {ok:true};}
   if(message.type==='RESUME'){

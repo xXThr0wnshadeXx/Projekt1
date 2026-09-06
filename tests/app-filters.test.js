@@ -29,4 +29,10 @@ test('typed filters coalesce, polls keep applied results, and directory reuses g
  $('back-collection').onclick();assert.equal(searchCalls.mock.callCount(),beforeSearch+3);assert.equal(filterCalls.mock.callCount(),initialCalls+3);
  $('filter-location').value='Paris';$('filter-location').oninput();$('reset-filters').onclick();flush();assert.match($('filter-count').textContent,/3 of 3/);assert.equal($('filter-location').value,'');
  $('search').value='Taylor';$('search').oninput();flush();assert.equal($('people-body').children.length,1);assert.match($('people-body').textContent,/Taylor/);
+ const sent=[];let quickPosts=false;
+ globalThis.chrome={runtime:{sendMessage:async(_id,message)=>{sent.push(message);return message.type==='PING'?{ok:true,version:'test',capabilities:['exploreNext','sharedCoverage',...(quickPosts?['quickPosts']:[])]}:{ok:true,status:'running'};}}};
+ await $('explore-posts').onclick();assert.equal(sent.some(m=>m.type==='EXPLORE_POSTS'),false,'old companions must be updated first');
+ quickPosts=true;$('collect-comments').checked=false;$('depth').value='1';await $('explore-posts').onclick();
+ const request=sent.find(m=>m.type==='EXPLORE_POSTS');assert.equal(request.root,root);assert.equal(request.config.comments,true);assert.equal(request.config.depth,2);assert.equal($('collect-comments').checked,true);
+
 });
