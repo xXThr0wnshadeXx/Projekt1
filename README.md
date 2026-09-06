@@ -1,56 +1,86 @@
-# Orbit — LinkedIn network mapper
+# Orbit — Shared LinkedIn Connection Graph
 
-Orbit collects visible connection relationships through a local Chrome companion, draws an interactive network, and saves observed people and relationships to one shared, persistent team library. Collections can overlap: the library merges them so a saved person can be explored without another LinkedIn request.
+Orbit builds an evidence-backed graph from LinkedIn pages that a contributor can already view. A Chrome companion reads those pages locally; one OpenAI Sites deployment hosts the interface, authenticated API, and shared D1 database.
 
-- **Team repository:** [xXThr0wnshadeXx/Projekt1](https://github.com/xXThr0wnshadeXx/Projekt1)
-- **Hosted application:** [Orbit](https://orbit-shreev2703-graph-test.cloudy-moose-7621.chatgpt.site/)
-- **Current application / companion version:** `2.0.0`
+## Use Orbit
 
-The repository is named `Projekt1`; the application is named **Orbit**. Both the source and the hosted application are public. Anyone can open the interface and download the companion. **Sign in with ChatGPT** inside Orbit to contribute to the shared team library. Public viewing does not grant database writes, deployment permissions, or access to the signed-in workspace. Ask the project owner for development/deployment access when needed.
+- **Canonical application:** [orbit-shreev2703-graph-test.shreev2703.chatgpt.site](https://orbit-shreev2703-graph-test.shreev2703.chatgpt.site/)
+- **Repository:** [xXThr0wnshadeXx/Projekt1](https://github.com/xXThr0wnshadeXx/Projekt1)
+- **Companion download:** [download the current ZIP](https://orbit-shreev2703-graph-test.shreev2703.chatgpt.site/downloads/orbit-network-mapper.zip)
 
-## Teammate downloads and local use
+There is one hosted application and one hosted database. Do not use the retired Turso setup or the older `doublejav.chatgpt.site` deployment.
 
-- **[Download the Chrome companion ZIP](https://github.com/xXThr0wnshadeXx/Projekt1/raw/refs/heads/main/downloads/orbit-network-mapper.zip)**
-- **[Download the full frontend source](https://github.com/xXThr0wnshadeXx/Projekt1/archive/refs/heads/main.zip)**
+## Contributor setup
 
-### Run the companion without a server
+1. Open the canonical application and sign in with ChatGPT.
+2. Download and unzip the Chrome companion.
+3. Open `chrome://extensions`.
+4. Enable **Developer mode** and choose **Load unpacked**.
+5. Select the extracted `orbit-network-mapper` folder.
+6. Reload the hosted Orbit page and click **Connect companion**.
+7. Enter a full LinkedIn profile URL and start the collection.
 
-1. Download and unzip the companion ZIP into a permanent folder.
-2. In Chrome, open `chrome://extensions`, enable **Developer mode**, and click **Load unpacked**.
-3. Select the extracted `orbit-network-mapper` folder containing `manifest.json`.
-4. Click Chrome's Extensions icon, then **Orbit — LinkedIn Network Mapper** to open its local workspace. Use the same Chrome profile as your LinkedIn session.
+Each contributor installs the companion in their own Chrome profile because it reads their own visible LinkedIn pages. They do not run a database or web server. Discoveries are sent to the same hosted API and merged into the same shared graph.
 
-The extension includes the frontend and can run locally without Node, npm, or a hosted server. Its collection checkpoint stays in that Chrome profile. A shared database and account sign-in still require a backend.
+## What runs where
 
-To update, pause collection, replace the files in the same extension folder, click **Reload** in `chrome://extensions`, and refresh Orbit. Keep the folder in place while the extension is installed.
-
-### Preview or edit the frontend on localhost
-
-Download and unzip the full frontend source above (or clone this repository). With Python 3 installed, open a terminal in the extracted repository folder and run:
-
-```sh
-python3 tools/preview.py
+```text
+LinkedIn pages visible to a contributor
+                │
+                ▼
+Local Chrome companion
+  - reads visible page content
+  - stores a resumable local checkpoint
+  - spaces LinkedIn requests
+                │
+                ▼
+Canonical Orbit Site
+  - user interface
+  - ChatGPT authentication
+  - /api/library/* Worker routes
+                │
+                ▼
+Sites D1 binding: DB
+  - shared workspace: demo-knowledge-graph
+  - people, relationships, evidence
+  - per-contributor rate limits
 ```
 
-On Windows, use `py -3 tools/preview.py` if `python3` is unavailable. Open **http://127.0.0.1:8770/** and choose **Preview setup on this device**. Keep the terminal running; Ctrl+C stops the preview. Use `--port 8771` if the default port is busy.
+The extension is local; the knowledge graph is not. All authenticated contributors use the hard-coded shared workspace `demo-knowledge-graph`. Their authenticated identities remain separate for authorization and rate limiting.
 
-Each teammate runs this on their own computer. Localhost is not a shareable hosted address. The HTTP preview displays the frontend but cannot connect to the companion under the current origin allowlist. Use the extension's own workspace for collection. Database features are unavailable in the static preview.
+## Shared database behavior
 
-Maintainers: after companion changes, run `npm run package`, copy `dist/orbit-network-mapper.zip` to `downloads/orbit-network-mapper.zip`, and commit both the source and updated download.
+The Sites runtime supplies a D1 database as the `DB` binding declared in [`.openai/hosting.json`](.openai/hosting.json). No Turso URL, token, `.env` file, LinkedIn API key, or local SQLite server is required.
 
-## Start here
+Database migrations live in [`drizzle/`](drizzle/) and are packaged with every Sites deployment. The schema stores:
 
-### Prerequisites
+- canonical LinkedIn profile URLs and profile metadata;
+- undirected relationships with stable, sorted endpoint IDs;
+- connection-list evidence and observation timestamps;
+- atomic per-contributor rate-limit counters.
 
-- Node.js **22.13 or later** with npm. SQLite tests use the built-in `node:sqlite` module; an older Node release will fail. The application was validated with Node 22.19.
-- Python 3 for the build and static preview scripts.
-- Git.
-- Chrome **120 or later** if you are working on the companion. A LinkedIn session is needed only for live collection, not unit tests or the static UI.
-- Authorized access to the existing Sites project for production API/database work and deployment.
+Ingestion uses idempotent upserts. Overlapping collections add new evidence and relationships without creating duplicate people. Empty incoming fields do not overwrite existing nonempty profile information.
 
-### Clone, install, and validate
+The hosted limits are currently 20 ingestion requests and 120 read requests per authenticated contributor per minute. A limit response uses HTTP 429 with `Retry-After` and rate-limit headers.
 
-```sh
+## Collection rules
+
+Orbit only processes LinkedIn pages the contributor can access in their browser. It does not bypass sign-in, verification, privacy controls, hidden connection lists, or commercial-use restrictions.
+
+- One collection tab is used at a time.
+- LinkedIn requests are spaced by at least two minutes.
+- Checkpoints survive browser restarts and can be resumed.
+- Unexpected pages, ownership changes, verification screens, and restrictions stop or pause collection.
+- Every saved relationship must include an observable connection-list source.
+- A missing relationship means “not recorded,” not “not connected.”
+
+Wait for **Saved to library** before clearing a local checkpoint. Clearing the browser checkpoint does not remove data already written to D1.
+
+## Local development
+
+Local development is for editing and testing. It is not a second production architecture.
+
+```powershell
 git clone https://github.com/xXThr0wnshadeXx/Projekt1.git
 cd Projekt1
 npm ci
@@ -60,272 +90,57 @@ npm run build
 npm run preview
 ```
 
-Open [http://127.0.0.1:8770](http://127.0.0.1:8770). Stop the preview with Ctrl+C. If port 8770 is occupied, stop the old preview process before restarting it, or choose a port with `npm run preview -- --port 8771`.
+The preview opens at `http://127.0.0.1:8770`. It serves the frontend and companion download, but it does not provide ChatGPT authentication or a local D1 backend. Shared-library testing must use the canonical hosted application.
 
-The preview packages the Chrome companion at startup and serves it at `/downloads/orbit-network-mapper.zip`, so the page's download buttons work locally without a production build. Restart the preview after companion source changes to refresh the download. Use `npm run preview`, not a bare `python3 -m http.server`: a generic server does not map that download URL to the generated ZIP.
+The npm tooling uses Node.js on Windows, macOS, and Linux. Python is not required.
 
-**The preview is a static Python server, not a local backend.** It serves the UI and supports local Orbit JSON import/export, graph rendering, and directory work. `/api/library/*` is unavailable there. A library connection error in this preview is expected. There is currently no `npm run dev`, local Worker/D1 emulator, or automated GitHub-to-production deployment.
+## API
 
-No `.env` file, LinkedIn API key, or database password is required for these local checks. Production receives its `DB` binding and authenticated-user identity from Sites.
+Authenticated routes are under `/api/library/`:
 
-### Choose a development path
+- `GET /api/library/stats` — shared people and connection counts;
+- `GET /api/library/search?q=...` — search saved profiles;
+- `GET /api/library/graph?url=...&depth=2&limit=1000` — bounded neighborhood;
+- `POST /api/library/ingest` — validate and merge a collected graph batch.
 
-- **UI and graph:** use the static preview, import a synthetic Orbit JSON file, and edit `index.html`, `styles.css`, `src/app.js`, or `src/graph.js`. Refresh the page after edits; the Python server does not provide hot reload.
-- **Collector:** load the repository as an unpacked extension, then use the extension's own page. The local HTTP preview cannot connect to the companion because the external-message allowlist contains only the hosted Orbit origin.
-- **Database or API:** start with the SQLite-backed and API unit tests. End-to-end testing requires a separately configured development Site or authorized access to the hosted application. Do not treat the production library as a test database.
+`GET /api/session` reports whether the request has a trusted Sites identity. Clients cannot supply their own user ID. Anonymous library requests return 401, cross-origin writes return 403, oversized bodies return 413, and a missing database binding returns 503.
 
-#### Built-in shared database
-
-The hosted application uses the Sites-provided D1 database bound as `DB` in `.openai/hosting.json`. No Turso account, URL, token, or local database setup is required. Every signed-in contributor reads and writes the same `demo-knowledge-graph` workspace; the authenticated user identity is still used for access checks and individual rate limits.
-
-The deployment enforces database-backed limits per authenticated contributor: 20 ingestion requests and 120 read requests per minute. A rejected request returns HTTP 429 with `Retry-After` and rate-limit headers.
-
-## Install and update the Chrome companion
-
-For development, open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select this repository's root folder—the folder containing `manifest.json`. Click the Orbit extension action to open its own interface. Changes to the background worker or manifest require clicking **Reload** on the extension card; refresh any open Orbit interface afterward.
-
-For a packaged install:
-
-```sh
-npm run package
-```
-
-Unzip `dist/orbit-network-mapper.zip` and load the extracted `orbit-network-mapper` folder. To update an existing packaged install, pause collection, replace the files in the same unpacked folder, click **Reload**, and refresh Orbit. Avoid uninstalling the extension when you want to preserve its local checkpoint. Export important work first.
-
-For the hosted workflow, open Orbit in the **same Chrome profile** as the installed companion and LinkedIn session, then select **Connect companion**. An in-app browser or another browser profile does not share Chrome's extension installation.
-
-The extension ID is `ocgpgkedpdglaealclnhmgolkfpehafa`. The public `key` in `manifest.json` keeps unpacked installations consistent; it is not a private credential. Keep that key, `COMPANION_ID` in `src/companion.js`, and the expected version in `src/app.js` consistent.
-
-For a different development Site origin, update both `SITE_ORIGIN` in `src/companion.js` and `externally_connectable.matches` in `manifest.json`. A change to only one will not enable the bridge. Preserve narrow, explicit allowed origins.
-
-## How the application works
-
-```mermaid
-flowchart LR
-    L[Visible LinkedIn pages] --> C[Chrome companion]
-    C --> K[Local collection checkpoint]
-    C <-->|Chrome runtime messages| U[Orbit web interface]
-    U --> G[Interactive canvas graph]
-    U -->|Same-origin authenticated API| W[Sites Worker]
-    W --> D[(Persistent D1 library)]
-    D -->|Saved neighborhood| U
-```
-
-1. The companion opens a profile or connection list in Chrome. `src/collector.js` reads rendered page content; the hosted server does not crawl LinkedIn.
-2. `src/background.js` manages the queue, request spacing, retries, pauses, and a checkpoint in `chrome.storage.local` under `orbitNetwork`.
-3. `src/core.js` normalizes profile URLs, deduplicates people and edges, validates connection-list ownership, and records source evidence.
-4. `src/app.js` retrieves changed companion state and updates the graph, directory, coverage, and progress display.
-5. `src/library.js` saves changed people first, then relationships, in batches of up to 100. The hosted page must remain open for continuous syncing. Failed saves retain pending work and retry.
-6. The Worker validates requests and merges records into D1. Library searches read that database without opening LinkedIn.
-
-The browser checkpoint and the permanent library serve different purposes. The checkpoint contains a resumable collection queue; the library contains accumulated people, connections, and observations across runs. Closing the hosted page stops syncing, but the companion can retain progress locally. Reopening the hosted page and connecting can sync that checkpoint later.
-
-**Wait for “Saved to library” before clearing a local collection.** Clearing the browser collection does not delete records already saved to D1. An exported Orbit JSON file is a graph snapshot, not a complete resumable worker checkpoint. CSV is export-only; it cannot currently be imported.
-
-## Repository guide
+## Repository layout
 
 ```text
-index.html                 Application structure and controls
-styles.css                 Application styling
-manifest.json              Chrome MV3 permissions, version, and allowed Site origin
-src/
-  app.js                   UI state, companion bridge, import/export, progress
-  graph.js                 Canvas rendering, layout, animation, selection, zoom
-  collector.js             Injected DOM inspection and pagination functions
-  background.js            Collection service worker, queue, pacing, recovery
-  core.js                  Shared graph model, URL validation, evidence, serialization
-  companion.js             Stable companion ID and allowed hosted origin
-  library.js               Browser-to-library sync and saved-person search
-server/
-  worker.js                Worker fetch entry point and embedded static assets
-  api.js                   API routing, identity, origin checks, body limits
-  database.js              Validation, transactional ingestion, search, traversal
-db/schema.ts               Drizzle SQLite schema
-drizzle/                   Versioned SQL migrations and Drizzle metadata
-drizzle.config.ts          Migration generation configuration
-vite.config.js            Worker bundle and Sites metadata plugin
-.openai/hosting.json       Existing Site project ID and logical DB binding
-tools/package.py           Packages the Chrome companion
-tools/preview.py           Local UI server and companion download route
-tools/build.py             Builds assets, companion download, and Worker artifact
-tests/                     Unit tests and isolated synthetic UI fixtures
+.openai/hosting.json   Sites project and D1 binding
+drizzle/               D1 migrations and metadata
+server/                Worker, API, database, and rate limiting
+src/                   UI, graph, collection, and companion code
+tests/                 API, database, collector, graph, and UI tests
+tools/                 Cross-platform build, package, and preview tools
+manifest.json          Chrome companion manifest
 ```
 
-The frontend uses plain JavaScript modules and HTML Canvas; there is no React application or frontend framework. Runtime application code has no third-party library dependency. Vite, the Sites plugin, Drizzle tooling, and LinkeDOM support builds, schema management, and tests.
+## Team workflow
 
-Generated output is ignored by Git:
+1. Pull the latest `main`.
+2. Create a focused branch.
+3. Run `npm run check`, `npm test`, and `npm run build`.
+4. Open a pull request and merge it after review.
+5. Save and deploy that exact merged commit through the existing Sites project.
+6. Verify the live application, session endpoint, D1-backed library, and companion download.
 
-- `out/`: assembled static assets and the downloadable companion ZIP.
-- `.build/assets.js`: generated asset map consumed by the Worker bundle.
-- `dist/server/index.js`: deployable Worker bundle.
-- `dist/.openai/`: hosting metadata and staged migrations.
-- `node_modules/`: installed development dependencies.
+Pushing GitHub does not automatically publish Sites. The deployed Sites version is the production system. Do not create another database for ordinary local development.
 
-`npm run build` first packages the companion, copies it into `out/downloads/`, and then rebuilds `dist/` with Vite. After a full build, use **`out/downloads/orbit-network-mapper.zip`** for the companion. Run `npm run package` separately when you specifically need the ZIP at `dist/orbit-network-mapper.zip`.
+## Capacity and limitations
 
-## Graph and database model
+The interface renders bounded graph views and defaults to a maximum of 10,000 people per map. The D1 library does not impose a 10,000-person lifetime limit, but a multi-million-person deployment has not yet been load-tested. Before treating D1 as the only copy of a large dataset, add capacity tests, monitoring, backups, and a restore procedure.
 
-Each person is identified by a canonical profile URL such as `https://www.linkedin.com/in/example/`. Relationships are undirected: sorted endpoint IDs form a stable edge ID, so A–B and B–A merge. Every accepted relationship needs a connection-list source URL and observation time. A missing edge means “not recorded,” not proof that two people are unconnected.
-
-The library has three tables:
-
-- **`people`**: primary key `(owner, id)`; name, normalized search name, headline, location, first-seen and last-seen timestamps. A name index supports prefix search.
-- **`connections`**: primary key `(owner, a, b)` with sorted endpoints; first-seen and last-seen timestamps. Forward and reverse access paths support adjacency lookup.
-- **`evidence`**: primary key `(owner, a, b, source)`; latest observation time for each relationship/source combination.
-
-`owner` is the stable shared workspace ID `demo-knowledge-graph` in the hosted Worker. Every signed-in teammate reads and writes that same logical graph. The authenticated Sites user ID is kept separate for access control and per-contributor rate limiting.
-
-Ingestion validates endpoints before writing, then uses a D1 transaction batch for idempotent upserts. JSON SQL parameters keep bind counts bounded. Existing nonempty profile fields survive empty updates. The current schema does not use foreign keys; preserve endpoint validation when changing ingestion. The `CROSS JOIN` order in JSON ingestion queries is intentional: it avoids a poor SQLite query plan found during testing.
-
-People and connection `first_seen` / `last_seen` values reflect ingestion timing. Evidence `observed_at` reflects the supplied observation time. Neither proves that a relationship still exists today. Deleted LinkedIn relationships are not automatically removed, and URL changes can produce a new person ID.
-
-### Change the schema
-
-```sh
-# First edit db/schema.ts, then:
-npx drizzle-kit generate
-npm test
-npm run build
-```
-
-Review the generated SQL and commit it together with `drizzle/meta/` and the schema change. Once deployed, migrations are immutable: add a new migration instead of rewriting one already applied. Sites stages/applies migrations during deployment. Never create or alter production tables in an API request handler.
-
-## Library API
-
-Routes live under `/api/library/` on the hosted Site. They are intended for the signed-in application, not anonymous public access. The trusted Sites dispatcher supplies `oai-authenticated-user-id`; do not replace this with a client-supplied user ID. A standalone server must establish a trusted authentication boundary before reusing this handler.
-
-- **`GET /stats`** returns `{ people, connections, lastSaved }` for the shared team graph.
-- **`GET /search?q=...`** accepts a name prefix or full profile URL and returns `{ people: [...] }`, with at most 30 results. This is not fuzzy or full-text search.
-- **`GET /graph?url=...&depth=2&limit=1000`** returns `{ found, root, nodes, edges, truncated, depth, limit }` for a saved person. A missing person returns `found: false` and empty node/edge arrays. Supported depth is 1–2 and node limit is 10–3,000. The UI requests 1,000 nodes.
-- **`POST /ingest`** accepts JSON `{ nodes: [...], edges: [...] }` and returns `{ saved: true }`. Send at most 100 nodes and 100 edges per request, with a body no larger than 500,000 bytes. A node needs a valid `id` or `url`; an edge needs `source`, `target`, and 1–20 evidence records containing a supported list `url` and parseable `observedAt`. Save endpoints before edges, or include them in the same batch.
-
-POST requests require `Content-Type: application/json` and an `Origin` matching the request origin. API responses are not cached. Missing identity returns 401; an invalid POST origin returns 403; oversized bodies return 413; unsupported content types return 415; validation failures return 400. Unknown routes return 404, and an absent DB binding returns 503.
-
-The neighborhood traversal bounds both node count and database work. `truncated: true` means a sample is being shown, not a complete neighborhood. The graph response includes one recent evidence record per displayed edge; the database can retain several source records. UI exports of that view therefore do not back up the entire permanent library.
-
-## Collection behavior and limits
-
-- One active collection tab; at least **120 seconds between collector-initiated navigation, pagination, and load-more actions**. The UI also offers 5- and 10-minute intervals. DOM polling is separate from page-action spacing, and LinkedIn may make its own background requests.
-- The next allowed action time is persisted. Older multi-tab queues are migrated to one lane; browser restart pauses collection for an explicit resume.
-- Collection depth is 1–3 and is fixed for a run. The per-run cap is 10–10,000 people. Raising the cap and resuming can extend a capped run.
-- Sign-in, verification, and restriction notices pause collection. Transient failures retry at most twice before a branch is marked incomplete.
-- A changed connection owner is not accepted. Equivalent filter encodings are normalized; viewer-degree filter changes with the same owner are recorded as adjusted coverage.
-- Hidden lists, mutual-only lists, missing pagination, and repeated page cycles remain visible in Coverage. A completed queue does not mean every real connection was discovered.
-
-There is no application-imposed 10,000-person lifetime limit on the shared library, but D1 has storage and execution limits. Million-node throughput and long live crawls have **not** been validated. The current graph is a bounded view of stored observations, not a prepopulated global LinkedIn directory. There is no unattended server crawler, automated freshness sweep, full-library export, or record-deletion interface yet.
-
-LinkedIn prohibits third-party automated scraping. Slower timings do not establish permission or guarantee that an account will avoid restrictions. Preserve the stop behavior; do not add verification bypasses, credential extraction, or hidden-data inference. See [LinkedIn's prohibited software guidance](https://www.linkedin.com/help/linkedin/answer/a1341387).
-
-## Tests and validation
-
-```sh
-npm run check                         # JavaScript syntax checks
-npm test                              # Full Node test suite
-node --test tests/database.test.js     # Persistence and traversal only
-node --test tests/background.test.js   # Collection scheduling and recovery only
-npm run build                         # Production artifact and companion
-```
-
-The imported 2.0.0 baseline passes 41 tests. Coverage includes URL/graph invariants, DOM extraction, mocked Chrome scheduling and migration, graph behavior, API identity/origin/body checks, SQLite account isolation, repeat ingestion, source evidence, and bounded neighborhoods. SQLite tests use an in-memory database initialized from committed migrations; no production data is needed. Synthetic tests do not establish actual LinkedIn collection speed or end-to-end production reliability.
-
-`tests/ui-fixture.html` and `tests/ui-fixture.js` provide an isolated synthetic rendering fixture. `tests/make-ui-fixture.js` can generate a 1,501-person Orbit JSON sample, but its output path is currently hard-coded to `/private/tmp/orbit-ui-test.network.json` for macOS. Adapt that path on another OS. Keep synthetic datasets in local tests; importing them into the hosted app will persist them in that account's library.
-
-Before a PR, run the checks relevant to the change and the production build. Include what changed, how it was checked, and any migration or companion-update requirement. For DOM fixes, add a sanitized minimal fixture reproducing the failure instead of committing personal profile HTML.
+There is no unattended cloud crawler, verification bypass, hidden-data inference, complete-database export, or deletion interface. LinkedIn may prohibit automated collection; contributors are responsible for following applicable terms and laws.
 
 ## Troubleshooting
 
-### Hosted Orbit says “You don't have access to this site”
+- **Companion not connected:** install the ZIP from the canonical Site, then reload both the extension and Site.
+- **401:** sign in with ChatGPT on the canonical Site.
+- **403:** use the canonical Site rather than another origin.
+- **429:** wait for the indicated retry period.
+- **503:** the Sites deployment is missing its `DB` binding.
+- **Collection paused:** open the collection tab and resolve the LinkedIn restriction manually.
 
-The interface and companion download do not require sign-in. Shared library access does: use the **Sign in with ChatGPT** link in the library panel. Different signed-in accounts contribute to the same team graph while retaining separate rate limits. If access is denied, ask the owner to verify the Site's current audience in Sites settings.
-
-### Local companion download says “No internet connection” or returns 404
-
-Pull the current code, stop the old local server with Ctrl+C, and run `npm run preview` again. The preview prints the packaged ZIP path and the local URL. Open that URL and retry the download. The previous generic Python server did not serve the `/downloads/` path; restarting with the new preview script fixes that missing route. Unzip the file before using Chrome's **Load unpacked**.
-
-### Companion is disconnected
-
-Use Chrome with the installed extension in the same browser profile, reload the extension, refresh the hosted page, and connect again. Check the extension ID and both origin allowlists if using a development deployment. The local preview is not on the external-message allowlist.
-
-### Library says it is unavailable or not yet saved
-
-The Python preview has no library API. On the hosted Site, use **Sign in with ChatGPT** if prompted. Check the browser Network panel for `/api/library/*` responses. A 503 points to a missing `DB` binding; a 400 can indicate invalid imported evidence or missing endpoints. Keep the page open for retry, and do not clear the checkpoint until saving succeeds. Never share session cookies or auth headers in a bug report.
-
-### Pages increase but the people count stays still
-
-Inspect the last-page counters: **new people**, **new links**, and **already mapped**. Reading overlapping lists can add relationships without new people. Check Coverage for repeated pages, mutual-only results, or incomplete branches. For a reproducible report include the companion version, sanitized progress message, selected depth/cap, and whether new-link counts change.
-
-### Collection is waiting or paused
-
-“Next LinkedIn request” is the deliberate pacing timer. A pause has a separate reason in the status area; use **View tab** to inspect the affected page. Resolve sign-in or account restrictions before resuming. If the person cap was reached, raise it first. A hidden list cannot be made complete by retrying indefinitely.
-
-### Tests or builds fail on a teammate's machine
-
-Check `node --version` and `python3 --version`, then rerun `npm ci` from the repository root. Missing `node:sqlite` generally indicates an old Node release. Run `npm run build`, not bare `vite build`: the Python build generates `.build/assets.js` before Vite bundles the Worker. Inspect the failing test/build output before changing dependencies or the lockfile.
-
-## Deployment and team workflow
-
-Work on a feature branch and open a PR to GitHub `main`:
-
-```sh
-git switch main
-git pull --ff-only
-git switch -c your-feature-name
-# Make changes and run the relevant validation.
-git add <changed-files>
-git commit -m "Describe the resulting behavior"
-git push -u origin your-feature-name
-```
-
-There are currently **no GitHub Actions workflows**. A GitHub push saves source but does not publish Orbit. The existing Sites deployment uses a separate Sites-managed source repository. `.openai/hosting.json` points to the existing production Site; do not create a duplicate Site or replace that project ID during ordinary maintenance.
-
-An authorized release maintainer should:
-
-1. Review the current Site audience and use the existing project. GitHub's public visibility does not imply that the hosted application should be public.
-2. Bring the reviewed GitHub changes into the Sites source checkout and run `npm ci`, `npm run check`, `npm test`, and `npm run build` there.
-3. Push that exact source to the Sites-managed repository using a short-lived credential kept out of files and Git config. After the push succeeds, record the full `git rev-parse --verify HEAD` result.
-4. Use the Sites hosting workflow to package the built Worker and `.openai` metadata/migrations, then save a Site version against that exact pushed commit. Do not archive the entire source tree or `node_modules`.
-5. Deploy the saved version to the intended existing audience, wait for a successful deployment, and verify the database binding and companion download. The build's metadata plugin stages migrations for Sites to apply.
-6. For companion changes, keep `manifest.json`, `package.json`, `VERSION` in `src/background.js`, and the expected version in `src/app.js` aligned. Tell users to reload their unpacked companion; publishing the hosted app does not update installed extensions.
-
-Application rollback and database rollback are separate concerns. Check migration compatibility before redeploying older code. There is no project-managed automated backup or full-library restore workflow yet; establish one before treating the database as the sole copy of an important corpus.
-
-Keep credentials, browser profiles, personal datasets, and database dumps out of commits. The current ignore rules cover dependencies, generated output, `*.network.json`, CSV, and ZIP files, but they do **not** ignore every possible secret filename or generic JSON export. Review staged changes before pushing to this public repository. No license file is currently included; public visibility alone should not be taken as an explicit reuse license.
-
-## Further references
-
-- [Cloudflare D1 limits](https://developers.cloudflare.com/d1/platform/limits/)
-- [LinkedIn connection API documentation](https://learn.microsoft.com/en-us/linkedin/shared/integrations/people/connections-api)
-- [LinkedIn prohibited software guidance](https://www.linkedin.com/help/linkedin/answer/a1341387)
-
-## Homepage and onboarding
-
-The root `index.html` is the welcome page. `setup.html` collects a validated
-LinkedIn profile URL before opening `map.html`. Profiles are remembered on the
-current device, scoped to the authenticated Sites user. This is a starting URL,
-not LinkedIn OAuth or verified ownership of the profile.
-
-The hosted setup/workspace routes require the existing trusted Sites identity;
-`GET /api/session` exposes only the current user's session with no-store caching.
-Localhost and the Chrome companion remain device-local tools and do not create
-accounts. The local homepage explicitly labels this as a preview.
-
-**Google account creation is not enabled.** The homepage displays its unavailable
-state rather than simulating authentication. Before enabling it, the project
-owner must confirm the hosting platform's external identity support, configure
-a Google OAuth web client for the final domain and callback, store its secret in
-the hosting secret manager, and implement verified server sessions with explicit
-library ownership mapping. Do not substitute browser flags or email alone for
-authentication. Existing library identities must not be silently reassigned.
-
-Graph zoom buttons change magnification by 8%. Scroll zoom is off by default;
-when enabled it uses small bounded changes around the pointer. New discoveries
-do not recenter or rescale the current view; use Fit when desired. The companion
-opens `map.html` directly. Reload the unpacked extension after this update.
-
-## Database-first workspace
-
-Network file import and JSON/CSV export have been removed from the workspace,
-including the companion IMPORT message handler. Use the saved library to find
-and view database records. The local preview still has no database backend.
-Earlier import/export instructions above describe the original 2.0.0 baseline
-and no longer apply to the current interface.
+Never commit browser profiles, session cookies, tokens, personal exports, database dumps, or credentials.
