@@ -3,6 +3,7 @@ import {randomUUID,randomBytes} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {before,after,describe,it} from 'node:test';
 import {Pool} from 'pg';
+import {canonicalJson} from '../dist/contracts/canonical.js';
 import {PgStore} from '../dist/packages/server/storage/postgres.js';
 import {migratePrivateStorage} from '../dist/packages/server/storage/migrate.js';
 import {migrateFactsStorage} from '../dist/packages/server/facts/migrate.js';
@@ -160,6 +161,55 @@ describe('public relationship review: current proof, explicit policy and atomic 
   await manual.confirm(a.token,{scopeId:a.scopeId,expectedGraphVersion:g.graphVersion,idempotencyKey:randomUUID(),confirm:true,change:{type:'RELATIONSHIP_FROM_OBSERVATION',observedLinkId:'anonymous-contact',decision:'ACCEPT',confirmation:{kind:'ACQUAINTANCE',strength:0.2,statement:'Anonymous manual assertion.',includeInSearch:false}}});
   const after=await graph(a);assert.deepEqual(after.searchEdges,[edge]);assert.deepEqual(after.relationships.find(r=>r.id===edge.relationshipId),g.relationships[0]);
   await facts.stage(a.token,directStage(a,'v2',after.graphVersion));assert.equal((await graph(a)).searchEdges.length,0);
+ });
+ async function staleDocumentSnapshot(a){
+  const before=await graph(a);
+  await facts.stage(a.token,directStage(a,'v2',before.graphVersion));
+  const current=await graph(a);
+  // Model a previously persisted stale projection, while keeping actual versioned resources valid.
+  current.searchEdges=before.searchEdges;
+  await pool.query('UPDATE private_scopes SET snapshot=$1 WHERE id=$2',[current,a.scopeId]);
+  return current;
+ }
+ it('ordinary graph reads repair obsolete public projections once and persist the new version',async()=>{
+  for(const mutation of ['policy','document','identity']){
+   const {a,request}=await prepared();await claims.review(a.token,request);let before=await graph(a);
+   if(mutation==='policy')await pool.query("UPDATE private_sources SET policy_version='withdrawn' WHERE id=$1",[a.sourceId]);
+   else if(mutation==='document')before=await staleDocumentSnapshot(a);
+   else {
+    const g=structuredClone(before),identity=g.identities.find(i=>i.personId!==g.rootPersonId);
+    g.people.find(p=>p.id===identity.personId).identityIds=[];identity.personId=null;identity.assignmentState='PENDING';
+    await pool.query('UPDATE private_scopes SET snapshot=$1 WHERE id=$2',[g,a.scopeId]);
+   }
+   const after=await graph(a);assert.equal(after.searchEdges.length,0);assert.equal(after.graphVersion,(BigInt(before.graphVersion)+1n).toString());
+   assert.equal(after.relationships.length,1);assert.deepEqual(await graph(a),after);
+   const persisted=(await pool.query('SELECT snapshot FROM private_scopes WHERE id=$1',[a.scopeId])).rows[0].snapshot;
+   assert.deepEqual(persisted,after);
+  }
+ });
+ it('source provisioning persists current public projection without requiring a later read repair',async()=>{
+  const {a,request}=await prepared();await claims.review(a.token,request);const before=await staleDocumentSnapshot(a);
+  await store.provisionSource({actorUserId:a.user.userId,scopeId:a.scopeId,expectedGraphVersion:before.graphVersion,source:{id:randomUUID(),provider:'PUBLIC_ARTICLE',origin:'PUBLIC_SOURCE',label:'Another anonymous source',importedAt:publicTime},policyVersion:'public-citation-review-v1'});
+  const persisted=(await pool.query('SELECT snapshot FROM private_scopes WHERE id=$1',[a.scopeId])).rows[0].snapshot;
+  assert.equal(persisted.searchEdges.length,0);assert.equal(persisted.graphVersion,(BigInt(before.graphVersion)+1n).toString());
+ });
+ it('import approval reports withdrawn public edges in its committed delta',async()=>{
+  const {a,request}=await prepared();await claims.review(a.token,request);const before=await staleDocumentSnapshot(a);
+  const context={sourceId:a.sourceId,scopeId:a.scopeId,ownerUserId:a.user.userId,batchId:randomUUID(),sourcePolicyVersion:'public-citation-review-v1',sharingDecisionId:null};
+  const envelope={context,batch:{schemaVersion:1,batchId:context.batchId,sourceId:a.sourceId,people:[],relationships:[],observedLinks:[],affiliations:[],evidence:[],warnings:[]},records:[],evidenceRecords:[],facts:[]};
+  const job=await store.stage({actorUserId:a.user.userId,context,expectedGraphVersion:before.graphVersion,payloadDigest:textHash(canonicalJson(envelope)),envelope});
+  const out=await store.approveImportObservations({actorUserId:a.user.userId,scopeId:a.scopeId,jobId:job.jobId,expectedGraphVersion:before.graphVersion,idempotencyKey:randomUUID(),personAssignments:[]});
+  const delta=out.events.find(e=>e.type==='BATCH_COMMITTED');assert.deepEqual(delta.removedEdgeIds,before.searchEdges.map(e=>e.id));assert.deepEqual(delta.searchEdges,[]);
+  const persisted=(await pool.query('SELECT snapshot FROM private_scopes WHERE id=$1',[a.scopeId])).rows[0].snapshot;
+  assert.equal(persisted.searchEdges.length,0);assert.equal(persisted.graphVersion,out.graphVersion);
+ });
+ it('failed read repair rolls back instead of returning stale public edges',async()=>{
+  const {a,request}=await prepared();await claims.review(a.token,request);const before=await staleDocumentSnapshot(a);
+  await pool.query(`CREATE FUNCTION reject_projection_update() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'anonymous repair failure'; END $$`);
+  await pool.query('CREATE TRIGGER reject_projection_update BEFORE UPDATE ON private_scopes FOR EACH ROW EXECUTE FUNCTION reject_projection_update()');
+  try{await assert.rejects(()=>graph(a));assert.deepEqual((await pool.query('SELECT snapshot FROM private_scopes WHERE id=$1',[a.scopeId])).rows[0].snapshot,before);}
+  finally{await pool.query('DROP TRIGGER reject_projection_update ON private_scopes');await pool.query('DROP FUNCTION reject_projection_update()');}
+  assert.equal((await graph(a)).searchEdges.length,0);
  });
  it('expired and revoked sessions never persist acceptance',async()=>{
   for(const column of ['expires_at','revoked_at']){const {a,request}=await prepared(),before=await graph(a);await pool.query(`UPDATE app_sessions SET ${column}=$1 WHERE token_hash=$2`,[Date.now()-1,a.sessionHash]);await rejectsCode(()=>claims.review(a.token,request),'UNAUTHENTICATED');assert.deepEqual(await graph(a),before);assert.equal(await count(a,'public_claim_decisions'),'0');}

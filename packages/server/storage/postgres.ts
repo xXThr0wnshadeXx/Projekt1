@@ -8,6 +8,7 @@ import { ServiceError } from '../service.js';
 import type { GraphSnapshot, GraphBuildEvent, NormalizedImportEnvelope, SourceSummary, SourceIdentityRef, Person } from '../../../contracts/index.js';
 import { canonicalJson } from '../../../contracts/canonical.js';
 import { normalizeImportShape, validateGraphSnapshot, validateNormalizedImport } from '../../../contracts/validation.js';
+import { refreshPublicCitationProjection } from '../public-facts/projection.js';
 
 type ScopeRow = { id: string; owner_user_id: string; root_person_id: string; graph_version: string; snapshot: GraphSnapshot };
 type SourceRow = { id: string; policy_version: string; enabled: boolean; summary: SourceSummary };
@@ -61,6 +62,7 @@ export class PgStore implements AuthStore, ReadPort, ImportPort, ContactsStore {
   private async saveSnapshot(client: PoolClient, row: ScopeRow, snapshot: GraphSnapshot): Promise<void> {
     snapshot.graphVersion = (BigInt(row.graph_version) + 1n).toString();
     const sources = await this.sourceRows(client, row);
+    await refreshPublicCitationProjection(client, row, snapshot, sources);
     validateGraphSnapshot(snapshot, {scopeId: row.id, rootPersonId: row.root_person_id, sourceIds: new Set(sources.map(s => s.id))});
     const result = await client.query('UPDATE private_scopes SET graph_version=$1,snapshot=$2 WHERE id=$3 AND owner_user_id=$4 AND graph_version=$5', [snapshot.graphVersion, snapshot, row.id, row.owner_user_id, row.graph_version]);
     if (result.rowCount !== 1) throw conflict();
@@ -77,7 +79,13 @@ export class PgStore implements AuthStore, ReadPort, ImportPort, ContactsStore {
       // Recheck the authoritative owner and root even if a stale or forged scope object is supplied.
       const row = await this.ownedScope(c, scope.ownerUserId, scope.scopeId, true);
       if (row.root_person_id !== scope.rootPersonId) throw forbidden();
-      return this.checkedSnapshot(c, row);
+      const graph = await this.checkedSnapshot(c, row);
+      const previousEdges = canonicalJson(graph.searchEdges);
+      await refreshPublicCitationProjection(c, row, graph, await this.sourceRows(c, row));
+      // Reads/searches must not serve a cached edge after a citation dependency changes.
+      // Persist repairs under the scope lock so stale search versions conflict on this same read.
+      if (canonicalJson(graph.searchEdges) !== previousEdges) await this.saveSnapshot(c, row, graph);
+      return graph;
     });
   }
 
@@ -292,7 +300,7 @@ export class PgStore implements AuthStore, ReadPort, ImportPort, ContactsStore {
       const envelope = {schemaVersion: 1 as const, jobId: job.id, scopeId: row.id};
       const events: GraphBuildEvent[] = [
         {...envelope, seq: 0, type: 'IMPORT_STARTED', sourceId: b.sourceId},
-        {...envelope, seq: 1, type: 'BATCH_COMMITTED', operationKind: 'REVIEW', baseGraphVersion: before.graphVersion, graphVersion: g.graphVersion, people: changed('people'), identities: changed('identities'), organizations: changed('organizations'), observedLinks: changed('observedLinks'), relationships: changed('relationships'), searchEdges: [], evidence: changed('evidence'), sources: [], removedPersonIds: [], removedEdgeIds: []},
+        {...envelope, seq: 1, type: 'BATCH_COMMITTED', operationKind: 'REVIEW', baseGraphVersion: before.graphVersion, graphVersion: g.graphVersion, people: changed('people'), identities: changed('identities'), organizations: changed('organizations'), observedLinks: changed('observedLinks'), relationships: changed('relationships'), searchEdges: changed('searchEdges'), evidence: changed('evidence'), sources: [], removedPersonIds: [], removedEdgeIds: before.searchEdges.filter(e=>!g.searchEdges.some(current=>current.id===e.id)).map(e=>e.id)},
         {...envelope, seq: 2, type: 'IMPORT_COMPLETED', graphVersion: g.graphVersion, peopleAdded: g.people.length - before.people.length, linksAdded: g.observedLinks.length - before.observedLinks.length, warnings: ['Imported relationship and affiliation claims still require confirmation before search.']},
       ];
       await c.query("UPDATE import_jobs SET status='OBSERVATIONS_APPROVED',review_key=$1,review_digest=$2,events=$3 WHERE id=$4 AND owner_user_id=$5 AND scope_id=$6", [input.idempotencyKey, reviewDigest, JSON.stringify(events), job.id, row.owner_user_id, row.id]);

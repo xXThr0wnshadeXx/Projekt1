@@ -1,4 +1,5 @@
 import { randomUUID, createHash } from 'node:crypto';
+import { refreshPublicCitationProjection } from '../public-facts/projection.js';
 import { Pool, type PoolClient } from 'pg';
 import type { ContactsStore, ContactsGrant, ContactsTransaction } from '../auth/contacts-ports.js';
 import { ServiceError } from '../service.js';
@@ -82,7 +83,8 @@ export class PgContactsPersistence implements ContactsStore {
       }
       if (graphChanged) {
         row.snapshot.graphVersion = (BigInt(row.graph_version) + 1n).toString();
-        const sources = (await c.query<{id: string}>('SELECT id FROM private_sources WHERE scope_id=$1 AND owner_user_id=$2 AND enabled=true', [row.id, row.owner_user_id])).rows;
+        const sources = (await c.query<SourceRow>('SELECT * FROM private_sources WHERE scope_id=$1 AND owner_user_id=$2 AND enabled=true', [row.id, row.owner_user_id])).rows;
+        await refreshPublicCitationProjection(c, row, row.snapshot, sources);
         validateGraphSnapshot(row.snapshot, {scopeId: row.id, rootPersonId: row.root_person_id, sourceIds: new Set(sources.map(s => s.id))});
         await c.query('UPDATE private_scopes SET graph_version=$1,snapshot=$2 WHERE id=$3 AND owner_user_id=$4', [row.snapshot.graphVersion, row.snapshot, row.id, row.owner_user_id]);
       }
