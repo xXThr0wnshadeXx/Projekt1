@@ -6,8 +6,8 @@ Orbit builds an evidence-backed graph from LinkedIn pages that a contributor can
 
 - **Canonical application:** [orbit-shreev2703-graph-test.shreev2703.chatgpt.site](https://orbit-shreev2703-graph-test.shreev2703.chatgpt.site/)
 - **Repository:** [xXThr0wnshadeXx/Projekt1](https://github.com/xXThr0wnshadeXx/Projekt1)
-- **Companion download:** [download the current ZIP](https://orbit-shreev2703-graph-test.shreev2703.chatgpt.site/downloads/orbit-network-mapper.zip?v=2.6.1)
-- **Current application and companion version:** `2.6.1`
+- **Companion download:** [download the current ZIP](https://orbit-shreev2703-graph-test.shreev2703.chatgpt.site/downloads/orbit-network-mapper.zip?v=2.6.2)
+- **Current application and companion version:** `2.6.2`
 
 This is the single supported hosted application and database. Do not use the retired Turso setup or the older `doublejav.chatgpt.site` deployment.
 
@@ -54,7 +54,7 @@ The extension is a background collection companion; the permanent knowledge grap
 
 Orbit maintains one continuously growing network for each signed-in account. Resuming an unfinished collection keeps its exact page, queue, and checkpoint; duplicate starts leave an active collection alone. A finished map becomes **Check for new connections**. Orbit never clears its saved coverage or requeues the whole known network: after 24 hours it checks the 24 stalest eligible branches, prioritizes the starting account, and rotates through the remainder on later runs. Newly discovered people still expand outward to the chosen degree. Reopening the Site starts a due daily batch, while reopening an unfinished run resumes exactly where it stopped. Every changed person and relationship is periodically upserted into the shared team graph. **Reset my account network** is deliberately kept in Settings and removes only that account’s contribution—overlapping records supported by teammates remain.
 
-### Comment relationships (2.6.1)
+### Comment relationships (2.6.2)
 
 A commenter and the actual author of a visible post get one **undirected, equal-weight relationship**, whether or not they are LinkedIn connections. Repeated comments and connection-list observations merge into the same pair while keeping separate evidence. Commenters on the same post are not automatically connected to each other.
 
@@ -71,7 +71,9 @@ Existing exports with `commentObservations`, combined comment evidence, or `kind
 - HTTP **429/999**, document **401/403**, and visible verification/restriction notices stop collection. `Retry-After` seconds and HTTP dates are respected, with a minimum 15-minute cooldown for restrictions. Time alone and reopening the Site never clear a restriction: inspect LinkedIn and explicitly resume. Login pages pause for sign-in. Repeated platform notices can extend the cooldown.
 - Transient failures back off exponentially, with two navigation retries per job and a pause after repeated failures. A stalled Next/scroll gets at most three paced attempts without repeatedly reloading the list. A checkpoint-write failure stops further actions until the companion is reloaded.
 - Scrolling uses overlapping viewports and combines unique people across virtualized snapshots. Modern and legacy result cards can coexist. A person cap saves only accepted rows and resumes the remainder without inflating page counts. An uncertain end remains **Incomplete** in Coverage.
-- Incomplete direct lists resume from an already validated list URL when available, and deeper profiles wait until that layer is resolved. Browser restarts preserve the last paginated URL.
+- Incomplete direct lists no longer block exploring the people already found. Resume keeps the active page and pending queue, including older coverage pauses. Browser restarts preserve the last paginated URL.
+- **Explore next layer** moves on to saved people's connections immediately, keeping the current direct-list checkpoint for later. It skips branches already attempted and does not re-create people. Increase coverage to 3rd degree in Map settings to explore another layer. Known people can still receive updated profile fields and new relationship evidence.
+- Collection scheduling uses the companion's local URL index and branch checkpoints. D1 merges the discovered people and relationships; a person existing in D1 alone is not proof their connection list was fully explored. Update an unpacked companion by replacing its existing files and clicking **Reload**, never by uninstalling it: uninstalling removes its local collection checkpoint.
 - An open Site now keeps its collection lease through background-tab throttling and overnight computer sleep. A normal Site close still pauses immediately and reopening resumes the same checkpoint.
 - Completed maps keep per-branch freshness timestamps. Daily refreshes inspect at most 24 stale branches at a time, retain all prior people, relationship evidence, comment coverage, and pagination history, and use idempotent URL/edge keys so a refresh cannot duplicate graph records.
 

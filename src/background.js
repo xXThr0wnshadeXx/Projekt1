@@ -69,6 +69,26 @@ async function schedule(s){
 const pause=async(s,reason,w)=>{s.attentionTabId=w?.tabId||null;s.status='paused';log(s,reason);try{await save(s);}finally{await schedule(s);}};
 function finishBranch(s,w,status,reason){const b=w.current.job.kind==='posts'?s.commentCoverage?.[w.current.job.owner]:s.branches[w.current.job.owner];if(b){b.status=status;b.reason=reason;b.checkedAt=new Date().toISOString();}log(s,reason);w.current=null;}
 function limit(s){s.status='limit';log(s,'Person limit reached. Increase the limit and resume to expand further.');}
+function queueUnexplored(s,minDepth=0){
+  s.queue=s.queue.filter(job=>job.kind!=='profile'||job.refresh||!['exhausted','hidden','mutuals_only','incomplete'].includes(s.branches[job.owner]?.status));
+  const busy=new Set([...s.queue,...(s.deferredJobs||[]),...workers(s).map(w=>w.current?.job).filter(Boolean)].map(job=>job.owner));
+  let added=0;
+  for(const person of Object.values(s.nodes).sort((a,b)=>a.depth-b.depth||a.id.localeCompare(b.id))){
+    // A known person is not necessarily an explored branch. Only schedule
+    // never-attempted branches; partial/hidden branches keep their coverage.
+    if(person.depth<minDepth||person.depth>=s.config.depth||s.branches[person.id]||busy.has(person.id))continue;
+    s.queue.push({kind:'profile',owner:person.id,depth:person.depth});busy.add(person.id);added++;
+  }
+  return added;
+}
+async function continueSavedFrontier(s){
+  queueUnexplored(s);
+  if(!s.queue.length&&!workers(s).some(w=>w.current))return false;
+  if(!s.runId)await startRun(s);
+  s.status='running';s.refreshing=false;s.pauseKind=null;s.attentionTabId=null;
+  if(s.workspaceManaged)s.workspaceLeaseUntil=Date.now()+WORKSPACE_LEASE;
+  log(s,'Continuing unexplored connections from saved progress');await save(s);await schedule(s);await tick();return true;
+}
 function prepareIncrementalRefresh(s,now=Date.now()){
   const lastBatch=Date.parse(s.lastRefreshBatchAt||'');
   if(Number.isFinite(lastBatch)&&now-lastBatch<REFRESH_AFTER)return [];
@@ -256,8 +276,10 @@ async function step(s,w,assign=true){
   const beforeEdges=Object.keys(s.edges).length;
   // Virtualized lists replace the visible rows; count the union across snapshots.
   const known=new Set(branch.profiles),newRows=(snap.people||[]).filter(p=>!known.has(profileURL(p.url)));
-  const capture={...snap,people:snap.isOwn?newRows:snap.people,countPage:branch.partialSignature!==snap.signature};
-  const added=seen?0:ingestPage(s,job,capture),links=Object.keys(s.edges).length-beforeEdges;
+  // Merge changed profile fields and new pair evidence even when every URL
+  // is already known. The URL/edge indexes make this idempotent.
+  const capture={...snap,countPage:!seen&&branch.partialSignature!==snap.signature};
+  const added=ingestPage(s,job,capture),links=Object.keys(s.edges).length-beforeEdges;
   if(newRows.length){c.unchangedAdvances=0;if(policy?.failures)await savePolicy({...policy,failures:0});}
   else if(snap.isOwn&&c.awaitingResults){c.unchangedAdvances=(c.unchangedAdvances||0)+1;}
   c.awaitingResults=false;c.lastSignature=snap.signature;c.candidate=null;c.replaying=false;
@@ -284,19 +306,14 @@ async function tick(){
     if(storageFailed)throw Error('Checkpoint storage failed. Reload the companion before collecting again.');
     if(s.workspaceManaged&&Date.now()>(s.workspaceLeaseUntil||0)){s.pauseKind='workspace_closed';await pause(s,'Orbit paused because the Site was closed. Reopen it to continue from this exact checkpoint.');return;}
     if(Object.keys(s.nodes).length>=s.config.maxNodes){limit(s);await save(s);return;}
-    const rootBranch=s.branches[s.root],hasExpansion=s.queue.some(job=>(job.depth??0)>0);
-    const rootCommentsPending=s.queue.some(job=>job.kind==='posts'&&job.owner===s.root)||s.workers?.some(w=>w.current?.job.kind==='posts'&&w.current.job.owner===s.root);
-    if(hasExpansion&&!rootCommentsPending&&!s.commentCoverage?.[s.root]?.profiles.length&&rootBranch&&['incomplete','hidden','mutuals_only'].includes(rootBranch.status)){
-      await pause(s,`Direct-layer check needed: Orbit found ${rootBranch.profiles?.length||0}${rootBranch.expectedCount?` of ${rootBranch.expectedCount}`:''} visible direct connections. Resolve this in the collection tab before connections-of-connections are expanded.`);return;
-    }
-    // Always finish shallower jobs first so every displayed distance has a verified chain.
+    // Expand observed paths even if the source list was only partially visible.
+    // Coverage remains partial; it does not invalidate the edges already seen.
     s.queue.sort((a,b)=>(a.depth??0)-(b.depth??0));
     for(const [i,w] of workers(s).entries()){
       if(s.status!=='running')break;
       const assign=s.config.delay===0||i===0;
       try{
         await step(s,w,assign);
-        // Let the next tick check direct-layer coverage before assigning more work.
       }catch(error){
         // A navigation/injection failure affects this lane, not the whole network.
         if(storageFailed)throw error;
@@ -317,7 +334,7 @@ async function archiveCurrent(){
  maps[s.id]=s;await chrome.storage.local.set({orbitMaps:maps,orbitNextRequestAt:Math.max(s.nextRequestAt||0,(await chrome.storage.local.get('orbitNextRequestAt')).orbitNextRequestAt||0)});
 }
 async function command(message){
-  if(message.type==='PING')return {ok:true,name:'Orbit',version:VERSION};
+  if(message.type==='PING')return {ok:true,name:'Orbit',version:VERSION,capabilities:['exploreNext']};
   if(message.type==='WORKSPACE_ACTIVE'){
     const s=await read();if(!s)return {ok:true};s.workspaceManaged=true;
     if(message.active===false){s.workspaceLeaseUntil=0;if(s.status==='running'){s.pauseKind='workspace_closed';await pause(s,'Orbit paused because the Site was closed. Reopen it to continue from this exact checkpoint.');}else await save(s);return {ok:true};}
@@ -326,7 +343,7 @@ async function command(message){
     // only a crash fallback and must not interrupt an intentionally open run.
     s.workspaceLeaseUntil=Date.now()+WORKSPACE_LEASE;
     if(s.status==='paused'&&s.pauseKind==='workspace_closed'){s.status='running';s.pauseKind=null;s.attentionTabId=null;log(s,'Site reopened · continuing from the saved checkpoint');await save(s);await schedule(s);wake(0);}
-    else if(s.status==='complete'&&!(await readPolicy(s)).blocked){const jobs=prepareIncrementalRefresh(s);if(jobs.length)await beginIncrementalRefresh(s,jobs,true);else await save(s);}
+    else if(s.status==='complete'&&!(await readPolicy(s)).blocked){if(await continueSavedFrontier(s))return {ok:true};const jobs=prepareIncrementalRefresh(s);if(jobs.length)await beginIncrementalRefresh(s,jobs,true);else await save(s);}
     else await save(s);
     return {ok:true};
   }
@@ -359,11 +376,32 @@ async function command(message){
     if(current&&root===current.root){
       if(Object.keys(current.nodes).length>config.maxNodes)throw Error('Increase the person limit above the number already saved.');
       current.config={...config,delay:Math.max(120,config.delay||120),depth:Math.max(current.config.depth,config.depth)};
+      if(await continueSavedFrontier(current))return {ok:true,status:current.status,reason:current.reason};
       const jobs=prepareIncrementalRefresh(current);
       if(!jobs.length){current.status='complete';current.refreshing=false;current.engineVersion=5;log(current,'Network is current. Orbit will keep this checkpoint and check stale branches on the next daily refresh.');await save(current);await schedule(current);return {ok:true,status:current.status,reason:current.reason};}
       await beginIncrementalRefresh(current,jobs);return {ok:true,status:current.status,reason:current.reason};
     }
     const s=newState(message.url,config);s.nextRequestAt=Math.max(current?.nextRequestAt||0,(await chrome.storage.local.get('orbitNextRequestAt')).orbitNextRequestAt||0);s.engineVersion=5;await startRun(s);await save(s);await schedule(s);await tick();return {ok:true};
+  }
+  if(message.type==='EXPLORE_NEXT'){
+    const s=await read();if(!s)throw Error('Collect your connections first.');
+    if(message.root&&profileURL(message.root)!==s.root)throw Error('Open your active account network before exploring further.');
+    if(!Object.values(s.nodes).some(p=>p.depth===1))throw Error('No first-degree people are saved yet. Continue collecting your connections first.');
+    if(['restriction','login','errors'].includes(s.pauseKind))throw Error(s.reason||'Resolve the collection pause, then press Resume.');
+    if((await readPolicy(s)).blocked)throw Error(policy.blocked.reason);
+    const config=options(message.config||s.config);if(Object.keys(s.nodes).length>=config.maxNodes)throw Error('Increase the people limit in Map settings before exploring further.');
+    s.config={...config,delay:Math.max(120,config.delay),depth:Math.max(2,s.config.depth,config.depth)};
+    // Keep the direct-list checkpoint available for a future refresh. Do not
+    // replay it when the user explicitly chooses to explore known connections.
+    s.deferredJobs||=[];
+    for(const w of workers(s))if(w.current?.job.owner===s.root){s.deferredJobs.push({...w.current.job,replayURL:w.current.resumeURL});w.current=null;}
+    s.deferredJobs.push(...s.queue.filter(job=>job.owner===s.root));s.queue=s.queue.filter(job=>job.owner!==s.root);
+    queueUnexplored(s,1);
+    if(!s.queue.length&&!workers(s).some(w=>w.current)){
+      s.status='complete';log(s,'All saved people within this depth have been explored. Increase to 3rd degree in Map settings, or wait for a daily refresh.');await save(s);await schedule(s);return {ok:true,status:s.status,reason:s.reason};
+    }
+    if(!s.runId)await startRun(s);s.status='running';s.refreshing=false;s.pauseKind=null;s.attentionTabId=null;if(s.workspaceManaged)s.workspaceLeaseUntil=Date.now()+WORKSPACE_LEASE;
+    log(s,'Exploring connections of saved people · direct-list checkpoint kept');await save(s);await schedule(s);await tick();return {ok:true,status:s.status,reason:s.reason};
   }
   if(message.type==='PAUSE'){const s=await read();if(s?.status==='running'){s.pauseKind='user';await pause(s,'Paused by you. Your progress and queue are saved.');}return {ok:true};}
   if(message.type==='RESUME'){
@@ -372,11 +410,9 @@ async function command(message){
     if(Object.keys(s.nodes).length>=config.maxNodes)throw Error('Increase the person limit above the current number of people.');
     await acknowledgeRestriction(s);
     s.config=config;s.engineVersion=5;s.status='running';s.pauseKind=null;s.attentionTabId=null;if(s.workspaceManaged)s.workspaceLeaseUntil=Date.now()+WORKSPACE_LEASE;
-    const rootBranch=s.branches[s.root],repair=['incomplete','hidden','mutuals_only'].includes(rootBranch?.status)&&!s.commentCoverage?.[s.root]?.profiles.length&&!workers(s).some(w=>w.current?.job.kind==='posts'&&w.current.job.owner===s.root);
-    if(repair){const interrupted=[];for(const w of workers(s)){if(w.current)interrupted.push(w.current.job);w.current=null;}const direct=rootBranch.scope==='connections'&&listURL(rootBranch.url)?{kind:'list',owner:s.root,depth:0,url:rootBranch.url,replayURL:rootBranch.resumeURL||rootBranch.url}:{kind:'profile',owner:s.root,depth:0};const jobs=[direct,...interrupted,...s.queue],seen=new Set();s.queue=jobs.filter(job=>{const key=`${job.kind}|${job.owner}|${job.depth??0}`;if(seen.has(key)||job.owner===s.root&&job!==direct)return false;seen.add(key);return true;});rootBranch.status='queued';rootBranch.reason='Rechecking the complete direct layer before continuing.';log(s,'Resuming by rechecking your direct connections, then continuing the saved queue');}
-    else for(const w of workers(s)){if(w.current){w.current.since=Date.now();w.current.candidate=null;w.current.nextActionAt=0;}}
-    // Slower mode drains existing lanes before assigning new work to its single lane.
-    if(!repair)log(s,'Resumed collection');await save(s);await schedule(s);await tick();return {ok:true,status:s.status,reason:s.reason};
+    for(const w of workers(s)){if(w.current){w.current.since=Date.now();w.current.candidate=null;w.current.nextActionAt=0;}}
+    queueUnexplored(s);
+    log(s,'Resumed from the saved page and remaining queue');await save(s);await schedule(s);await tick();return {ok:true,status:s.status,reason:s.reason};
   }
   if(message.type==='CLEAR'){const s=await read();if(s?.status==='running')throw Error('Pause collection before clearing it.');clearTimeout(timer);timer=null;await chrome.alarms.clear(ALARM);const maps=(await chrome.storage.local.get('orbitMaps')).orbitMaps||{};if(s)delete maps[s.id];await chrome.storage.local.set({orbitMaps:maps});cached=null;await chrome.storage.local.remove(KEY);return {ok:true};}
   if(message.type==='SHOW_TAB'){const s=await read(),w=s&&workers(s).find(w=>w.current&&w.tabId);const id=s?.attentionTabId||w?.tabId||s?.tabId;if(id)await chrome.tabs.update(id,{active:true});else throw Error('No collection tab is open yet.');return {ok:true};}

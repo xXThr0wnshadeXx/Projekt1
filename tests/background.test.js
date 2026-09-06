@@ -67,10 +67,10 @@ test('legacy saved page resumes, browser restart requeues every lane once',async
   assert.equal(h.data.orbitNetwork.workers.length,1);assert.equal(h.data.orbitNetwork.current.job.owner,root);
   h.listeners.startup();await h.flush();const saved=h.data.orbitNetwork;assert.equal(saved.status,'paused');assert.equal(saved.current,null);assert.equal(saved.queue.length,1);assert.ok(saved.workers.every(w=>!w.current&&!w.tabId));
 });
-test('resume renews the Site lease and repairs an incomplete direct checkpoint',async t=>{
+test('resume renews the Site lease and expands saved people despite incomplete direct coverage',async t=>{
   const s=newState(root,{depth:2,delay:0});s.status='paused';s.pauseKind='coverage';s.workspaceManaged=true;s.workspaceLeaseUntil=0;s.branches[root]={status:'incomplete',pages:1,profiles:[a],url:list('root')};s.nodes[a]={...person('a'),id:a,depth:1};s.queue=[{kind:'profile',owner:a,depth:1}];s.workers=[{tabId:null,current:null}];
   const h=await harness(t,s);h.snapshots={[root]:profile(person('root'),list('root'))};const response=await h.command({type:'RESUME',config:{maxNodes:1000,depth:2,delay:0}});
-  assert.equal(response.ok,true);assert.equal(response.status,'running');assert.ok(h.data.orbitNetwork.workspaceLeaseUntil>1000000);assert.equal(h.data.orbitNetwork.current.job.owner,root);assert.equal(h.data.orbitNetwork.branches[root].status,'queued');assert.match(h.data.orbitNetwork.reason,/exploring root/i);
+  assert.equal(response.ok,true);assert.equal(response.status,'running');assert.ok(h.data.orbitNetwork.workspaceLeaseUntil>1000000);assert.equal(h.data.orbitNetwork.current.job.owner,a);assert.equal(h.data.orbitNetwork.branches[root].status,'incomplete');assert.equal(h.data.orbitNetwork.queue.some(job=>job.owner===root),false);
 });
 
 test('a changed viewer-degree filter keeps the same owner and records adjusted coverage',async t=>{
@@ -261,14 +261,34 @@ test('reopening the Site starts a due daily refresh without rebuilding the map',
   assert.equal(h.data.orbitNetwork.status,'running');assert.equal(h.data.orbitNetwork.refreshing,true);assert.equal(h.data.orbitNetwork.current.job.owner,root);assert.equal(h.data.orbitNetwork.branches[root].pages,2);assert.ok(h.data.orbitNetwork.log.some(entry=>/Daily incremental refresh/.test(entry.message)));
 });
 
-test('an incomplete direct layer pauses before navigating to any deeper profile',async t=>{
-  const h=await harness(t),url=list('root');h.snapshots={[root]:profile(person('root'),url),[url]:page(url,[person('a')],{paginationState:'missing'})};
-  await h.command({type:'START',url:root});for(let i=0;i<16;i++)await h.tick();
-  assert.equal(h.data.orbitNetwork.status,'paused');assert.equal(h.requests.length,3);
-  assert.equal(h.tabs.get(1).url,url);
-  assert.equal((await h.command({type:'RESUME'})).ok,true);
-  assert.equal(h.data.orbitNetwork.current.job.kind,'list'); // Reuse the validated list URL.
-  assert.equal(h.data.orbitNetwork.current.job.owner,root);
+test('an incomplete direct list still expands observed connections without inventing completeness',async t=>{
+  const h=await harness(t),url=list('root');h.snapshots={[root]:profile(person('root'),url),[url]:page(url,[person('a')],{paginationState:'missing'}),[a]:profile(person('a'),list('a')),[list('a')]:page(list('a'),[person('b')])};
+  await h.command({type:'START',url:root});for(let i=0;i<30;i++)await h.tick();
+  assert.equal(h.data.orbitNetwork.status,'complete');assert.equal(h.data.orbitNetwork.branches[root].status,'incomplete');assert.deepEqual(route(h.data.orbitNetwork,b),[root,a,b]);
+});
+
+test('Explore next layer defers a repeating root page, preserves progress, and visits only unexpanded people',async t=>{
+  const s=newState(root,{depth:2});s.queue=[{kind:'profile',owner:a,depth:1},{kind:'profile',owner:b,depth:1}];s.status='paused';
+  for(const id of [a,b])s.nodes[id]={id,url:id,name:id,depth:1};
+  s.branches[root]={status:'incomplete',pages:8,profiles:[a,b],url:list('root')};s.branches[b]={status:'exhausted',pages:2,profiles:[]};
+  s.workers=[{tabId:1,current:{job:{kind:'list',owner:root,depth:0,url:list('root')},resumeURL:list('root')+'&page=8',lastSignature:'saved',since:0}}];
+  const h=await harness(t,s);h.tabs.set(1,{id:1,url:list('root'),status:'complete'});h.snapshots={[a]:profile(person('a'),list('a'))};
+  const response=await h.command({type:'EXPLORE_NEXT',root});assert.equal(response.ok,true);
+  const after=h.data.orbitNetwork;assert.equal(after.current.job.owner,a);assert.equal(after.queue.some(job=>job.owner===b||job.owner===root),false);assert.equal(after.branches[root].pages,8);assert.equal(after.branches[root].status,'incomplete');assert.equal(after.deferredJobs[0].replayURL,list('root')+'&page=8');
+  const current=structuredClone(after.current);await h.command({type:'EXPLORE_NEXT',root});assert.equal(h.data.orbitNetwork.current.job.owner,current.job.owner);assert.equal(h.requests.length,1);
+});
+
+test('unexplored people take priority over a daily refresh and survive a previously completed run',async t=>{
+  const s=newState(root,{depth:2});s.status='complete';s.queue=[];s.lastRefreshBatchAt=new Date().toISOString();s.nodes[a]={id:a,url:a,name:'A',depth:1};s.branches[root]={status:'exhausted',pages:4,profiles:[a],checkedAt:'stale'};
+  const h=await harness(t,s);await h.command({type:'START',url:root});assert.equal(h.data.orbitNetwork.current.job.owner,a);assert.equal(h.data.orbitNetwork.refreshing,false);assert.equal(h.data.orbitNetwork.branches[root].pages,4);
+});
+
+test('replayed known own-list rows enrich profiles and add missing links without duplicate people',async t=>{
+  const own='https://www.linkedin.com/mynetwork/invite-connect/connections/',s=newState(root,{depth:1});s.status='paused';s.queue=[];s.nodes[a]={id:a,url:a,name:'A',depth:1,headline:'Old role'};
+  s.pages=1;s.branches[root]={status:'collecting',pages:1,profiles:[a],seenPages:[a],url:own,expectedCount:1};s.workers=[{tabId:1,current:{job:{kind:'list',owner:root,depth:0,url:own},replaying:true,resumeURL:own,since:0}}];
+  const h=await harness(t,s);h.tabs.set(1,{id:1,url:own,status:'complete'});h.snapshots={[own]:page(own,[{...person('a'),headline:'New role'}],{isOwn:true,expectedCount:1})};
+  await h.command({type:'RESUME'});for(let i=0;i<5;i++)await h.tick();const saved=h.data.orbitNetwork;
+  assert.equal(saved.nodes[a].headline,'New role');assert.equal(Object.keys(saved.nodes).length,2);assert.equal(Object.keys(saved.edges).length,1);assert.equal(saved.pages,1);
 });
 
 test('a late restriction response persists even after the active job is cancelled',async t=>{
