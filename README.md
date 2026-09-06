@@ -30,7 +30,9 @@ npm run build
 npm run preview
 ```
 
-Open [http://127.0.0.1:8770](http://127.0.0.1:8770). Stop the preview with Ctrl+C. If port 8770 is occupied, stop the old preview process before restarting it.
+Open [http://127.0.0.1:8770](http://127.0.0.1:8770). Stop the preview with Ctrl+C. If port 8770 is occupied, stop the old preview process before restarting it, or choose a port with `npm run preview -- --port 8771`.
+
+The preview packages the Chrome companion at startup and serves it at `/downloads/orbit-network-mapper.zip`, so the page's download buttons work locally without a production build. Restart the preview after companion source changes to refresh the download. Use `npm run preview`, not a bare `python3 -m http.server`: a generic server does not map that download URL to the generated ZIP.
 
 **The preview is a static Python server, not a local backend.** It serves the UI and supports local Orbit JSON import/export, graph rendering, and directory work. `/api/library/*` is unavailable there. A library connection error in this preview is expected. There is currently no `npm run dev`, local Worker/D1 emulator, or automated GitHub-to-production deployment.
 
@@ -108,6 +110,7 @@ drizzle.config.ts          Migration generation configuration
 vite.config.js            Worker bundle and Sites metadata plugin
 .openai/hosting.json       Existing Site project ID and logical DB binding
 tools/package.py           Packages the Chrome companion
+tools/preview.py           Local UI server and companion download route
 tools/build.py             Builds assets, companion download, and Worker artifact
 tests/                     Unit tests and isolated synthetic UI fixtures
 ```
@@ -194,6 +197,14 @@ The imported 2.0.0 baseline passes 41 tests. Coverage includes URL/graph invaria
 Before a PR, run the checks relevant to the change and the production build. Include what changed, how it was checked, and any migration or companion-update requirement. For DOM fixes, add a sanitized minimal fixture reproducing the failure instead of committing personal profile HTML.
 
 ## Troubleshooting
+
+### Hosted Orbit says “You don't have access to this site”
+
+The production Site currently allows only its owner's ChatGPT account. Chrome profiles have separate sign-in sessions: sign in to the authorized ChatGPT account in that profile and reopen Orbit. A teammate's different account needs a separate Site access grant from the owner. Neither cloning GitHub nor installing the companion grants hosted access, and granting Site access does not combine users' database libraries.
+
+### Local companion download says “No internet connection” or returns 404
+
+Pull the current code, stop the old local server with Ctrl+C, and run `npm run preview` again. The preview prints the packaged ZIP path and the local URL. Open that URL and retry the download. The previous generic Python server did not serve the `/downloads/` path; restarting with the new preview script fixes that missing route. Unzip the file before using Chrome's **Load unpacked**.
 
 ### Companion is disconnected
 
