@@ -112,6 +112,26 @@ describe('public relationship review: current proof, explicit policy and atomic 
   await rejectsCode(()=>claims.review(a.token,request),'VERSION_CONFLICT');
   await claims.review(a.token,{...request,expectedGraphVersion:rejected.graphVersion,idempotencyKey:randomUUID(),decisions:[{...request.decisions[0],includeInSearch:false}]});assert.equal((await graph(a)).searchEdges.length,0);
  });
+ it('stale rejection cannot mutate a newer accepted revision; current rejection and exact retry still work',async()=>{
+  const {a,request}=await prepared();await claims.review(a.token,request);
+  const first=await graph(a),batch=await facts.stage(a.token,directStage(a,'v2',first.graphVersion));
+  for(const mention of ['1','2']){
+   const r=await review(a,batch),ep=r.endpoints.find(e=>e.endpoint.mention===mention);
+   await facts.resolve(a.token,{scopeId:a.scopeId,expectedGraphVersion:r.graphVersion,idempotencyKey:randomUUID(),confirm:true,
+    endpointId:ep.endpointId,expectedEndpointRevision:ep.endpointRevision,expectedResolutionDecisionId:ep.latestResolutionDecisionId,
+    disposition:'LINK_EXISTING',personId:mention==='1'?first.rootPersonId:first.relationships[0].toPersonId});
+  }
+  const r=await review(a,batch),binding=mention=>{const ep=r.endpoints.find(e=>e.endpoint.mention===mention);return {endpointId:ep.endpointId,endpointRevision:ep.endpointRevision,resolutionDecisionId:ep.latestResolutionDecisionId};};
+  await claims.review(a.token,{...request,expectedGraphVersion:r.graphVersion,idempotencyKey:randomUUID(),decisions:[{...request.decisions[0],proposalRevision:'v2',bindings:{subject:binding('1'),object:binding('2')}}]});
+  const before=await graph(a);assert.equal(before.searchEdges.length,1);assert.equal(before.relationships[0].state,'CONFIRMED');assert.deepEqual(before.relationships[0].evidenceIds,['r1_v2']);
+  const stale={...request,expectedGraphVersion:before.graphVersion,idempotencyKey:randomUUID(),decisions:[{sourceId:a.sourceId,proposalId:'p1',proposalRevision:'v1',decision:'REJECT'}]};
+  await rejectsCode(()=>claims.review(a.token,stale),'VERSION_CONFLICT');assert.deepEqual(await graph(a),before);
+  assert.equal(await count(a,'public_claim_decisions'),'2');assert.equal(await count(a,'public_claim_reviews'),'2');
+  const current={...stale,idempotencyKey:randomUUID(),decisions:[{...stale.decisions[0],proposalRevision:'v2'}]},result=await claims.review(a.token,current);
+  assert.equal(result.events[0].removedEdgeIds.length,1);const after=await graph(a);assert.equal(after.searchEdges.length,0);assert.equal(after.relationships[0].state,'REJECTED');
+  assert.deepEqual(await claims.review(a.token,current),{...result,duplicate:true});assert.deepEqual(await graph(a),after);
+  assert.equal(await count(a,'public_claim_decisions'),'3');assert.equal(await count(a,'public_claim_reviews'),'3');
+ });
  it('a new document revision removes stale traversal atomically and invalidates old acceptance retry',async()=>{
   const {a,request}=await prepared();await claims.review(a.token,request);const before=await graph(a);
   await facts.stage(a.token,directStage(a,'v2',before.graphVersion));const g=await graph(a);assert.equal(g.searchEdges.length,0);assert.equal(g.relationships.length,1);

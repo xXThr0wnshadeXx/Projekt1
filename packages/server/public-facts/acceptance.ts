@@ -10,7 +10,7 @@ import {factDigest} from '../facts/projection.js';
 import {withFactScope, checkedFactSnapshot, saveFactSnapshot, conflict, invalid} from '../facts/transaction.js';
 import type {PublicCitationPolicy, PublicCitationAssessment, PublicClaimReviewRequest, PublicClaimReviewResponse} from './acceptance-contracts.js';
 import {validatePublicClaimReview} from './acceptance-contracts.js';
-import {provePublicRelationship, publicResource, publicSource, PUBLIC_RELATIONSHIP_PREFIX, type PublicProposalRecord} from './acceptance-proof.js';
+import {assertPublicHead, provePublicRelationship, publicResource, publicSource, PUBLIC_RELATIONSHIP_PREFIX, type PublicProposalRecord} from './acceptance-proof.js';
 import {latestPublicDecisions, refreshPublicCitationProjection} from './projection.js';
 
 export const PUBLIC_REVIEW_WARNINGS = ['Public citations report source assertions; they do not verify willingness to help or current opportunities.', 'Route scores are relative policy assessments, not probabilities. Identity assignments are explicitly reviewed, not authenticated profile ownership.'];
@@ -69,6 +69,7 @@ export class PgPublicClaimStore {
         } else {
           const record = await publicResource<PublicProposalRecord>(c, row, selected.sourceId, 'PROPOSAL', selected.proposalId, selected.proposalRevision);
           if (record.proposal.kind !== 'RELATIONSHIP') throw invalid();
+          await assertPublicHead(c, row, selected.sourceId, 'PROPOSAL', selected.proposalId, selected.proposalRevision);
           if (existing) {existing.state = 'REJECTED'; existing.updatedAt = new Date().toISOString(); relationship = structuredClone(existing);}
         }
         const decisionId = randomUUID();
