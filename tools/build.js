@@ -22,7 +22,7 @@ mkdirSync(join(out, "downloads"), { recursive: true });
 for (const name of ["index.html", "setup.html", "map.html", "styles.css"]) {
   copyFileSync(join(root, name), join(out, name));
 }
-for (const name of ["app.js", "core.js", "graph.js", "companion.js", "import.js", "library.js", "onboarding.js", "workspace.js", "filters.js"]) {
+for (const name of ["app.js", "core.js", "graph.js", "companion.js", "import.js", "library.js", "onboarding.js", "workspace.js", "filters.js", "search.js"]) {
   copyFileSync(join(root, "src", name), join(out, "src", name));
 }
 copyFileSync(extensionZip, join(out, "downloads", "orbit-network-mapper.zip"));
@@ -56,3 +56,6 @@ mkdirSync(join(root, ".build"), { recursive: true });
 writeFileSync(join(root, ".build", "assets.js"), `export default ${JSON.stringify(assets)};`, "utf8");
 
 run(process.execPath, [join(root, "node_modules", "vite", "bin", "vite.js"), "build"]);
+// Vite empties dist before bundling the Worker, so restore the standalone
+// companion artifact for release workflows after the Worker build finishes.
+packageExtension();

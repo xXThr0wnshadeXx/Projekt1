@@ -15,11 +15,20 @@ export function inspectLinkedIn() {
   if(/^\/in\/[^/]+\/?$/.test(location.pathname)) {
     const title=main.querySelector('h1,h2');
     if(!title)return {kind:'loading',url};
+    const sectionText=(label,max)=>{
+      const section=Array.from(main.querySelectorAll('section')).find(node=>{
+        const heading=node.querySelector('h2,h3');return heading&&new RegExp(`^${label}(?:\\s|$)`,'i').test(clean(heading.textContent));
+      });
+      if(!section)return '';
+      const copy=section.cloneNode(true);copy.querySelectorAll('button,svg,[aria-hidden="true"],h2,h3').forEach(node=>node.remove());
+      return clean(copy.textContent).replace(/\b(?:show all|see more)\b/gi,'').slice(0,max);
+    };
     const candidate=links.find(a=>/^[\d,.+]+\s+connections$/i.test(clean(a.textContent)) && /connectionOf=|\/mynetwork\/invite-connect\/connections/.test(a.getAttribute('href')||''));
     const mutual=links.find(a=>/mutual connections?|mutual connection$/i.test(clean(a.textContent)) && (a.getAttribute('href')||'').includes('connectionOf='));
     const selected=candidate||mutual;
     const subtitle=main.querySelector('.text-body-medium');
-    return {kind:'profile',url,person:{url:canonical(url),name:clean(title.textContent),headline:clean(subtitle?.textContent)},listUrl:selected?new URL(selected.getAttribute('href'),url).href:null,scope:candidate?'connections':mutual?'mutuals_only':'hidden',totalLabel:clean(candidate?.textContent)};
+    const locationText=clean(main.querySelector('.text-body-small.inline.t-black--light.break-words,.pv-text-details__left-panel .text-body-small')?.textContent);
+    return {kind:'profile',url,person:{url:canonical(url),name:clean(title.textContent),headline:clean(subtitle?.textContent),location:locationText,about:sectionText('about',4000),experience:sectionText('experience',6000),education:sectionText('education',4000),skills:sectionText('skills',3000)},listUrl:selected?new URL(selected.getAttribute('href'),url).href:null,scope:candidate?'connections':mutual?'mutuals_only':'hidden',totalLabel:clean(candidate?.textContent)};
   }
   const path=location.pathname.replace(/\/?$/,'/');
   const isOwn=path==='/mynetwork/invite-connect/connections/';
@@ -45,7 +54,7 @@ export function inspectLinkedIn() {
   return {kind:unique.length||empty?'list':'loading',url,people:unique,hasNext,paginationState,isOwn,empty,expectedCount:count||null,signature:unique.map(p=>p.url).sort().join('|'),pageLabel:clean(main.querySelector('[aria-current="page"],[aria-current="true"]')?.textContent),scrollHeight:document.documentElement.scrollHeight};
 }
 
-export function advanceLinkedIn(expectedURL,own,scrollOnly=false) {
+export async function advanceLinkedIn(expectedURL,own,scrollOnly=false) {
   const current=new URL(location.href),expected=new URL(expectedURL);
   const path=u=>u.pathname.replace(/\/?$/,'/');
   const owner=u=>{const values=u.searchParams.getAll('connectionOf');if(values.length!==1||!values[0])return null;try{const parsed=JSON.parse(values[0]);if(Array.isArray(parsed)&&parsed.length&&parsed.every(v=>typeof v==='string'&&v.length))return JSON.stringify([...new Set(parsed)].sort());if(typeof parsed==='string'&&parsed.length)return JSON.stringify([parsed]);}catch{}return JSON.stringify([values[0]]);};
@@ -53,16 +62,29 @@ export function advanceLinkedIn(expectedURL,own,scrollOnly=false) {
   const main=document.querySelector('[role="region"][aria-label="Primary content"]')||document.querySelector('main')||document.body;
   const pageRoot=main.closest('main')||main;
   if(own||scrollOnly){
-    // LinkedIn may scroll a nested list instead of the window.
-    let container=main.querySelector('a[href*="/in/"]')?.parentElement,scrolled=false;
-    while(container&&container!==document.body){
-      if(container.scrollHeight>container.clientHeight+20&&/auto|scroll/.test(getComputedStyle(container).overflowY)){
-        container.scrollTo(0,container.scrollHeight);scrolled=true;break;
+    // Headers often contain a profile link before the actual virtualized list.
+    // Prefer the scrollable ancestor shared by the most profile links.
+    const candidates=new Map();
+    for(const profileLink of main.querySelectorAll('a[href*="/in/"]')){
+      for(let container=profileLink.parentElement;container&&container!==document.body;container=container.parentElement){
+        if(container.scrollHeight>container.clientHeight+20&&/auto|scroll/.test(getComputedStyle(container).overflowY)){
+          candidates.set(container,(candidates.get(container)||0)+1);break;
+        }
       }
-      container=container.parentElement;
     }
-    if(!scrolled)window.scrollTo(0,document.documentElement.scrollHeight);
-    const more=Array.from(pageRoot.querySelectorAll('button')).find(e=>/^(show more|load more)$/i.test(e.textContent.trim()));if(more&&!more.disabled)more.click();return 'scrolled';
+    const container=[...candidates].sort((a,b)=>b[1]-a[1])[0]?.[0]||document.scrollingElement||document.documentElement;
+    const bottom=Math.max(0,container.scrollHeight-container.clientHeight);
+    const scroll=top=>container.scrollTo?container.scrollTo({top,behavior:'instant'}):window.scrollTo({top,behavior:'instant'});
+    // Re-enter the loading boundary when a virtualized list was already at bottom.
+    if(bottom>0&&(container.scrollTop||0)>=bottom-2){
+      scroll(Math.max(0,bottom-Math.min(200,container.clientHeight/2)));
+      await new Promise(resolve=>setTimeout(resolve,150));
+      if(location.href!==current.href)throw Error('The collection tab changed.');
+    }
+    scroll(bottom);
+    const more=Array.from(pageRoot.querySelectorAll('button')).find(e=>/^(show more|load more)$/i.test(e.textContent.trim()));
+    if(more&&!more.disabled&&more.getAttribute('aria-disabled')!=='true')more.click();
+    return 'scrolled';
   }
   const controls=Array.from(pageRoot.querySelectorAll('button,a[href],[role="button"]'));
   const next=controls.find(e=>e.classList.contains('artdeco-pagination__button--next'))||controls.find(e=>/^(?:go to (?:the )?)?next(?: page)?$/i.test((e.getAttribute('aria-label')||e.textContent||'').trim())||e.getAttribute('rel')==='next');

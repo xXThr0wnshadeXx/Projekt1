@@ -35,13 +35,13 @@ export function createLibrary({getCollection,showGraph,showCollection}){
     finally{saving=false;if(pending){clearTimeout(timer);timer=setTimeout(sync,30000);}}
   }
   function queue(state){if(!enabled||!state||state.cloudView)return;pending=state;clearTimeout(timer);timer=setTimeout(sync,2000);}
-  async function lookup(url){
+  async function lookup(url,accountView=false){
     try{
       status('Loading saved connections…');const data=await api('graph?url='+encodeURIComponent(url)+'&depth=2&limit=1000');
       if(!data.found){status('This person is not in the team library yet. Collect a network containing them.');return;}
       const nodes=Object.fromEntries(data.nodes.map(p=>[p.id,p])),edges=Object.fromEntries(data.edges.map(e=>[e.id,e]));
-      showGraph({schemaVersion:1,id:'library:'+data.root+':'+Date.now(),root:data.root,nodes,edges,branches:{},queue:[],status:'imported',cloudView:true,pages:0,config:{maxNodes:1000,depth:2,delay:120},createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),reason:data.truncated?'Showing a bounded sample of saved connections. Search another person to explore from there.':'Loaded observed connections from the shared team library.'});
-      $('back-collection').hidden=false;status(data.truncated?'Saved neighborhood loaded · sample limited to keep the map responsive':'Saved neighborhood loaded · no LinkedIn requests');
+      showGraph({schemaVersion:1,id:'library:'+data.root+':'+Date.now(),root:data.root,nodes,edges,branches:{},queue:[],status:'imported',cloudView:true,pages:0,config:{maxNodes:1000,depth:2,delay:120},createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),reason:data.truncated?'Showing a bounded sample of the account network. Continue collecting to expand it.':'Loaded the persistent account network from shared D1.'},accountView);
+      $('back-collection').hidden=accountView;status(data.truncated?'Account network loaded · bounded view for responsive rendering':'Account network loaded from D1 · no LinkedIn request needed');
     }catch(error){status(error.message);}
   }
   $('library-query').addEventListener('input',()=>{
@@ -49,8 +49,8 @@ export function createLibrary({getCollection,showGraph,showCollection}){
     searchTimer=setTimeout(async()=>{try{
       const q=$('library-query').value.trim(),target=$('library-results');target.replaceChildren();if(!q)return;
       const data=await api('search?q='+encodeURIComponent(q));if(serial!==searchSerial)return;
-      for(const p of data.people){const b=document.createElement('button');b.className='library-person';b.textContent=p.name||p.id;b.title=p.headline;b.onclick=()=>lookup(p.id);target.append(b);}
-      if(!data.people.length)target.textContent='No saved match. Try the start of their name or their full LinkedIn URL.';
+      for(const p of data.people){const b=document.createElement('button'),name=document.createElement('strong'),detail=document.createElement('small');b.className='library-person';name.textContent=p.name||p.id;detail.textContent=[p.reason,p.headline||p.location].filter(Boolean).join(' · ');b.append(name,detail);b.onclick=()=>lookup(p.id);target.append(b);}
+      if(!data.people.length)target.textContent='No close suggestion yet. Try an abbreviation, school, company, location, role, or partial spelling.';
     }catch(error){status(error.message);}},250);
   });
   $('library-form').onsubmit=e=>{e.preventDefault();const value=$('library-query').value.trim();if(value.startsWith('https://'))lookup(value);};
@@ -67,8 +67,14 @@ export function createLibrary({getCollection,showGraph,showCollection}){
   $('confirm-library-import').onclick=async()=>{if(!prepared||importing)return;importing=true;$('confirm-library-import').disabled=true;$('cancel-library-import').disabled=true;try{await upload(prepared,status);await refreshStats();status(`Import complete · ${prepared.nodes.length.toLocaleString()} people, ${prepared.edges.length.toLocaleString()} links, and ${prepared.records.length.toLocaleString()} source records processed without duplicates`);prepared=null;$('library-import-preview').hidden=true;}catch(error){status(error.status===401?'Sign in with ChatGPT, then confirm again.':`Import stopped: ${error.message}`);}finally{importing=false;$('confirm-library-import').disabled=false;$('cancel-library-import').disabled=false;if(pending){clearTimeout(timer);timer=setTimeout(sync,1000);}}};
   $('cancel-library-import').onclick=()=>{prepared=null;$('library-import-preview').hidden=true;status('Import cancelled · nothing was uploaded.');};
   $('back-collection').onclick=()=>{showCollection();$('back-collection').hidden=true;};
-  $('show-imports').onclick=async()=>{const target=$('library-imports'),button=$('show-imports');if(!target.hidden){target.hidden=true;button.setAttribute('aria-expanded','false');button.textContent='Load recent imports';return;}button.disabled=true;try{const data=await api('imports');target.replaceChildren();for(const item of data.imports){const row=document.createElement('article'),name=document.createElement('strong'),details=document.createElement('span');name.textContent=item.fileName||'Imported collection';details.textContent=`${item.format||'JSON'} · ${Number(item.records).toLocaleString()} preserved records · ${new Date(item.lastSeen).toLocaleString()}`;row.append(name,details);target.append(row);}if(!data.imports.length)target.textContent='No imported files have been saved yet.';target.hidden=false;button.setAttribute('aria-expanded','true');button.textContent='Hide recent imports';}catch(error){status(error.message);}finally{button.disabled=false;}};
-  if(enabled)refreshStats().then(()=>status('Shared team library ready · discoveries save automatically while this page is open')).catch(error=>{if(error.status===401)status('Sign in to contribute to the shared team library.');else{$('library-counts').textContent='Library unavailable';status('Open the hosted Orbit site to use the shared team library.');}});
+  $('show-imports').onclick=async()=>{const target=$('library-imports'),button=$('show-imports');if(!target.hidden){target.hidden=true;button.setAttribute('aria-expanded','false');button.textContent='View database activity';return;}button.disabled=true;try{const data=await api('activity');target.replaceChildren();const summary=document.createElement('p');summary.className='database-proof';summary.textContent=`LIVE D1 · ${Number(data.people).toLocaleString()} people · ${Number(data.connections).toLocaleString()} links · last save ${data.lastSaved?new Date(data.lastSaved).toLocaleString():'not yet'}`;target.append(summary);
+    const section=(title,rows,render)=>{const details=document.createElement('details'),heading=document.createElement('summary'),body=document.createElement('div');details.open=true;heading.textContent=`${title} (${rows.length})`;for(const item of rows){const row=document.createElement('article'),name=document.createElement('strong'),meta=document.createElement('span'),values=render(item);name.textContent=values[0];meta.textContent=values.slice(1).filter(Boolean).join(' · ');row.append(name,meta);body.append(row);}if(!rows.length)body.textContent='Nothing saved yet.';details.append(heading,body);target.append(details);};
+    section('Recently saved people',data.recentPeople,item=>[item.name||item.id,item.headline||item.location||'Profile',new Date(item.lastSeen).toLocaleString()]);
+    section('Recently saved connections',data.recentConnections,item=>[`${item.aName||item.a} → ${item.bName||item.b}`,item.contributorNames&&`Contributed by ${item.contributorNames}`,new Date(item.lastSeen).toLocaleString()]);
+    section('Imported files',data.recentImports,item=>[item.fileName||'Imported collection',item.format||'JSON',`${Number(item.records).toLocaleString()} preserved records`,new Date(item.lastSeen).toLocaleString()]);
+    target.hidden=false;button.setAttribute('aria-expanded','true');button.textContent='Hide database activity';}catch(error){status(error.message);}finally{button.disabled=false;}};
+  if(enabled)refreshStats().then(()=>status('Autosave ready · every changed person and connection merges into shared D1')).catch(error=>{if(error.status===401)status('Sign in to contribute to the shared team library.');else{$('library-counts').textContent='Library unavailable';status('Open the hosted Orbit site to use the shared team library.');}});
   else status('Use the hosted Orbit site for permanent storage.');
-  return {queue};
+  setInterval(()=>{if(pending&&!saving&&!importing)sync();},30000);
+  return {queue,loadAccount:url=>lookup(url,true),resetCaches(){pending=null;savedNodes.clear();savedEdges.clear();}};
 }

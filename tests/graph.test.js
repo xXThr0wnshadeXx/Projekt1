@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {NetworkGraph} from '../src/graph.js';
+import {NetworkGraph,networkTargets} from '../src/graph.js';
 import {newState,addPerson,addEdge} from '../src/core.js';
 const root='https://www.linkedin.com/in/root/',source='https://www.linkedin.com/search/results/people/?connectionOf=root';
 function graph(t){
@@ -77,4 +77,9 @@ test('continuous wheel input does not restart easing and has a useful zoom range
  assert.ok(h.g.zoomTarget.scale/initial>.8&&h.g.zoomTarget.scale/initial<.85);
  h.handlers.wheel(event);assert.equal(h.g.zoomTime,start);
  h.paint(start+16);assert.ok(h.g.scale<initial);
+});
+test('adaptive branch targets make room for growing second-degree clusters',()=>{
+ const points=[{id:'root',depth:0},{id:'a',depth:1},{id:'b',depth:1},...Array.from({length:30},(_,i)=>({id:`child-${i}`,depth:2}))],edges=[{source:'root',target:'a'},{source:'root',target:'b'},...Array.from({length:30},(_,i)=>({source:'a',target:`child-${i}`}))];
+ const targets=networkTargets(points,edges,'root');assert.equal(targets.size,points.length);for(const point of targets.values())assert.ok(Number.isFinite(point.x)&&Number.isFinite(point.y));assert.ok(Math.hypot(targets.get('a').x,targets.get('a').y)<Math.hypot(targets.get('b').x,targets.get('b').y)||Math.hypot(targets.get('a').x,targets.get('a').y)>0);
+ const seen=[];for(const p of points){const at=targets.get(p.id);for(const other of seen)assert.ok(Math.hypot(at.x-other.x,at.y-other.y)>0);seen.push(at);}
 });

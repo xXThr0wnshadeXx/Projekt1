@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
 import {readFileSync,readdirSync} from 'node:fs';
-import {ingest,stats,search,neighborhood,listImports} from '../server/database.js';
+import {ingest,stats,search,neighborhood,listImports,shortestPath,resetContribution,activity} from '../server/database.js';
 function database(){
   const raw=new DatabaseSync(':memory:');for(const f of readdirSync(new URL('../drizzle/',import.meta.url)).filter(f=>f.endsWith('.sql')))raw.exec(readFileSync(new URL('../drizzle/'+f,import.meta.url),'utf8'));
   const db={prepare(sql){return {sql,args:[],bind(...args){this.args=args;return this;},async all(){return {results:raw.prepare(sql).all(...this.args)};},async first(){return raw.prepare(sql).get(...this.args)||null;}};},async batch(statements){raw.exec('BEGIN');try{const results=statements.map(s=>({results:raw.prepare(s.sql).all(...s.args)}));raw.exec('COMMIT');return results;}catch(e){raw.exec('ROLLBACK');throw e;}}};return {db,raw};
@@ -44,4 +44,18 @@ test('library neighborhoods are bounded even for high-degree profiles',async()=>
   const {db}=database();await ingest(db,'one',{nodes:[person('root')],edges:[]});
   for(let i=0;i<5;i++){const names=Array.from({length:100},(_,j)=>'p'+(i*100+j));await ingest(db,'one',{nodes:names.map(person),edges:names.map(n=>edge('root',n))});}
   const graph=await neighborhood(db,'one',person('root').id,2,100);assert.equal(graph.nodes.length,100);assert.equal(graph.truncated,true);assert.ok(graph.edges.every(e=>graph.nodes.some(n=>n.id===e.source)&&graph.nodes.some(n=>n.id===e.target)));
+});
+test('search understands abbreviations, rich fields, and close spellings',async()=>{
+  const {db}=database();await ingest(db,'shared',{nodes:[{...person('sam'),name:'Sam Engineer',headline:'Student at San Jose State University',skills:'Machine Learning'}],edges:[]},'sam-user');
+  assert.equal((await search(db,'shared','sjsu'))[0].id,person('sam').id);
+  assert.equal((await search(db,'shared','machin learnin'))[0].id,person('sam').id);
+  assert.equal((await search(db,'shared','enginerr'))[0].id,person('sam').id);
+  assert.equal((await search(db,'shared','san jose universty'))[0].id,person('sam').id);
+});
+test('cross-account paths retain shared evidence and reset only one contributor',async()=>{
+  const {db,raw}=database();await ingest(db,'shared',{nodes:['root','a'].map(person),edges:[edge('root','a')]},'shreev');await ingest(db,'shared',{nodes:['a','b'].map(person),edges:[edge('a','b')]},'ben');await ingest(db,'shared',{nodes:['root','a'].map(person),edges:[edge('root','a')]},'nicolas');
+  const path=await shortestPath(db,'shared',person('root').id,person('b').id,6);assert.equal(path.hops,2);assert.deepEqual(path.nodes.map(node=>node.id),['root','a','b'].map(name=>person(name).id));assert.deepEqual(new Set(path.edges[0].contributors),new Set(['shreev','nicolas']));
+  const before=await activity(db,'shared');assert.equal(before.people,3);assert.equal(before.connections,2);assert.equal(before.recentConnections.length,2);
+  await resetContribution(db,'shared','shreev');assert.equal(raw.prepare('SELECT COUNT(*) count FROM connections WHERE owner=?').get('shared').count,2);
+  await resetContribution(db,'shared','nicolas');assert.equal(raw.prepare('SELECT COUNT(*) count FROM connections WHERE owner=?').get('shared').count,1);assert.equal((await shortestPath(db,'shared',person('root').id,person('b').id,6)).found,false);
 });

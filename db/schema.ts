@@ -1,6 +1,6 @@
 import {sqliteTable,text,integer,primaryKey,index} from 'drizzle-orm/sqlite-core';
 export const people=sqliteTable('people',{
-  owner:text('owner').notNull(),id:text('id').notNull(),name:text('name').notNull(),searchName:text('search_name').notNull(),headline:text('headline').notNull(),location:text('location').notNull(),firstSeen:text('first_seen').notNull(),lastSeen:text('last_seen').notNull()
+  owner:text('owner').notNull(),id:text('id').notNull(),name:text('name').notNull(),searchName:text('search_name').notNull(),headline:text('headline').notNull(),location:text('location').notNull(),about:text('about').notNull().default(''),experience:text('experience').notNull().default(''),education:text('education').notNull().default(''),skills:text('skills').notNull().default(''),keywords:text('keywords').notNull().default(''),firstSeen:text('first_seen').notNull(),lastSeen:text('last_seen').notNull()
 },t=>[primaryKey({columns:[t.owner,t.id]}),index('people_name').on(t.owner,t.searchName,t.id)]);
 export const connections=sqliteTable('connections',{
   owner:text('owner').notNull(),a:text('a').notNull(),b:text('b').notNull(),firstSeen:text('first_seen').notNull(),lastSeen:text('last_seen').notNull()
@@ -8,6 +8,15 @@ export const connections=sqliteTable('connections',{
 export const evidence=sqliteTable('evidence',{
   owner:text('owner').notNull(),a:text('a').notNull(),b:text('b').notNull(),source:text('source').notNull(),observedAt:text('observed_at').notNull()
 },t=>[primaryKey({columns:[t.owner,t.a,t.b,t.source]})]);
+export const peopleContributors=sqliteTable('people_contributors',{
+  owner:text('owner').notNull(),personId:text('person_id').notNull(),contributorId:text('contributor_id').notNull(),firstSeen:text('first_seen').notNull(),lastSeen:text('last_seen').notNull()
+},t=>[primaryKey({columns:[t.owner,t.personId,t.contributorId]}),index('people_contributors_account').on(t.contributorId,t.personId)]);
+export const connectionContributors=sqliteTable('connection_contributors',{
+  owner:text('owner').notNull(),a:text('a').notNull(),b:text('b').notNull(),contributorId:text('contributor_id').notNull(),firstSeen:text('first_seen').notNull(),lastSeen:text('last_seen').notNull()
+},t=>[primaryKey({columns:[t.owner,t.a,t.b,t.contributorId]}),index('connection_contributors_account').on(t.contributorId,t.a,t.b)]);
+export const evidenceContributors=sqliteTable('evidence_contributors',{
+  owner:text('owner').notNull(),a:text('a').notNull(),b:text('b').notNull(),source:text('source').notNull(),contributorId:text('contributor_id').notNull(),firstSeen:text('first_seen').notNull(),lastSeen:text('last_seen').notNull()
+},t=>[primaryKey({columns:[t.owner,t.a,t.b,t.source,t.contributorId]}),index('evidence_contributors_account').on(t.contributorId,t.a,t.b)]);
 export const apiRateLimits=sqliteTable('api_rate_limits',{
   key:text('key').primaryKey(),count:integer('count').notNull(),resetAt:integer('reset_at').notNull()
 });

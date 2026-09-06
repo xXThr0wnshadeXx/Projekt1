@@ -32,6 +32,11 @@ test('two layers obey two-minute request spacing; restrictions pause collection'
   const result=await h.command({type:'GET_STATE'});assert.ok(result.state);assert.equal((await h.command({type:'GET_STATE',revision:result.revision})).unchanged,true);
   h.listeners.action();await h.flush();assert.equal([...h.tabs.values()].at(-1).url,'https://orbit-shreev2703-graph-test.shreev2703.chatgpt.site/map.html?source=companion');
 });
+test('closing and reopening the Site pauses and resumes the same checkpoint',async t=>{
+  const h=await harness(t);h.snapshots={[root]:profile(person('root'),list('root')),[list('root')]:page(list('root'),[person('a')])};await h.command({type:'START',url:root,config:{depth:1,delay:0}});const id=h.data.orbitNetwork.id;
+  await h.command({type:'WORKSPACE_ACTIVE',active:false});assert.equal(h.data.orbitNetwork.status,'paused');assert.equal(h.data.orbitNetwork.pauseKind,'workspace_closed');assert.equal(h.data.orbitNetwork.id,id);assert.ok(h.data.orbitNetwork.current||h.data.orbitNetwork.queue.length);
+  await h.command({type:'WORKSPACE_ACTIVE',active:true});assert.equal(h.data.orbitNetwork.status,'running');assert.equal(h.data.orbitNetwork.pauseKind,null);for(let i=0;i<15;i++){await h.command({type:'WORKSPACE_ACTIVE',active:true});await h.tick();}assert.equal(h.data.orbitNetwork.status,'complete');assert.ok(h.data.orbitNetwork.nodes[a]);
+});
 test('one paced tab follows lists and respects the shared cap on resume',async t=>{
   const h=await harness(t),first=['a','b','c'].map(person),snapshots={[root]:profile(person('root'),list('root')),[list('root')]:page(list('root'),first)};
   for(const p of first){const id=p.name.toLowerCase();snapshots[p.url]=profile(p,list(id));snapshots[list(id)]=page(list(id),Array.from({length:10},(_,i)=>person(`${id}-${i}`)));}

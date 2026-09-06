@@ -2,7 +2,7 @@ import {newState,options,profileURL,listURL,sameList,sameConnectionOwner,addPers
 import {inspectLinkedIn,advanceLinkedIn} from './collector.js';
 import {SITE_ORIGIN} from './companion.js';
 
-const KEY='orbitNetwork',ALARM='orbit-collect',VERSION='2.2.0';
+const KEY='orbitNetwork',ALARM='orbit-collect',VERSION='2.3.0';
 const POLL=1000,SETTLE=200,LOAD_TIMEOUT=60000,UNCHANGED_TIMEOUT=15000;
 let chain=Promise.resolve(),cached,timer=null,timerAt=Infinity;
 const serialize=fn=>{const p=chain.then(fn);chain=p.catch(()=>{});return p;};
@@ -69,7 +69,7 @@ async function recover(s,w,reason){
   await save(s);
 }
 async function step(s,w,assign=true){
-  if(!w.current){if(!assign)return;const job=s.queue.shift();if(job)await navigate(s,w,job);return;}
+  if(!w.current){if(!assign)return;s.queue.sort((a,b)=>(a.depth??0)-(b.depth??0));const job=s.queue.shift();if(job)await navigate(s,w,job);return;}
   if(w.current.navPending){if(Date.now()>=(s.nextRequestAt||0))await navigate(s,w,w.current.job,w.current.resumeURL);return;}
   if(w.current.retryAt){if(Date.now()>=w.current.retryAt)await navigate(s,w,w.current.job,w.current.resumeURL);return;}
   const c=w.current,job=c.job,tab=await chrome.tabs.get(w.tabId).catch(()=>null),now=Date.now();
@@ -113,9 +113,9 @@ async function step(s,w,assign=true){
   }
   c.resumeURL=snap.url;
   if(c.advancePending){
-    if(c.lastSignature===snap.signature){await performAdvance(s,w,snap);return;}
+    if(c.lastSignature===snap.signature){c.unchangedAdvances=(c.unchangedAdvances||0)+1;if(snap.isOwn&&c.unchangedAdvances>=3){const missing=snap.expectedCount&&snap.people.length<snap.expectedCount;finishBranch(s,w,missing?'incomplete':'exhausted',missing?`${s.nodes[job.owner].name}: LinkedIn stopped adding direct connections at ${snap.people.length} of ${snap.expectedCount}. Open Coverage and retry before expanding.`:`${s.nodes[job.owner].name}: end of visible direct connections`);await save(s);return;}await performAdvance(s,w,snap);return;}
     // Navigation succeeded before a worker suspension; consume the new page.
-    c.advancePending=false;
+    c.advancePending=false;c.unchangedAdvances=0;
   }
   if(c.lastSignature===snap.signature){
     if(now-c.since>=UNCHANGED_TIMEOUT)await recover(s,w,'Results stopped changing while waiting for the next page.');
@@ -134,7 +134,7 @@ async function step(s,w,assign=true){
   const candidate=JSON.stringify([snap.signature,snap.hasNext,snap.empty,snap.expectedCount]);
   if(c.candidate!==candidate){c.candidate=candidate;c.stableSince=now;return;}
   if(now-c.stableSince<(!snap.isOwn&&!snap.hasNext?1000:SETTLE))return;
-  const branch=s.branches[job.owner];branch.seenPages ||= [];
+  const branch=s.branches[job.owner];branch.seenPages ||= [];if(snap.expectedCount)branch.expectedCount=Math.max(branch.expectedCount||0,snap.expectedCount);
   const seen=branch.seenPages.includes(snap.signature);
   if(seen&&!c.replaying){
     finishBranch(s,w,'incomplete',`${s.nodes[job.owner].name}: LinkedIn returned an already captured page. Stopped this page loop; other lists continue.`);await save(s);return;
@@ -160,14 +160,20 @@ async function step(s,w,assign=true){
 async function tick(){
   const s=await read();if(!s||s.status!=='running')return;
   try{
+    if(s.workspaceManaged&&Date.now()>(s.workspaceLeaseUntil||0)){s.pauseKind='workspace_closed';await pause(s,'Orbit paused because the Site was closed. Reopen it to continue from this exact checkpoint.');return;}
     if(Object.keys(s.nodes).length>=s.config.maxNodes){limit(s);await save(s);return;}
-    // Tabs load concurrently; state mutations stay serialized to protect evidence and caps.
+    const rootBranch=s.branches[s.root],hasExpansion=s.queue.some(job=>(job.depth??0)>0);
+    if(hasExpansion&&rootBranch&&['incomplete','hidden','mutuals_only'].includes(rootBranch.status)){
+      await pause(s,`Direct-layer check needed: Orbit found ${rootBranch.profiles?.length||0}${rootBranch.expectedCount?` of ${rootBranch.expectedCount}`:''} visible direct connections. Resolve this in the collection tab before connections-of-connections are expanded.`);return;
+    }
+    // Always finish shallower jobs first so every displayed distance has a verified chain.
+    s.queue.sort((a,b)=>(a.depth??0)-(b.depth??0));
     for(const [i,w] of workers(s).entries()){
       if(s.status!=='running')break;
       const assign=s.config.delay===0||i===0;
       try{
         await step(s,w,assign);
-        if(s.status==='running'&&!w.current&&assign&&s.queue.length)await navigate(s,w,s.queue.shift());
+        if(s.status==='running'&&!w.current&&assign&&s.queue.length){s.queue.sort((a,b)=>(a.depth??0)-(b.depth??0));await navigate(s,w,s.queue.shift());}
       }catch(error){
         // A navigation/injection failure affects this lane, not the whole network.
         if(w.current)await recover(s,w,error.message||'The page could not be read.');
@@ -188,6 +194,15 @@ async function archiveCurrent(){
 }
 async function command(message){
   if(message.type==='PING')return {ok:true,name:'Orbit',version:VERSION};
+  if(message.type==='WORKSPACE_ACTIVE'){
+    const s=await read();if(!s)return {ok:true};s.workspaceManaged=true;
+    if(message.active===false){s.workspaceLeaseUntil=0;if(s.status==='running'){s.pauseKind='workspace_closed';await pause(s,'Orbit paused because the Site was closed. Reopen it to continue from this exact checkpoint.');}else await save(s);return {ok:true};}
+    // Three minutes tolerates aggressive background-tab timer throttling while
+    // pagehide still pauses immediately on a normal close or navigation.
+    s.workspaceLeaseUntil=Date.now()+180000;
+    if(s.status==='paused'&&s.pauseKind==='workspace_closed'){s.status='running';s.pauseKind=null;s.attentionTabId=null;log(s,'Site reopened · continuing from the saved checkpoint');await save(s);await schedule(s);wake(0);}else await save(s);
+    return {ok:true};
+  }
   if(message.type==='GET_STATE'){const s=await read(),revision=s?`${s.id}:${s.revision||0}:${s.updatedAt}`:'empty';return message.revision===revision?{ok:true,unchanged:true,revision}:{ok:true,state:s,revision};}
   if(message.type==='LIST_MAPS'){
     const maps=(await chrome.storage.local.get('orbitMaps')).orbitMaps||{},s=await read();if(s)maps[s.id]=s;
@@ -209,14 +224,16 @@ async function command(message){
     }return {ok:true};
   }
   if(message.type==='START'){
-    const s=newState(message.url,message.config);await archiveCurrent();s.nextRequestAt=(await chrome.storage.local.get('orbitNextRequestAt')).orbitNextRequestAt||0;s.engineVersion=2;await save(s);await schedule(s);await tick();return {ok:true};
+    const root=profileURL(message.url),current=await read(),config=options(message.config);
+    if(current&&root===current.root){if(Object.keys(current.nodes).length>config.maxNodes)throw Error('Increase the person limit above the number already saved.');current.config={...config,delay:Math.max(120,config.delay||120),depth:Math.max(current.config.depth,config.depth)};current.queue=[];for(const person of Object.values(current.nodes).sort((a,b)=>a.depth-b.depth))if(person.depth<current.config.depth)current.queue.push({kind:'profile',owner:person.id,depth:person.depth});for(const w of workers(current))w.current=null;current.status='running';current.attentionTabId=null;current.engineVersion=3;log(current,'Refreshing your single account network from the direct layer outward');await save(current);await schedule(current);await tick();return {ok:true};}
+    const s=newState(message.url,config);s.nextRequestAt=Math.max(current?.nextRequestAt||0,(await chrome.storage.local.get('orbitNextRequestAt')).orbitNextRequestAt||0);s.engineVersion=3;await save(s);await schedule(s);await tick();return {ok:true};
   }
-  if(message.type==='PAUSE'){const s=await read();if(s?.status==='running')await pause(s,'Paused by you. Your progress and queue are saved.');return {ok:true};}
+  if(message.type==='PAUSE'){const s=await read();if(s?.status==='running'){s.pauseKind='user';await pause(s,'Paused by you. Your progress and queue are saved.');}return {ok:true};}
   if(message.type==='RESUME'){
     const s=await read();if(!s||!['paused','limit'].includes(s.status))throw Error('There is no paused collection to resume.');
     const config=options(message.config||s.config);config.delay=Math.max(120,config.delay||120);if(config.depth!==s.config.depth)throw Error('Exploration depth is fixed for an existing collection. Start a new map to change it.');
     if(Object.keys(s.nodes).length>=config.maxNodes)throw Error('Increase the person limit above the current number of people.');
-    s.config=config;s.engineVersion=2;s.status='running';s.attentionTabId=null;
+    s.config=config;s.engineVersion=3;s.status='running';s.pauseKind=null;s.attentionTabId=null;
     for(const w of workers(s)){if(w.current){w.current.since=Date.now();w.current.candidate=null;w.current.nextActionAt=0;}}
     // Slower mode drains existing lanes before assigning new work to its single lane.
     log(s,'Resumed collection');await save(s);await schedule(s);wake(0);return {ok:true};
@@ -244,5 +261,5 @@ chrome.runtime.onStartup.addListener(()=>serialize(async()=>{
   for(const w of workers(s)){if(w.current)s.queue.unshift(w.current.job);w.current=null;w.tabId=null;}
   s.current=null;s.tabId=null;if(s.status==='running')await pause(s,'Browser restarted. Resume when you are ready.');else await save(s);
 }));
-chrome.runtime.onInstalled.addListener(()=>serialize(async()=>{const s=await read();if(s?.status==='running')await pause(s,'Companion updated. Collection now uses one tab with at least two minutes between LinkedIn requests. Resume only after resolving any LinkedIn restriction.');}));
+chrome.runtime.onInstalled.addListener(()=>serialize(async()=>{const s=await read();if(s?.status==='running')await pause(s,'Companion updated. Orbit now verifies the complete direct layer before expanding and saves richer professional profile details. Resume from the Site.');}));
 serialize(async()=>{const s=await read();if(s?.status==='running'){workers(s);await schedule(s);}});
