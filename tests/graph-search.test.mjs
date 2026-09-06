@@ -122,6 +122,24 @@ test('orders equal-score routes deterministically', async (t) => {
   assert.deepEqual(second.paths.map((path) => path.personIds), first.paths.map((path) => path.personIds));
 });
 
+test('fails closed for public context or unreviewed claims and never assigns local scores', async (t) => {
+  const { assessReviewedPublicRelationship } = await loadGraph(t);
+  const accepted = {
+    endpointIdentitiesResolved: true, relationshipAccepted: true,
+    support: 'DIRECT_ATTRIBUTED_STATEMENT', freshness: 'CURRENT', reviewerPreference: 'STANDARD',
+  };
+  assert.deepEqual(assessReviewedPublicRelationship(accepted), {
+    eligible: true, reviewerPreference: 'STANDARD', scoring: 'REQUIRES_APPROVED_SERVER_POLICY',
+  });
+  for (const relationship of [
+    { ...accepted, endpointIdentitiesResolved: false },
+    { ...accepted, relationshipAccepted: false },
+    { ...accepted, support: 'CONTEXT_ONLY' },
+  ]) {
+    assert.equal(assessReviewedPublicRelationship(relationship).eligible, false);
+  }
+});
+
 function exhaustiveScores(edges, root, targetId, maxHops) {
   const found = [];
   const visit = (person, people, used, score) => {
