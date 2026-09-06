@@ -95,3 +95,12 @@ test('selection greys unrelated dots, updates for new edges, and clears back to 
  h.g.focus(null);h.fills.length=0;h.paint(performance.now()+3000);
  assert.deepEqual(h.fills,['#ead779','#a8bf83','#a8bf83','#b5a0cb']);
 });
+
+
+test('zooming out keeps dots visible without moving the layout',t=>{
+ const {g,arcs,paint}=graph(t),s=newState(root);g.reducedMotion=true;
+ const child=addPerson(s,{url:'https://www.linkedin.com/in/visible-child/'},2);addEdge(s,root,child,source);g.setData(s);
+ const before=g.points.map(p=>({x:p.x,y:p.y}));g.scale=.02;arcs.length=0;paint(performance.now()+2000);
+ assert.equal(arcs.length,2);assert.ok(arcs[0].r*g.scale>=8);assert.ok(arcs[1].r*g.scale>=3);
+ assert.deepEqual(g.points.map(p=>({x:p.x,y:p.y})),before);
+});
