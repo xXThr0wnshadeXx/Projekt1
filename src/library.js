@@ -20,7 +20,7 @@ export function mergeAccountGraphs(local,shared,maxDepth=6){
   const connected={};for(const [id,depth] of depths)if(nodes[id])connected[id]={...nodes[id],depth};
   const connectedEdges={};for(const edge of Object.values(edges))if(connected[edge.source]&&connected[edge.target])connectedEdges[edge.id]=edge;
   const coverage=new Map();for(const item of [...(shared.coverage||[]),...(local.coverage||[])])coverage.set(`${item.personId}|${item.kind}`,item);
-  return {...local,id:`account:${local.root}`,graphRevision:`${local.revision||0}:${shared.graphRevision||0}:${Object.keys(connectedEdges).length}`,nodes:connected,edges:connectedEdges,branches:{...(shared.branches||{}),...(local.branches||{})},profileChecks:{...(shared.profileChecks||{}),...(local.profileChecks||{})},commentCoverage:{...(shared.commentCoverage||{}),...(local.commentCoverage||{})},coverage:[...coverage.values()],cloudView:false,sharedView:true,updatedAt:[local.updatedAt,shared.updatedAt].filter(Boolean).sort().at(-1)};
+  return {...local,id:`account:${local.root}`,graphRevision:`${local.graphRevision??local.revision??local.updatedAt}:${shared.graphRevision??shared.updatedAt}:${maxDepth}:${Object.keys(connectedEdges).length}`,nodes:connected,edges:connectedEdges,branches:{...(shared.branches||{}),...(local.branches||{})},profileChecks:{...(shared.profileChecks||{}),...(local.profileChecks||{})},commentCoverage:{...(shared.commentCoverage||{}),...(local.commentCoverage||{})},coverage:[...coverage.values()],cloudView:false,sharedView:true,updatedAt:[local.updatedAt,shared.updatedAt].filter(Boolean).sort().at(-1)};
 }
 // The hosted page uses its Sites session; no LinkedIn credentials leave Chrome.
 export function createLibrary({getCollection,showGraph,showCollection}){
