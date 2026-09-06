@@ -1,4 +1,4 @@
-import {locationOf,fieldOf,matchesFilters} from './filters.js';
+import {locationOf,fieldOf,matchesFilters,keywordMatches,keywordTerms} from './filters.js';
 import {profileURL,options,route} from './core.js';
 import {createLibrary} from './library.js';
 import {NetworkGraph} from './graph.js';
@@ -21,12 +21,12 @@ function el(tag,text,className){const e=document.createElement(tag);if(text!==un
 function link(text,url,className){const a=el('a',text,className);a.href=url;a.target='_blank';a.rel='noopener noreferrer';return a;}
 function filteredPeople(){const q=$('search').value.toLowerCase().trim();return Object.values(state?.nodes||{}).filter(p=>matchesFilters(p,activeFilters())&&`${p.name} ${p.headline} ${p.location}`.toLowerCase().includes(q)).sort((a,b)=>a.depth-b.depth||a.name.localeCompare(b.name));}
 function degreeMap(){const out={};for(const e of Object.values(state?.edges||{})){out[e.source]=(out[e.source]||0)+1;out[e.target]=(out[e.target]||0)+1;}return out;}
-function renderPeople(){const people=filteredPeople(),degrees=degreeMap(),body=$('people-body');body.replaceChildren();set('directory-summary',`${people.length.toLocaleString()} people${$('search').value?' match your search':''}`);if(!people.length){const tr=el('tr'),td=el('td',state?'No people match this search.':'Build a network or open a saved graph to see people.','table-note');td.colSpan=4;tr.append(td);body.append(tr);return;}
+function renderPeople(){const people=filteredPeople(),degrees=degreeMap(),terms=activeKeywords(),body=$('people-body');body.replaceChildren();set('directory-summary',`${people.length.toLocaleString()} people${$('search').value?' match your search':''}`);if(!people.length){const tr=el('tr'),td=el('td',state?'No people match this search.':'Build a network or open a saved graph to see people.','table-note');td.colSpan=5;tr.append(td);body.append(tr);return;}
   // Render a bounded slice so a 10,000-person map stays responsive. Search spans all nodes.
-  for(const p of people.slice(0,500)){const tr=el('tr'),td=el('td'),button=el('button',p.name,'person-button');button.onclick=()=>selectPerson(p.id);td.append(button);tr.append(td,el('td',p.headline||'—'),el('td',p.depth===0?'Starting person':`${p.depth} step${p.depth===1?'':'s'}`),el('td',degrees[p.id]||0));body.append(tr);}if(people.length>500){const tr=el('tr'),td=el('td','Showing the first 500 results. Refine your search to find more people.','table-note');td.colSpan=4;tr.append(td);body.append(tr);}}
+  for(const p of people.slice(0,500)){const tr=el('tr'),td=el('td'),button=el('button',p.name,'person-button'),matches=keywordMatches(p,terms);button.onclick=()=>selectPerson(p.id);td.append(button);tr.append(td,el('td',p.headline||'—'),el('td',matches.join(', ')||'—'),el('td',p.depth===0?'Starting person':`${p.depth} step${p.depth===1?'':'s'}`),el('td',degrees[p.id]||0));body.append(tr);}if(people.length>500){const tr=el('tr'),td=el('td','Showing the first 500 results. Refine your search to find more people.','table-note');td.colSpan=5;tr.append(td);body.append(tr);}}
 function renderCoverage(){const body=$('coverage-body');body.replaceChildren();const branches=Object.entries(state?.branches||{});for(const [id,b] of branches){const tr=el('tr'),td=el('td'),button=el('button',state.nodes[id]?.name||id,'person-button');button.onclick=()=>selectPerson(id);td.append(button);const status=el('td',branchNames[b.status]||b.status);if(b.scope==='mutuals_only'&&b.status!=='mutuals_only')status.append(el('small',' · mutuals only'));if(b.filterChanged)status.append(el('small',' · filters adjusted'));status.title=(b.reason||'')+(b.filterChanged?' LinkedIn changed the viewer-degree filter; this branch covers the visible subset.':'');tr.append(td,status,el('td',(b.profiles||[]).length),el('td',b.pages||0));body.append(tr);}if(!branches.length){const tr=el('tr'),td=el('td',state?.status==='imported'?'This saved map has no resumable collection history.':'Coverage appears as the collector opens connection lists.','table-note');td.colSpan=4;tr.append(td);body.append(tr);}const activity=$('activity-log');activity.replaceChildren();for(const entry of state?.log||[]){const row=el('div',undefined,'log-line');row.append(el('time',new Date(entry.at).toLocaleTimeString()),el('span',entry.message));activity.append(row);}}
 function selectPerson(id){selected=id;renderInspector();if(!$('inspector').open)$('inspector').showModal();}
-function renderInspector(){const p=state?.nodes[selected];if(!p){graph.focus(null);return;}const target=$('inspector-content');target.replaceChildren();target.append(el('div',p.name.split(/\s+/).slice(0,2).map(w=>w[0]).join('').toUpperCase(),'person-avatar'),el('h3',p.name));if(p.headline)target.append(el('p',p.headline));if(p.location)target.append(el('p',p.location));target.append(link('View LinkedIn profile ↗',p.url,'profile-link'));const path=route(state,p.id);graph.focus(p.id,path);const section=el('div',undefined,'detail-section');section.append(el('h4','SHORTEST RECORDED PATH'));if(path.length)for(const id of path)section.append(el('div',state.nodes[id].name,'path-person'));else section.append(el('p','No recorded path to the starting profile.'));target.append(section);
+function renderInspector(){const p=state?.nodes[selected];if(!p){graph.focus(null);return;}const target=$('inspector-content'),matches=keywordMatches(p,activeKeywords());target.replaceChildren();target.append(el('div',p.name.split(/\s+/).slice(0,2).map(w=>w[0]).join('').toUpperCase(),'person-avatar'),el('h3',p.name));if(p.headline)target.append(el('p',p.headline));if(p.location)target.append(el('p',p.location));if(matches.length){const keywordSection=el('div',undefined,'detail-section');keywordSection.append(el('h4','KEYWORD MATCH'),el('p',`Matched “${matches.join('”, “')}” in this saved profile’s headline or location.`));target.append(keywordSection);}target.append(link('View LinkedIn profile ↗',p.url,'profile-link'));const path=route(state,p.id);graph.focus(p.id,path);const section=el('div',undefined,'detail-section');section.append(el('h4','SHORTEST RECORDED PATH'));if(path.length)for(const id of path)section.append(el('div',state.nodes[id].name,'path-person'));else section.append(el('p','No recorded path to the starting profile.'));target.append(section);
   const edges=Object.values(state.edges).filter(e=>e.source===p.id||e.target===p.id);if(edges.length){const neighbors=el('div',undefined,'detail-section');neighbors.style.marginTop='24px';neighbors.append(el('h4',`${edges.length} CONNECTIONS IN THIS MAP`));for(const edge of edges.slice(0,20)){const other=edge.source===p.id?edge.target:edge.source,b=el('button',state.nodes[other].name,'neighbor');b.onclick=()=>selectPerson(other);neighbors.append(b);}if(edges.length>20)neighbors.append(el('p',`${edges.length-20} more connections appear in the graph.`));target.append(neighbors);const sources=el('div',undefined,'detail-section');sources.style.marginTop='24px';sources.append(el('h4','RELATIONSHIP EVIDENCE'));for(const edge of edges.slice(0,5)){const other=edge.source===p.id?edge.target:edge.source,e=edge.evidence[0];if(e)sources.append(link(`${state.nodes[other].name} · source list ↗`,e.url,'evidence-link'));}target.append(sources);}}
 function renderLive(){
   const active=state?.status==='running';show('live-progress',active);
@@ -80,7 +80,8 @@ if($('scroll-zoom'))$('scroll-zoom').onchange=e=>{graph.scrollZoom=e.target.chec
 graph.onZoom=scale=>{if($('zoom-level'))set('zoom-level',`${Math.round(scale*100)}%`);};
 graph.onZoom(graph.scale);
 
-function activeFilters(){return {location:$('filter-location').value,field:$('filter-field').value};}
+function activeKeywords(){return keywordTerms($('filter-keywords').value);}
+function activeFilters(){return {location:$('filter-location').value,field:$('filter-field').value,keywords:activeKeywords(),keywordOnly:$('filter-keywords-only').checked};}
 function refreshFilterOptions(){
   const people=Object.values(state?.nodes||{});
   for(const [id,key,label] of [['filter-location',locationOf,'All locations'],['filter-field',fieldOf,'All fields']]){
@@ -90,12 +91,14 @@ function refreshFilterOptions(){
     select.replaceChildren(Object.assign(el('option',label),{value:''}));
     for(const v of values)select.append(Object.assign(el('option',`${v} (${counts.get(v)||0})`),{value:v}));select.value=value;
   }
-  set('filter-count',`${people.filter(p=>matchesFilters(p,activeFilters())).length.toLocaleString()} of ${people.length.toLocaleString()} people match · use Fit to frame the groups`);
+  const filters=activeFilters(),visible=people.filter(p=>matchesFilters(p,filters)).length,keywordMatchesCount=filters.keywords.length?people.filter(p=>keywordMatches(p,filters.keywords).length).length:null;
+  set('filter-count',`${visible.toLocaleString()} of ${people.length.toLocaleString()} people shown${keywordMatchesCount===null?'':` · ${keywordMatchesCount.toLocaleString()} match your keywords`} · use Fit to frame the groups`);
 }
-function applyFilters(){graph.setFilters(activeFilters(),$('group-by').value);refreshFilterOptions();if(selected&&state?.nodes[selected]&&!matchesFilters(state.nodes[selected],activeFilters())){selected=null;graph.focus(null);$('inspector-content').replaceChildren(el('h3','Select a visible person'),el('p','Your filters changed which people are shown.'));}if(view==='directory')renderPeople();}
+function applyFilters(){const filters=activeFilters(),requestedGroup=$('group-by').value,groupBy=requestedGroup==='keyword'&&!filters.keywords.length?'none':requestedGroup;graph.setFilters(filters,groupBy,filters.keywords);refreshFilterOptions();if(selected&&state?.nodes[selected]&&!matchesFilters(state.nodes[selected],filters)){selected=null;graph.focus(null);$('inspector-content').replaceChildren(el('h3','Select a visible person'),el('p','Your filters changed which people are shown.'));}if(view==='directory')renderPeople();}
 $('filter-toggle').onclick=()=>{const open=$('map-filters').hidden;show('map-filters',open);$('filter-toggle').setAttribute('aria-expanded',String(open));};
-for(const id of ['filter-location','filter-field','group-by'])$(id).onchange=applyFilters;
-$('reset-filters').onclick=()=>{$('filter-location').value='';$('filter-field').value='';$('group-by').value='none';applyFilters();};
+for(const id of ['filter-location','filter-field','group-by','filter-keywords-only'])$(id).onchange=applyFilters;
+$('filter-keywords').oninput=applyFilters;
+$('reset-filters').onclick=()=>{$('filter-location').value='';$('filter-field').value='';$('filter-keywords').value='';$('filter-keywords-only').checked=false;$('group-by').value='none';applyFilters();};
 
 async function refreshMaps(){
   if(!hasCollector()){$('new-map').disabled=true;return;}
@@ -107,7 +110,7 @@ async function refreshMaps(){
 async function changeMap(type,id){try{
  await send({type,id});libraryMode=false;state=null;selected=null;remoteRevision=null;
  $('inspector-content').replaceChildren(el('h3','Every person has a path.'),el('p','Select someone in your map to explore their connections.'));
- $('profile-url').value='';$('filter-location').value='';$('filter-field').value='';$('group-by').value='none';graph.setFilters({},'none');
+ $('profile-url').value='';$('filter-location').value='';$('filter-field').value='';$('filter-keywords').value='';$('filter-keywords-only').checked=false;$('group-by').value='none';graph.setFilters({},'none');
  await refresh();if(state){$('profile-url').value=state.root;$('max-nodes').value=state.config.maxNodes;$('depth').value=state.config.depth;$('delay').value=state.config.delay;}
  await refreshMaps();
 }catch(e){toast(e.message);}}
