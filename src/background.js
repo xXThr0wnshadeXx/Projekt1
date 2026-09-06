@@ -321,8 +321,10 @@ chrome.webRequest?.onHeadersReceived.addListener(details=>{
   const status=details.statusCode;
   if(![429,999].includes(status)&&!(details.type==='main_frame'&&[401,403].includes(status)))return;
   serialize(async()=>{
-    const s=await read(),w=s?.workers?.find(w=>w.tabId===details.tabId&&w.current);
-    if(!w||!['running','paused'].includes(s.status))return;
+    const s=await read(),w=s?.workers?.find(w=>w.tabId===details.tabId);
+    // A late response still applies after the last rows were saved or a build
+    // was cancelled; finishing a job must not discard a server cooldown.
+    if(!w)return;
     const header=details.responseHeaders?.find(h=>h.name.toLowerCase()==='retry-after')?.value;
     const reason=`LinkedIn returned HTTP ${status}. Collection stopped. Check the collection tab and resume manually after the cooldown.`;
     await restriction(s,w,reason,retryAfter(header));

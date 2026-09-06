@@ -248,3 +248,11 @@ test('an incomplete direct layer pauses before navigating to any deeper profile'
   assert.equal(h.data.orbitNetwork.current.job.kind,'list'); // Reuse the validated list URL.
   assert.equal(h.data.orbitNetwork.current.job.owner,root);
 });
+
+test('a late restriction response persists even after the active job is cancelled',async t=>{
+  const h=await harness(t);await h.command({type:'START',url:root});
+  await h.command({type:'CANCEL'});
+  h.listeners.headers({tabId:1,statusCode:429,type:'xmlhttprequest',responseHeaders:[{name:'Retry-After',value:'7200'}]});await h.flush();
+  assert.equal(h.data.orbitCollectionPolicy.nextAt,8200000);
+  assert.equal((await h.command({type:'START',url:a})).ok,false);assert.equal(h.requests.length,1);
+});
