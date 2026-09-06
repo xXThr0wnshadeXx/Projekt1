@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "Orbit \u2014 LinkedIn Network Mapper",
+  "version": "2.0.0",
+  "description": "Build a local, evidence-backed connection graph from LinkedIn pages you can view.",
+  "minimum_chrome_version": "120",
+  "permissions": [
+    "storage",
+    "scripting",
+    "alarms",
+    "unlimitedStorage"
+  ],
+  "host_permissions": [
+    "https://www.linkedin.com/*"
+  ],
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Open Orbit network mapper"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'"
+  },
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEApADxgBcJJrrYNWhPaxP0yWbGfiftq3PRj1h81aSaOF1eYcJ2BljjErWEIgj4suWUNVqhGdwfZuDmo+J2TJWlQjQan2R0ODxVEs4J820t37BZ2Vwq5Q9gAbG5r0fJtMTE3ru5FlDLaqqKHOHwc4OC+I145VahYBkW2GLw5Zx3usU6urWEq9BAoLRxgOtqF9DSn1zJdC0s/kLsHF1pH9XdLsFfB56m9EIe/f6ieQp/jgjN/24vZrVxJMHGIv5qyLi5J2Cuxa4dBLy7TVS1SQ6JnM1NiLewCgqdh6Clnh9CciO9VtaOCAd3QHT+Kvt2aKBePpIgWA45SCYbn1x5QPFnTwIDAQAB",
+  "externally_connectable": {
+    "matches": [
+      "https://orbit-network-mapper.doublejav.chatgpt.site/*"
+    ]
+  }
+}

@@ -1,0 +1,8 @@
+node_modules/
+dist/
+*.network.json
+*.csv
+*.zip
+out/
+
+.build/
