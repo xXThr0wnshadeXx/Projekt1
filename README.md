@@ -1,12 +1,12 @@
 # Orbit — LinkedIn network mapper
 
-Orbit collects visible connection relationships through a local Chrome companion, draws an interactive network, and saves observed people and relationships to a private, persistent library. Collections can overlap: the library merges them so a saved person can be explored without another LinkedIn request.
+Orbit collects visible connection relationships through a local Chrome companion, draws an interactive network, and saves observed people and relationships to one shared, persistent team library. Collections can overlap: the library merges them so a saved person can be explored without another LinkedIn request.
 
 - **Team repository:** [xXThr0wnshadeXx/Projekt1](https://github.com/xXThr0wnshadeXx/Projekt1)
 - **Hosted application:** [Orbit](https://orbit-network-mapper.doublejav.chatgpt.site/)
 - **Current application / companion version:** `2.0.0`
 
-The repository is named `Projekt1`; the application is named **Orbit**. Both the source and the hosted application are public. Anyone can open the interface and download the companion. **Sign in with ChatGPT** inside Orbit to use the permanent library; records remain private to each signed-in account. Public viewing does not grant deployment permissions or access to another user's data. Ask the project owner for development/deployment access when needed.
+The repository is named `Projekt1`; the application is named **Orbit**. Both the source and the hosted application are public. Anyone can open the interface and download the companion. **Sign in with ChatGPT** inside Orbit to contribute to the shared team library. Public viewing does not grant database writes, deployment permissions, or access to the signed-in workspace. Ask the project owner for development/deployment access when needed.
 
 ## Start here
 
@@ -44,20 +44,11 @@ No `.env` file, LinkedIn API key, or database password is required for these loc
 - **Collector:** load the repository as an unpacked extension, then use the extension's own page. The local HTTP preview cannot connect to the companion because the external-message allowlist contains only the hosted Orbit origin.
 - **Database or API:** start with the SQLite-backed and API unit tests. End-to-end testing requires a separately configured development Site or authorized access to the hosted application. Do not treat the production library as a test database.
 
-#### Optional Turso development database
+#### Built-in shared database
 
-The repository includes a portable Turso connection for local database/API work. Configure `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` as private Worker secrets to use Turso as the hosted library database; if they are absent, the existing D1 binding remains the fallback. To run a shared authenticated demo graph, also set `ORBIT_SHARED_WORKSPACE_ID` to a stable workspace ID. This opt-in mode centralizes contributions while retaining the sign-in requirement; leaving it unset preserves per-user isolation.
+The hosted application uses the Sites-provided D1 database bound as `DB` in `.openai/hosting.json`. No Turso account, URL, token, or local database setup is required. Every signed-in contributor reads and writes the same `demo-knowledge-graph` workspace; the authenticated user identity is still used for access checks and individual rate limits.
 
-```sh
-copy .env.example .env
-# Edit .env and replace the TURSO_AUTH_TOKEN placeholder. Never commit it.
-npm run turso:health
-npm run turso:setup
-```
-
-The example sets `TURSO_DATABASE_URL` to the project’s `connection-graph` database URL. Create a token in Turso, set both values only in your local environment or deployment secret store, then run `npm run turso:setup` once. The setup command applies [`db/turso-schema.sql`](db/turso-schema.sql); the health command only runs `SELECT 1` and neither command prints credentials.
-
-Shared deployments enforce database-backed limits per authenticated contributor: 20 ingestion requests and 120 read requests per minute by default. Override them with the positive integer secrets `ORBIT_WRITE_LIMIT_PER_MINUTE` and `ORBIT_READ_LIMIT_PER_MINUTE`. A rejected request returns HTTP 429 with `Retry-After` and rate-limit headers.
+The deployment enforces database-backed limits per authenticated contributor: 20 ingestion requests and 120 read requests per minute. A rejected request returns HTTP 429 with `Retry-After` and rate-limit headers.
 
 ## Install and update the Chrome companion
 
@@ -152,7 +143,7 @@ The library has three tables:
 - **`connections`**: primary key `(owner, a, b)` with sorted endpoints; first-seen and last-seen timestamps. Forward and reverse access paths support adjacency lookup.
 - **`evidence`**: primary key `(owner, a, b, source)`; latest observation time for each relationship/source combination.
 
-`owner` is the authenticated Sites user ID. Every read and write is scoped to it. **Giving a teammate Site access does not merge their library with yours.** A shared team graph would require an explicit workspace/authorization design; it is not implemented.
+`owner` is the stable shared workspace ID `demo-knowledge-graph` in the hosted Worker. Every signed-in teammate reads and writes that same logical graph. The authenticated Sites user ID is kept separate for access control and per-contributor rate limiting.
 
 Ingestion validates endpoints before writing, then uses a D1 transaction batch for idempotent upserts. JSON SQL parameters keep bind counts bounded. Existing nonempty profile fields survive empty updates. The current schema does not use foreign keys; preserve endpoint validation when changing ingestion. The `CROSS JOIN` order in JSON ingestion queries is intentional: it avoids a poor SQLite query plan found during testing.
 
@@ -173,7 +164,7 @@ Review the generated SQL and commit it together with `drizzle/meta/` and the sch
 
 Routes live under `/api/library/` on the hosted Site. They are intended for the signed-in application, not anonymous public access. The trusted Sites dispatcher supplies `oai-authenticated-user-id`; do not replace this with a client-supplied user ID. A standalone server must establish a trusted authentication boundary before reusing this handler.
 
-- **`GET /stats`** returns `{ people, connections, lastSaved }` for the current user.
+- **`GET /stats`** returns `{ people, connections, lastSaved }` for the shared team graph.
 - **`GET /search?q=...`** accepts a name prefix or full profile URL and returns `{ people: [...] }`, with at most 30 results. This is not fuzzy or full-text search.
 - **`GET /graph?url=...&depth=2&limit=1000`** returns `{ found, root, nodes, edges, truncated, depth, limit }` for a saved person. A missing person returns `found: false` and empty node/edge arrays. Supported depth is 1–2 and node limit is 10–3,000. The UI requests 1,000 nodes.
 - **`POST /ingest`** accepts JSON `{ nodes: [...], edges: [...] }` and returns `{ saved: true }`. Send at most 100 nodes and 100 edges per request, with a body no larger than 500,000 bytes. A node needs a valid `id` or `url`; an edge needs `source`, `target`, and 1–20 evidence records containing a supported list `url` and parseable `observedAt`. Save endpoints before edges, or include them in the same batch.
@@ -191,7 +182,7 @@ The neighborhood traversal bounds both node count and database work. `truncated:
 - A changed connection owner is not accepted. Equivalent filter encodings are normalized; viewer-degree filter changes with the same owner are recorded as adjusted coverage.
 - Hidden lists, mutual-only lists, missing pagination, and repeated page cycles remain visible in Coverage. A completed queue does not mean every real connection was discovered.
 
-There is no application-imposed 10,000-person lifetime limit on the library, but D1 has storage and execution limits. Million-node throughput and long live crawls have **not** been validated. The current graph is a bounded view of stored observations, not a prepopulated global LinkedIn directory. There is no unattended server crawler, shared team library, automated freshness sweep, full-library export, or record-deletion interface yet.
+There is no application-imposed 10,000-person lifetime limit on the shared library, but D1 has storage and execution limits. Million-node throughput and long live crawls have **not** been validated. The current graph is a bounded view of stored observations, not a prepopulated global LinkedIn directory. There is no unattended server crawler, automated freshness sweep, full-library export, or record-deletion interface yet.
 
 LinkedIn prohibits third-party automated scraping. Slower timings do not establish permission or guarantee that an account will avoid restrictions. Preserve the stop behavior; do not add verification bypasses, credential extraction, or hidden-data inference. See [LinkedIn's prohibited software guidance](https://www.linkedin.com/help/linkedin/answer/a1341387).
 
@@ -215,7 +206,7 @@ Before a PR, run the checks relevant to the change and the production build. Inc
 
 ### Hosted Orbit says “You don't have access to this site”
 
-The Site has been changed from owner-only access to public access. Reopen the main Orbit URL or refresh an old access-denied page. The interface and companion download do not require sign-in. Permanent library access does: use the **Sign in with ChatGPT** link in the library panel. Chrome profiles have separate sessions, and different signed-in accounts still have separate libraries. If access is still denied, ask the owner to verify the Site's current audience in Sites settings.
+The interface and companion download do not require sign-in. Shared library access does: use the **Sign in with ChatGPT** link in the library panel. Different signed-in accounts contribute to the same team graph while retaining separate rate limits. If access is denied, ask the owner to verify the Site's current audience in Sites settings.
 
 ### Local companion download says “No internet connection” or returns 404
 

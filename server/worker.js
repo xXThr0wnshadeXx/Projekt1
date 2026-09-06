@@ -1,15 +1,15 @@
 import assets from '../.build/assets.js';
 import {handleAPI} from './api.js';
-import {createTursoDatabase} from './turso.js';
+
+const SHARED_WORKSPACE = 'demo-knowledge-graph';
+
 export default {async fetch(request,env){
   const databaseEnv = {
     ...env,
-    ...(env.TURSO_DATABASE_URL && env.TURSO_AUTH_TOKEN
-      ? {DB:createTursoDatabase({url:env.TURSO_DATABASE_URL,authToken:env.TURSO_AUTH_TOKEN})}
-      : {}),
-    // Opt-in demo mode: authenticated users contribute to one named graph.
-    // Leaving this unset preserves owner-isolated libraries.
-    SHARED_OWNER: env.ORBIT_SHARED_WORKSPACE_ID || undefined,
+    // The hosted Site supplies the built-in D1 DB binding. Every signed-in
+    // contributor writes to the same demo graph, while rate limits still use
+    // each contributor's authenticated identity.
+    SHARED_OWNER: SHARED_WORKSPACE,
   };
   const response=await handleAPI(request,databaseEnv);if(response)return response;
   const url=new URL(request.url);
