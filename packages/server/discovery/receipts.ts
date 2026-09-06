@@ -3,7 +3,7 @@ import {createHash,randomUUID} from 'node:crypto';import type {Pool} from 'pg';
 import type {GraphSnapshot} from '../../../contracts/index.js';import {canonicalJson} from '../../../contracts/canonical.js';
 import {ServiceError} from '../service.js';import type {FactActor} from '../facts/contracts.js';
 import {withFactScope,checkedFactSnapshot,type FactSourceRow} from '../facts/transaction.js';
-import type {DiscoveryRequest,DiscoveryResult} from './contracts.js';import type {AuthorizedDiscoveryContext} from './providers/service.js';
+import type {DiscoveryRequest,DiscoveryResult,DiscoveryReviewRequest,DiscoveryReviewResponse} from './contracts.js';import type {AuthorizedDiscoveryContext} from './providers/service.js';
 const digest=(value:unknown)=>createHash('sha256').update(canonicalJson(value)).digest('hex');
 const conflict=()=>new ServiceError('VERSION_CONFLICT',409);
 interface Receipt {id:string;request_digest:string;base_graph_version:string;context_digest:string;source_policies:Record<string,string>;phase:'RUNNING'|'COMPLETE'|'FAILED';result:DiscoveryResult|null;failure_code:string|null;expired:boolean;workflow:DiscoveryWorkflow|null;run_id:string|null}
@@ -14,7 +14,8 @@ export interface DiscoveryReceipts {
  claim(actor:FactActor,request:DiscoveryRequest):Promise<DiscoveryClaim>;
  complete(actor:FactActor,request:DiscoveryRequest,id:string,result:DiscoveryResult,runId:string):Promise<DiscoveryResult>;
  fail(actor:FactActor,request:DiscoveryRequest,id:string,runId:string):Promise<void>;
- saveWorkflow(actor:FactActor,request:DiscoveryRequest,id:string,runId:string,workflow:DiscoveryWorkflow):Promise<void>;
+  saveWorkflow(actor:FactActor,request:DiscoveryRequest,id:string,runId:string,workflow:DiscoveryWorkflow):Promise<void>;
+  lookup(actor:FactActor,request:DiscoveryReviewRequest):Promise<DiscoveryReviewResponse>;
 }
 /** Explicitly selected PUBLIC identities only; never derive queries from private Person fields. */
 export function publicDiscoveryContext(graph:GraphSnapshot,request:DiscoveryRequest,sources:FactSourceRow[]):AuthorizedDiscoveryContext{
@@ -87,5 +88,22 @@ export class PgDiscoveryReceipts implements DiscoveryReceipts {
    await c.query("UPDATE discovery_receipts SET workflow=$2,lease_expires_at=clock_timestamp()+interval '60 seconds' WHERE id=$1",[id,workflow]);
   });
  }
+
+ async lookup(actor:FactActor,request:DiscoveryReviewRequest):Promise<DiscoveryReviewResponse>{return withFactScope(this.pool,actor,request.scopeId,async(c,row,sources)=>{
+  const prior=(await c.query<Receipt>('SELECT * FROM discovery_receipts WHERE id=$1 AND owner_user_id=$2 AND scope_id=$3 FOR UPDATE',[request.discoveryId,actor.userId,row.id])).rows[0];
+  if(!prior)throw new ServiceError('FORBIDDEN',403);
+  if(prior.phase!=='COMPLETE'||!prior.workflow||prior.workflow.steps.some(step=>!step.done))throw conflict();
+  await this.currentProposals(c,actor,row.id,prior.workflow);
+  const batches=prior.workflow.steps.flatMap(step=>{
+   if(!step.stageResponse&&!step.stageRequest)return [];
+   if(!step.stageResponse||!step.stageRequest||!step.sourceId||step.stageRequest.envelope.normalized.context.scopeId!==row.id||step.stageRequest.envelope.normalized.context.sourceId!==step.sourceId)throw conflict();
+   // Confirm the durable stage still exists under this actor/scope before exposing its batch ID.
+   // The workflow is private state, so a missing backing row must fail closed rather than map stale data.
+   // This query is intentionally performed in the surrounding scope transaction.
+   return [{batchId:step.stageResponse.batchId,sourceId:step.sourceId!,proposalRefs:step.stageRequest.envelope.proposals.map(p=>({id:p.id,revision:p.revision}))}];
+  });
+  for(const batch of batches){const found=await c.query('SELECT id FROM public_fact_batches WHERE id=$1 AND scope_id=$2 AND owner_user_id=$3 AND source_id=$4',[batch.batchId,row.id,actor.userId,batch.sourceId]);if(!found.rowCount)throw conflict();}
+  return{scopeId:row.id,discoveryId:prior.id,graphVersion:row.graph_version,batches};
+ });}
 
 }

@@ -2,7 +2,7 @@ import {orchestrateDiscovery} from './orchestrator.js';
 import type {PublicFactsService} from '../public-facts/service.js';
 import type {PublicSourceProvisioner} from '../storage/public-source-provision.js';
 import {createHash} from 'node:crypto';import {ServiceError,type AuthPort} from '../service.js';import type {FactActor} from '../facts/contracts.js';
-import {DiscoveryError,validateDiscoveryRequest,type DiscoveryCapabilities,type SearchProvider} from './contracts.js';
+import {DiscoveryError,validateDiscoveryRequest,validateDiscoveryReview,type DiscoveryCapabilities,type SearchProvider} from './contracts.js';
 import {type DiscoverySourcesOptions} from './providers/service.js';import type {DiscoveryReceipts} from './receipts.js';
 export function discoveryServiceError(error:unknown):ServiceError{
  if(error instanceof ServiceError)return error;
@@ -28,4 +28,5 @@ export class DiscoveryApplication {
    this.availableUntil=result.capabilities.generalWeb==='AVAILABLE'||result.capabilities.wikimedia==='AVAILABLE'?Date.now()+60000:0;return result;
   }catch(error){if(id)this.availableUntil=0;if(actor&&request&&id&&runId){try{await this.ports.receipts.fail(actor,request,id,runId);}catch{/* Expired/revoked authority cannot mutate its receipt; lease recovery remains fail-closed. */}}throw discoveryServiceError(error);}
  }
+ async lookup(credential:unknown,input:unknown){const actor=await this.actor(credential),request=validateDiscoveryReview(input);return this.ports.receipts.lookup(actor,request);}
 }

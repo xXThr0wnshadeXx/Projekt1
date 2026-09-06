@@ -18,6 +18,9 @@ export interface DiscoveryResult {
   unresolvedIdentityCount: number; warnings: string[];
   budget: {queriesUsed: number; pagesRead: number; exhausted: boolean};
 }
+export interface DiscoveryReviewRequest {scopeId: string; discoveryId: string}
+export interface DiscoveryReviewBatch {batchId: string; sourceId: string; proposalRefs: Array<{id: string; revision: string}>}
+export interface DiscoveryReviewResponse {scopeId: string; discoveryId: string; graphVersion: string; batches: DiscoveryReviewBatch[]}
 export type DiscoveryFailure = 'INVALID_INPUT'|'FORBIDDEN'|'VERSION_CONFLICT'|'NOT_CONFIGURED'|'SOURCE_UNAVAILABLE'|'ACCESS_DENIED'|'UNSUPPORTED_CONTENT'|'LIMIT_EXCEEDED'|'CANCELLED';
 /** Generic errors: never attach URLs, queries, headers, driver errors or response bodies. */
 export class DiscoveryError extends Error {
@@ -105,5 +108,11 @@ export function validateDiscoveryRequest(value: unknown): DiscoveryRequest {
     if (input.selectedContextPersonIds && new Set(input.selectedContextPersonIds).size !== input.selectedContextPersonIds.length) throw new Error();
     if (input.selectedPublicUrls) input.selectedPublicUrls = [...new Set(input.selectedPublicUrls.map(url => publicUrl(url).href))];
     return input;
+  } catch {throw new DiscoveryError('INVALID_INPUT');}
+}
+export function validateDiscoveryReview(value: unknown): DiscoveryReviewRequest {
+  try {
+    s.object({scopeId: s.id, discoveryId: s.id})(value, '$');
+    return structuredClone(value as DiscoveryReviewRequest);
   } catch {throw new DiscoveryError('INVALID_INPUT');}
 }
