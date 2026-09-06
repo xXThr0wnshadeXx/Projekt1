@@ -4,12 +4,12 @@ import {NetworkGraph} from '../src/graph.js';
 import {newState,addPerson,addEdge} from '../src/core.js';
 const root='https://www.linkedin.com/in/root/',source='https://www.linkedin.com/search/results/people/?connectionOf=root';
 function graph(t){
-  let callback,scheduled=0;const arcs=[],handlers={};
+  let callback,scheduled=0;const arcs=[],fills=[],handlers={};
   t.mock.method(globalThis,'requestAnimationFrame',fn=>{callback=fn;return ++scheduled;});
   globalThis.ResizeObserver=class {observe(){}};globalThis.window={devicePixelRatio:1};
-  const context=new Proxy({arc(x,y,r){arcs.push({x,y,r});}},{get:(o,k)=>o[k]||(()=>{})});
+  const context=new Proxy({arc(x,y,r){arcs.push({x,y,r});},fill(){fills.push(context.fillStyle);}},{get:(o,k)=>o[k]||(()=>{})});
   const canvas={getContext:()=>context,addEventListener(name,fn){handlers[name]=fn;},parentElement:{getBoundingClientRect:()=>({width:1000,height:700})}};
-  const g=new NetworkGraph(canvas,()=>{});g.resize();return {g,arcs,handlers,paint(now){const fn=callback;callback=null;fn?.(now);},get scheduled(){return scheduled;}};
+  const g=new NetworkGraph(canvas,()=>{});g.resize();return {g,arcs,fills,handlers,paint(now){const fn=callback;callback=null;fn?.(now);},get scheduled(){return scheduled;}};
 }
 // Node has no animation frame API; these tests exercise timing/layout without a browser.
 globalThis.requestAnimationFrame=()=>0;
@@ -77,4 +77,17 @@ test('continuous wheel input does not restart easing and has a useful zoom range
  assert.ok(h.g.zoomTarget.scale/initial>.8&&h.g.zoomTarget.scale/initial<.85);
  h.handlers.wheel(event);assert.equal(h.g.zoomTime,start);
  h.paint(start+16);assert.ok(h.g.scale<initial);
+});
+
+
+test('selection greys unrelated dots, updates for new edges, and clears back to depth colors',t=>{
+ const h=graph(t),s=newState(root);h.g.reducedMotion=true;
+ const a=addPerson(s,{url:'https://www.linkedin.com/in/a/'},1),b=addPerson(s,{url:'https://www.linkedin.com/in/b/'},2),c=addPerson(s,{url:'https://www.linkedin.com/in/c/'},1);
+ addEdge(s,root,a,source);addEdge(s,a,b,source);addEdge(s,root,c,source);
+ h.g.setData(s);h.g.focus(b,[root,a,b]);h.fills.length=0;h.paint(performance.now()+2000);
+ assert.deepEqual([...h.g.neighbors].sort(),[a,b].sort());
+ assert.deepEqual(h.fills,['#747474','#a8bf83','#747474','#b5a0cb'],'even distant path nodes are grey unless directly connected');
+ addEdge(s,c,b,source);h.g.setData(s);assert.ok(h.g.neighbors.has(c));
+ h.g.focus(null);h.fills.length=0;h.paint(performance.now()+3000);
+ assert.deepEqual(h.fills,['#ead779','#a8bf83','#a8bf83','#b5a0cb']);
 });
