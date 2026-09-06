@@ -87,7 +87,7 @@ test('fit is always 100% and controls make useful progress on very large maps',t
  assert.equal(h.g.zoomTarget,null);assert.ok(Math.abs(h.g.zoomRatio()-1.5)<1e-12);assert.ok(Math.abs(ratios.at(-1)-1.5)<1e-12);
  h.g.stepZoom(-1);assert.ok(Math.abs(h.g.zoomTarget.scale/h.g.fitScale-1)<1e-12);
 });
-test('adaptive branch targets make room for growing second-degree clusters',()=>{
+test('disk targets keep growing second-degree clusters distinct',()=>{
  const points=[{id:'root',depth:0},{id:'a',depth:1},{id:'b',depth:1},...Array.from({length:30},(_,i)=>({id:`child-${i}`,depth:2}))],edges=[{source:'root',target:'a'},{source:'root',target:'b'},...Array.from({length:30},(_,i)=>({source:'a',target:`child-${i}`}))];
  const targets=networkTargets(points,edges,'root');assert.equal(targets.size,points.length);for(const point of targets.values())assert.ok(Number.isFinite(point.x)&&Number.isFinite(point.y));assert.ok(Math.hypot(targets.get('a').x,targets.get('a').y)<Math.hypot(targets.get('b').x,targets.get('b').y)||Math.hypot(targets.get('a').x,targets.get('a').y)>0);
  const seen=[];for(const p of points){const at=targets.get(p.id);for(const other of seen)assert.ok(Math.hypot(at.x-other.x,at.y-other.y)>0);seen.push(at);}
@@ -155,4 +155,47 @@ test('unfiltered name search retains the starter and real intermediate route onl
  h.g.search('Zelda Quinn');assert.ok(h.g.searchContext.has(root));
  h.g.search('');assert.equal(h.g.searchContext.size,0);
  h.g.search('Zelda Quinn');h.g.setData(null);assert.equal(h.g.searchContext.size,0);
+});
+
+test('disk stays centered, separates depths and is deterministic across input order',()=>{
+ const points=[{id:'root',depth:0},...Array.from({length:800},(_,i)=>({id:`person-${i}`,depth:i<120?1:i<500?2:3}))];
+ const targets=networkTargets(points,[],'root'),reverse=networkTargets([...points].reverse(),[],'root');
+ assert.deepEqual(targets.get('root'),{x:0,y:0});assert.deepEqual(targets,reverse);
+ const bands=[1,2,3].map(depth=>points.filter(p=>p.depth===depth).map(p=>Math.hypot(targets.get(p.id).x,targets.get(p.id).y)));
+ assert.ok(Math.max(...bands[0])<Math.min(...bands[1]));assert.ok(Math.max(...bands[1])<Math.min(...bands[2]));
+ const positions=[...targets.values()],xs=positions.map(p=>p.x),ys=positions.map(p=>p.y),width=Math.max(...xs)-Math.min(...xs),height=Math.max(...ys)-Math.min(...ys);
+ assert.ok(width/height>.95&&width/height<1.05);assert.ok(Math.max(...bands[2])<1100,'disk radius grows with square root of population');
+ for(let i=0;i<positions.length;i++)for(let j=0;j<i;j++)assert.ok(Math.hypot(positions[i].x-positions[j].x,positions[i].y-positions[j].y)>55,'nodes have room on and between rings');
+ assert.deepEqual(focusTargets(points.slice(0,8),'root').get('root'),{x:0,y:0});
+});
+
+test('filtering and fuzzy search run once per change, never during paint, zoom or hover',t=>{
+ const h=graph(t),s=newState(root,{maxNodes:10000});h.g.reducedMotion=true;
+ for(let i=0;i<9999;i++){const id=addPerson(s,{url:`https://www.linkedin.com/in/cache-${i}/`,name:`Person ${i}`,location:i%2?'Boston':'Paris',headline:'Software engineer'},1);addEdge(s,root,id,source);}
+ h.g.setData(s);
+ const filters=t.mock.method(h.g,'evaluateFilter'),search=t.mock.method(h.g,'evaluateSearch');
+ const start=performance.now();h.g.setFilters({location:'Boston'});const filterMs=performance.now()-start;
+ assert.equal(filters.mock.callCount(),10000);assert.equal(search.mock.callCount(),0);
+ h.g.search('engineer');assert.equal(search.mock.callCount(),10000);
+ const frameStart=performance.now();for(let i=0;i<5;i++){h.g.paint(performance.now()+2000);h.g.pickPoint(0,0);h.g.fit();h.g.zoom(1.05);}
+ const frameMs=performance.now()-frameStart;assert.equal(filters.mock.callCount(),10000);assert.equal(search.mock.callCount(),10000);
+ h.g.setFilters({location:'Boston'});h.g.search('engineer');assert.equal(filters.mock.callCount(),10000);assert.equal(search.mock.callCount(),10000);
+ h.g.setFilters({location:'Boston'},'location');assert.equal(filters.mock.callCount(),10000);assert.equal(search.mock.callCount(),10000);
+ t.diagnostic(`Synthetic 10k map: filter apply ${filterMs.toFixed(0)}ms; 5 mock-canvas paints + hover/fit/zoom ${frameMs.toFixed(0)}ms. No fuzzy evaluations during rendering.`);
+});
+
+test('cached results refresh for metadata changes, new people, graph replacement and tree exit',t=>{
+ const {g}=graph(t),s=newState(root);g.reducedMotion=true;
+ const a=addPerson(s,{url:'https://www.linkedin.com/in/cache-a/',name:'Morgan',location:'Paris',headline:'Designer'},1);addEdge(s,root,a,source);
+ g.setData(s);g.setFilters({location:'Boston'});g.search('engineer');assert.equal(g.isVisible(g.positions.get(a)),false);assert.equal(g.isSearchHit(g.positions.get(a)),false);
+ addPerson(s,{url:a,location:'Boston',headline:'Software engineer'},1);g.setData(s);assert.equal(g.isVisible(g.positions.get(a)),true);assert.equal(g.isSearchHit(g.positions.get(a)),true);
+ const b=addPerson(s,{url:'https://www.linkedin.com/in/cache-b/',name:'Taylor',location:'Boston',headline:'Engineer'},1);addEdge(s,root,b,source);g.setData(s);assert.equal(g.isVisible(g.positions.get(b)),true);assert.equal(g.isSearchHit(g.positions.get(b)),true);
+ g.search('');g.setFilters({});g.showTree(a);assert.deepEqual({x:g.positions.get(a).x,y:g.positions.get(a).y},{x:0,y:0});g.clearTree();assert.deepEqual({x:g.positions.get(root).x,y:g.positions.get(root).y},{x:0,y:0});
+ delete s.nodes[b];s.graphRevision++;g.setData(s);assert.equal(g.points.length,2);assert.equal(g.positions.has(b),false);
+ const revision=g.matchRevision;g.setData(null);assert.ok(g.matchRevision>revision);g.setData({...s,id:'replacement'});assert.equal(g.points.length,2);assert.equal(g.isVisible(g.positions.get(a)),true);
+});
+
+test('large filter changes bound particle effects instead of animating every removed node',t=>{
+ const {g}=graph(t),s=newState(root);for(let i=0;i<1000;i++)addPerson(s,{url:`https://www.linkedin.com/in/dust-${i}/`,location:'Paris'},1);
+ g.setData(s);g.setFilters({location:'Boston'});assert.ok(g.points.filter(p=>p.snapAt).length<=180);assert.equal(g.points.filter(p=>g.isVisible(p)).length,0);
 });

@@ -49,7 +49,7 @@ export function fieldMatches(p,query=''){
 }
 export function matchesFilters(p,{location='',field='',keywords=[],keywordOnly=false,first=true,second=true,extended=true,maxDepth=6}={}){
  const terms=keywordTerms(keywords),within=p.depth===undefined||p.depth===0||p.depth<=Number(maxDepth||6),depth=p.depth===1?first:p.depth===2?second:p.depth>2?extended:true;
- return within&&depth&&locationMatches(p,location)&&fieldMatches(p,field)&&(!terms.length||keywordMatches(p,terms).length>0);
+ return within&&depth&&(!location||locationMatches(p,location))&&(!field||fieldMatches(p,field))&&(!terms.length||keywordMatches(p,terms).length>0);
 }
 export function relationshipTypes(edge){
  const types=new Set((edge?.evidence||[]).map(item=>item?.type||'visible_connection_list'));

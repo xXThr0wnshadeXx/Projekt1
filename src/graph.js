@@ -1,27 +1,30 @@
-import {matchesFilters,groupTargets,springProgress,relationshipMatches,relationshipNodeIds} from './filters.js';
+import {matchesFilters,groupTargets,springProgress,relationshipMatches} from './filters.js';
 import {scorePerson} from './search.js';
 const MIN_SCALE=.001,MAX_SCALE=12,CONTROL_ZOOM_FACTOR=1.5;
-// Reserve space for each observed branch, then arrange siblings in a golden-angle
-// spiral. This keeps large second-degree clusters readable without an expensive
-// all-pairs force simulation on every animation frame.
+// Concentric rings fill a compact disk. Depth orders the rings; stable IDs order
+// people within them. Edges remain evidence of relationships, never layout inputs.
 export function networkTargets(points,edges,root){
-  const ordered=[...points].sort((a,b)=>a.depth-b.depth),byId=new Map(points.map(p=>[p.id,p])),parents=new Map(),children=new Map(points.map(p=>[p.id,[]]));
-  for(const edge of edges)for(const [a,b] of [[edge.source,edge.target],[edge.target,edge.source]])if(byId.has(a)&&byId.has(b)&&byId.get(a).depth<byId.get(b).depth&&!parents.has(b))parents.set(b,a);
-  for(const p of ordered){if(p.id===root)continue;const parent=parents.get(p.id)||root;if(children.has(parent))children.get(parent).push(p);}
-  const radii=new Map(),local=new Map();for(const p of [...ordered].reverse()){const branch=children.get(p.id)||[],largest=Math.max(12,...branch.map(child=>radii.get(child.id)||12)),spacing=largest*2+28;let radius=16;for(const [i,child] of branch.entries()){const angle=i*2.3999632297,distance=spacing*Math.sqrt(i+1);local.set(child.id,{x:Math.cos(angle)*distance,y:Math.sin(angle)*distance});radius=Math.max(radius,distance+(radii.get(child.id)||12));}radii.set(p.id,radius);}
-  const targets=new Map([[root,{x:0,y:0}]]);for(const p of ordered){if(p.id===root)continue;const parent=targets.get(parents.get(p.id)||root)||{x:0,y:0},offset=local.get(p.id)||{x:0,y:0};targets.set(p.id,{x:parent.x+offset.x,y:parent.y+offset.y});}return targets;
-}
-// A filtered or searched result set is intentionally arranged as people—not
-// semantic buckets. The golden-angle layout is deterministic, airy and compact
-// enough to fit without covering the canvas in labels.
-export function focusTargets(points){
-  const ordered=[...points].sort((a,b)=>a.id.localeCompare(b.id)),targets=new Map(),spacing=58;
-  ordered.forEach((p,i)=>{const angle=i*2.3999632297,r=i?spacing*Math.sqrt(i):0;targets.set(p.id,{x:Math.cos(angle)*r,y:Math.sin(angle)*r});});
+  const targets=new Map(),ordered=[...points].filter(p=>p.id!==root).sort((a,b)=>(a.depth??1)-(b.depth??1)||a.id.localeCompare(b.id));
+  if(points.some(p=>p.id===root))targets.set(root,{x:0,y:0});
+  let radius=90,index=0,ring=0;
+  while(index<ordered.length){
+    const depth=ordered[index].depth;let end=index;
+    while(end<ordered.length&&ordered[end].depth===depth)end++;
+    while(index<end){
+      const count=Math.min(end-index,Math.max(1,Math.floor(2*Math.PI*radius/58))),offset=ring*2.3999632297;
+      for(let i=0;i<count;i++){const angle=offset+i*2*Math.PI/count;targets.set(ordered[index++].id,{x:Math.cos(angle)*radius,y:Math.sin(angle)*radius});}
+      radius+=58;ring++;
+    }
+  }
   return targets;
+}
+// Keep the starter centered whenever it survives a search or filter.
+export function focusTargets(points,root){
+  return networkTargets(points,[],(points.some(p=>p.id===root)?root:undefined)??points.find(p=>p.depth===0)?.id??[...points].sort((a,b)=>a.id.localeCompare(b.id))[0]?.id);
 }
 export class NetworkGraph {
   constructor(canvas,onSelect){
-    this.canvas=canvas;this.ctx=canvas.getContext('2d');this.onSelect=onSelect;this.points=[];this.edges=[];this.positions=new Map();this.showAllConnections=false;this.filters={};this.relationshipIds=null;this.groupBy="none";this.groupLabels=[];this.treeRoot=null;this.treeNodes=null;this.treeDepths=new Map();this.motion=null;this.scale=1;this.fitScale=1;this.offset={x:0,y:0};this.selected=null;this.query='';this.searchContext=new Set();this.path=new Set();this.neighbors=new Set();this.autoFit=true;this.scrollZoom=false;this.zoomTarget=null;this.zoomTime=null;this.frame=null;this.childCounts=new Map();this.directCount=0;this.reducedMotion=globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches||false;
+    this.canvas=canvas;this.ctx=canvas.getContext('2d');this.onSelect=onSelect;this.points=[];this.edges=[];this.positions=new Map();this.showAllConnections=false;this.filters={};this.relationshipIds=null;this.relationshipEdges=null;this.groupBy="none";this.groupLabels=[];this.treeRoot=null;this.treeNodes=null;this.treeDepths=new Map();this.motion=null;this.scale=1;this.fitScale=1;this.offset={x:0,y:0};this.selected=null;this.query='';this.searchContext=new Set();this.path=new Set();this.neighbors=new Set();this.autoFit=true;this.scrollZoom=false;this.zoomTarget=null;this.zoomTime=null;this.frame=null;this.childCounts=new Map();this.directCount=0;this.dataRevision=0;this.matchRevision=0;this.filterDirty=true;this.searchDirty=true;this.reducedMotion=globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches||false;
     if(globalThis.document?.fonts)document.fonts.load('15px "Space Grotesk"').then(()=>this.draw()).catch(()=>{});
     this.observer=new ResizeObserver(()=>this.resize());this.observer.observe(canvas.parentElement);
     canvas.addEventListener('wheel',e=>{if(!this.scrollZoom)return;e.preventDefault();const pixels=e.deltaY*(e.deltaMode===1?16:e.deltaMode===2?this.h:1);this.queueZoom(Math.exp(-Math.max(-120,Math.min(120,pixels))*.002),e.offsetX,e.offsetY);},{passive:false});
@@ -34,10 +37,15 @@ export class NetworkGraph {
   setData(state){
     this.state=state;
     if(!state||this.dataId!==state.id){this.points=[];this.edges=[];this.searchContext.clear();this.positions.clear();this.zoomTarget=null;this.motion=null;this.groupLabels=[];this.treeRoot=null;this.treeNodes=null;this.treeDepths.clear();this.childCounts.clear();this.directCount=0;this.dataId=state?.id;this.graphRevision=null;this.autoFit=true;this.lastRevealed=null;}
-    if(!state){this.draw();return;}
+    if(!state){this.dataRevision++;this.matchRevision++;this.draw();return;}
     if(state.graphRevision!==undefined&&this.graphRevision===state.graphRevision)return;
-    this.graphRevision=state.graphRevision;
-    const nodes=Object.values(state.nodes),adj=new Map();this.edges=Object.values(state.edges);this.relationshipIds=relationshipNodeIds(state,this.filters.relationship);
+    this.graphRevision=state.graphRevision;this.dataRevision++;this.filterDirty=true;this.searchDirty=true;
+    const nodes=Object.values(state.nodes),adj=new Map();this.edges=Object.values(state.edges);
+    // A bounded shared view can lose nodes when its distance or source changes.
+    this.points=this.points.filter(p=>Boolean(state.nodes[p.id]));
+    for(const id of this.positions.keys())if(!state.nodes[id])this.positions.delete(id);
+    if(this.treeRoot&&!state.nodes[this.treeRoot]){this.treeRoot=null;this.treeNodes=null;this.treeDepths.clear();}
+    if(this.selected&&!state.nodes[this.selected]){this.selected=null;this.path.clear();}
     for(const e of this.edges){for(const [a,b] of [[e.source,e.target],[e.target,e.source]]){if(!adj.has(a))adj.set(a,[]);adj.get(a).push(b);}}
     if(nodes.some(p=>this.positions.has(p.id)&&this.positions.get(p.id).depth!==p.depth)){this.points=[];this.positions.clear();this.childCounts.clear();this.directCount=0;this.autoFit=true;}
     const added=nodes.filter(p=>!this.positions.has(p.id)).sort((a,b)=>a.depth-b.depth),now=performance.now();
@@ -50,7 +58,7 @@ export class NetworkGraph {
     // Refresh metadata, then animate every branch toward a collision-resistant home.
     for(const p of nodes){const point=this.positions.get(p.id);Object.assign(point,p);point.r=p.depth===0?9:p.depth===1?4.2:2.8;}
     const homes=networkTargets(this.points,this.edges,state.root);for(const p of this.points){const target=homes.get(p.id);p.homeX=target.x;p.homeY=target.y;}
-    if(this.treeRoot)this.buildTree(this.treeRoot);this.updateNeighbors();this.layout();if(this.autoFit)this.fit();else this.draw();
+    this.refreshMatches();if(this.treeRoot)this.buildTree(this.treeRoot);this.updateNeighbors();this.layout();if(this.autoFit)this.fit();else this.draw();
   }
   fit(){this.zoomTarget=null;this.zoomTime=null;this.autoFit=true;if(!this.points.length||!this.w||!this.h){this.draw();return;}let ex=100,ey=100;for(const p of this.points){if(!this.isVisible(p)||(this.query&&!this.isSearchVisible(p)))continue;ex=Math.max(ex,Math.abs(p.tx??p.x)+80);ey=Math.max(ey,Math.abs(p.ty??p.y)+80);}for(const label of this.groupLabels){ex=Math.max(ex,Math.abs(label.x)+100);ey=Math.max(ey,Math.abs(label.y)+30);}this.scale=Math.max(MIN_SCALE,Math.min((this.w-65)/(ex*2),(this.h-100)/(ey*2),1.8));this.fitScale=this.scale;this.offset={x:0,y:0};this.autoFit=false;this.notifyZoom();this.draw();}
   zoomRatio(){return this.fitScale>0?this.scale/this.fitScale:1;}
@@ -70,16 +78,31 @@ export class NetworkGraph {
     this.zoom(next/this.scale,target.x,target.y);return true;
   }
   nodeRadius(p){return Math.max(p.r,(p.depth===0?8:p.depth===1?4.5:3)/this.scale);}
-  edgeVisible(edge){return relationshipMatches(edge,this.filters.relationship);}
-  isVisible(p){return matchesFilters(p,this.filters)&&(!this.relationshipIds||this.relationshipIds.has(p.id))&&(!this.treeNodes||this.treeNodes.has(p.id));}
-  isSearchHit(p){return !this.query||scorePerson(p,this.query).score>0;}
+  edgeVisible(edge){return !this.relationshipEdges||this.relationshipEdges.has(edge);}
+  matchesFacet(p){return p.filterMatch!==false&&(!this.relationshipIds||this.relationshipIds.has(p.id));}
+  isVisible(p){return this.matchesFacet(p)&&(!this.treeNodes||this.treeNodes.has(p.id));}
+  isSearchHit(p){return !this.query||p.searchMatch?.score>0;}
+  evaluateFilter(p){return matchesFilters(p,this.filters);}
+  evaluateSearch(p){p.nameHit=Boolean(this.query&&scorePerson({name:p.name},this.query).score>0);return this.query?scorePerson(p,this.query):{score:1,reason:''};}
+  refreshMatches(){
+    if(!this.filterDirty&&!this.searchDirty)return;
+    if(this.filterDirty){
+      this.relationshipIds=null;this.relationshipEdges=null;
+      if(this.filters.relationship&&this.filters.relationship!=='all'){
+        this.relationshipIds=new Set(this.state?.root?[this.state.root]:[]);this.relationshipEdges=new Set();
+        for(const edge of this.edges)if(relationshipMatches(edge,this.filters.relationship)){this.relationshipEdges.add(edge);this.relationshipIds.add(edge.source);this.relationshipIds.add(edge.target);}
+      }
+    }
+    for(const p of this.points){if(this.filterDirty)p.filterMatch=this.evaluateFilter(p);if(this.searchDirty)p.searchMatch=this.evaluateSearch(p);}
+    this.filterDirty=false;this.searchDirty=false;this.matchRevision++;
+  }
   isSearchVisible(p){return this.isSearchHit(p)||this.searchContext.has(p.id);}
   updateSearchContext(){
     this.searchContext.clear();
     const f=this.filters,root=this.state?.root;
     if(!this.query||!root||this.treeRoot||f.relationship&&f.relationship!=='all'||f.location?.trim()||f.field?.trim()||f.keywords?.length||f.first===false||f.second===false||f.extended===false)return;
     // Match names alone: employer, school, and location searches keep their usual behavior.
-    const hits=this.points.filter(p=>scorePerson({name:p.name},this.query).score>0);
+    const hits=this.points.filter(p=>p.nameHit);
     if(!hits.length)return;
     this.searchContext.add(root);
     const adjacency=new Map();
@@ -103,12 +126,16 @@ export class NetworkGraph {
   eventPoint(e){const r=this.canvas.getBoundingClientRect();return {x:(e.clientX-r.left-this.w/2-this.offset.x)/this.scale,y:(e.clientY-r.top-this.h/2-this.offset.y)/this.scale};}
   pickPoint(x,y){let near=null,dist=Infinity,now=performance.now();for(const p of this.points){if(!this.isVisible(p)||!this.isSearchVisible(p)||p.bornAt>now)continue;const d=Math.hypot(p.x-x,p.y-y);if(d<Math.max(9/this.scale,this.nodeRadius(p)+4/this.scale)&&d<dist){near=p;dist=d;}}return near;}
   setFilters(filters,by='none',keywords=[]){
-    const before=new Map(this.points.map(p=>[p.id,this.isVisible(p)])),now=performance.now();this.filters=filters;this.relationshipIds=relationshipNodeIds(this.state,filters.relationship);this.groupBy=by;this.groupKeywords=keywords;
-    for(const [i,p] of this.points.entries()){const was=before.get(p.id),visible=this.isVisible(p);if(was&&!visible&&!this.reducedMotion){p.snapAt=now+Math.min(i,60)*5;p.restoreAt=null;}else if(!was&&visible&&!this.reducedMotion){p.restoreAt=now+Math.min(i,40)*4;p.snapAt=null;}else if(visible)p.snapAt=null;}
+    const changed=JSON.stringify(this.filters)!==JSON.stringify(filters);
+    if(!changed&&this.groupBy===by&&JSON.stringify(this.groupKeywords||[])===JSON.stringify(keywords))return;
+    const before=new Map(this.points.map(p=>[p.id,this.isVisible(p)])),now=performance.now();this.filters=structuredClone(filters);this.groupBy=by;this.groupKeywords=[...keywords];
+    this.filterDirty=changed;this.refreshMatches();if(this.treeRoot)this.buildTree(this.treeRoot);
+    let removed=0;
+    for(const [i,p] of this.points.entries()){const was=before.get(p.id),visible=this.isVisible(p);if(was&&!visible&&!this.reducedMotion){p.snapAt=removed++<180?now+Math.min(i,60)*5:null;p.restoreAt=null;}else if(!was&&visible&&!this.reducedMotion){p.restoreAt=now+Math.min(i,40)*4;p.snapAt=null;}else if(visible)p.snapAt=null;}
     this.layout();this.fit();
   }
   buildTree(root,maxDepth=2,maxNodes=600){
-    if(!this.positions.has(root))return null;const allowed=new Set(this.points.filter(p=>matchesFilters(p,this.filters)).map(p=>p.id)),adj=new Map();
+    if(!this.positions.has(root))return null;const allowed=new Set(this.points.filter(p=>this.matchesFacet(p)).map(p=>p.id)),adj=new Map();
     for(const e of this.edges){if(!this.edgeVisible(e)||!allowed.has(e.source)||!allowed.has(e.target))continue;if(!adj.has(e.source))adj.set(e.source,[]);if(!adj.has(e.target))adj.set(e.target,[]);adj.get(e.source).push(e.target);adj.get(e.target).push(e.source);}
     const nodes=new Set([root]),depths=new Map([[root,0]]),queue=[root];while(queue.length&&nodes.size<maxNodes){const id=queue.shift(),depth=depths.get(id);if(depth>=maxDepth)continue;for(const next of (adj.get(id)||[]).sort()){if(nodes.has(next))continue;nodes.add(next);depths.set(next,depth+1);queue.push(next);if(nodes.size>=maxNodes)break;}}
     this.treeRoot=root;this.treeNodes=nodes;this.treeDepths=depths;return {count:nodes.size,direct:[...depths.values()].filter(depth=>depth===1).length,extended:[...depths.values()].filter(depth=>depth===2).length};
@@ -116,11 +143,15 @@ export class NetworkGraph {
   showTree(root){const summary=this.buildTree(root);if(!summary)return null;this.groupBy='none';this.groupLabels=[];this.layout();this.fit();return summary;}
   clearTree(){if(!this.treeRoot)return;this.treeRoot=null;this.treeNodes=null;this.treeDepths.clear();this.layout();this.fit();}
   layout(){
-    this.updateSearchContext();
+    this.refreshMatches();this.updateSearchContext();
     const now=performance.now();this.advanceMotion(now);
-    const visible=this.points.filter(p=>this.isVisible(p)),focused=this.query?visible.filter(p=>this.isSearchVisible(p)):visible,faceted=Boolean(this.filters.location||this.filters.field||this.filters.keywords?.length||this.filters.relationship&&this.filters.relationship!=='all'),filteredEdges=this.edges.filter(edge=>this.edgeVisible(edge)),tree=this.treeRoot?networkTargets(visible.map(p=>({...p,depth:this.treeDepths.get(p.id)??3})),filteredEdges,this.treeRoot):null,grouped=!tree&&this.groupBy!=='none'?groupTargets(focused,this.groupBy,this.groupKeywords):null,focus=(!tree&&!grouped&&(this.query||faceted))?focusTargets(focused):null;
+    const visible=this.points.filter(p=>this.isVisible(p)),focused=this.query?visible.filter(p=>this.isSearchVisible(p)):visible,faceted=Boolean(this.filters.location||this.filters.field||this.filters.keywords?.length||this.filters.relationship&&this.filters.relationship!=='all'),tree=this.treeRoot?networkTargets(visible.map(p=>({...p,depth:this.treeDepths.get(p.id)??3})),this.edges,this.treeRoot):null,grouped=!tree&&this.groupBy!=='none'?groupTargets(focused,this.groupBy,this.groupKeywords):null,focus=(!tree&&!grouped&&(this.query||faceted))?focusTargets(focused,this.state?.root):null;
     this.groupLabels=grouped?.labels||[];
-    const targets=this.points.map(p=>[p,tree?.get(p.id)||grouped?.targets.get(p.id)||focus?.get(p.id)||{x:p.homeX,y:p.homeY}]);
+    // Keep dimmed nonmatches outside the result disk so they cannot sit under
+    // selectable matches after those matches move toward the center.
+    const focusRadius=focus?Math.max(0,...[...focus.values()].map(p=>Math.hypot(p.x,p.y)))+100:0;
+    const background=p=>{const r=Math.hypot(p.homeX,p.homeY),distance=focusRadius+r;return {x:r?p.homeX/r*distance:distance,y:r?p.homeY/r*distance:0};};
+    const targets=this.points.map(p=>[p,tree?.get(p.id)||grouped?.targets.get(p.id)||focus?.get(p.id)||(focus&&this.query&&!this.isSearchVisible(p)?background(p):{x:p.homeX,y:p.homeY})]);
     if(!targets.some(([p,t])=>(p.tx??p.x)!==t.x||(p.ty??p.y)!==t.y))return;
     for(const [p,target] of targets){p.fromX=p.x;p.fromY=p.y;p.tx=target.x;p.ty=target.y;if(this.reducedMotion){p.x=p.tx;p.y=p.ty;}}
     this.motion=this.reducedMotion?null:now;
@@ -129,7 +160,7 @@ export class NetworkGraph {
   advanceMotion(now){if(this.motion===null)return false;const t=Math.min(1,Math.max(0,(now-this.motion)/950)),progress=springProgress(t);for(const p of this.points){if(p.tx===undefined)continue;p.x=t===1?p.tx:p.fromX+(p.tx-p.fromX)*progress;p.y=t===1?p.ty:p.fromY+(p.ty-p.fromY)*progress;}if(t===1)this.motion=null;return t<1;}
   updateNeighbors(){this.neighbors=new Set(this.selected?[this.selected]:[]);for(const e of this.edges){if(e.source===this.selected)this.neighbors.add(e.target);if(e.target===this.selected)this.neighbors.add(e.source);}}
   focus(id,path=[]){if(this.selected===id&&[...this.path].join('|')===path.join('|'))return;this.selected=id;this.path=new Set(path);this.updateNeighbors();this.draw();}
-  search(q){q=q.trim().toLowerCase();if(this.query===q)return;this.query=q;this.layout();this.fit();}
+  search(q){q=q.trim().toLowerCase();if(this.query===q)return;this.query=q;this.searchDirty=true;this.layout();this.fit();}
   draw(){if(this.frame!==null)return;this.frame=requestAnimationFrame(now=>{this.frame=null;this.paint(now);});}
   drawDust(p,progress){
     const ctx=this.ctx,seed=[...p.id].reduce((n,c)=>(n*31+c.charCodeAt(0))>>>0,7),fade=1-progress,r=this.nodeRadius(p);

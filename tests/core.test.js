@@ -51,3 +51,13 @@ test('comment evidence rejects mismatched endpoints, parent posts and foreign or
   assert.equal(normalizeEvidence({...e,commentId:'urn:li:comment:(activity:999,456)'},a,b),null);
   assert.equal(normalizeEvidence({...e,post:'https://evil.example/feed/update/urn:li:activity:123/'},a,b),null);
 });
+
+test('account graph refreshes only for graph changes, not collection pacing updates',()=>{
+ const local=newState(root),a=addPerson(local,{url:'https://www.linkedin.com/in/revision-a/',name:'A'},1);addEdge(local,root,a,list);
+ const shared={root,nodes:{},edges:{},graphRevision:'shared-1'};
+ const initial=mergeAccountGraphs(local,shared).graphRevision;
+ local.revision=99;local.reason='Waiting before the next action';assert.equal(mergeAccountGraphs(local,shared).graphRevision,initial);
+ addPerson(local,{url:a,location:'Boston'},1);const updated=mergeAccountGraphs(local,shared).graphRevision;assert.notEqual(updated,initial);
+ assert.notEqual(mergeAccountGraphs(local,shared,1).graphRevision,updated);
+ assert.notEqual(mergeAccountGraphs(local,{...shared,graphRevision:'shared-2'}).graphRevision,updated);
+});

@@ -8,8 +8,8 @@ New contributors and new Codex chats should read [PROJECT_HANDOFF.md](PROJECT_HA
 
 - **Canonical application:** [orbit-shreev2703-graph-test.shreev2703.chatgpt.site](https://orbit-shreev2703-graph-test.shreev2703.chatgpt.site/)
 - **Repository:** [xXThr0wnshadeXx/Projekt1](https://github.com/xXThr0wnshadeXx/Projekt1)
-- **Companion download:** [download the current ZIP](https://orbit-shreev2703-graph-test.shreev2703.chatgpt.site/downloads/orbit-network-mapper.zip?v=2.8.1)
-- **Current application and companion version:** `2.8.1`
+- **Companion download:** [download the current ZIP](https://orbit-shreev2703-graph-test.shreev2703.chatgpt.site/downloads/orbit-network-mapper.zip?v=2.8.2)
+- **Current application and companion version:** `2.8.2`
 
 This is the single supported hosted application and database. Do not use the retired Turso setup or the older `doublejav.chatgpt.site` deployment.
 
@@ -89,7 +89,9 @@ The added `webRequest` permission observes status codes and `Retry-After` in the
 
 LinkedIn [prohibits scraping extensions and automated activity](https://www.linkedin.com/help/linkedin/answer/a1341387/prohibited-software-and-extensions). No delay, quota, or browser agent guarantees that an account will avoid restrictions. Test collector changes with the local fixtures, not a live scraping run on a teammate's account.
 
-Use the filters to organize this persistent network by distance, location, estimated field, or school/employer/skill keywords. Search is suggestion-based rather than exact-only: aliases such as `SJSU`, full institution names, profile details, and close spellings are ranked together. The map can animate all visible people into readable location clusters. Selecting a person shows progressively disclosed professional details, alternate observed routes, and a person-centered two-hop connection tree.
+**Orbit layout** places the starting person at the center of a circular disk, with direct connections on the inner rings and more distant people farther out. A selected person’s connection tree uses that person as its center. Only recorded relationships are drawn.
+
+Use the filters to organize this persistent network by distance, location, estimated field, or school/employer/skill keywords. Search is suggestion-based rather than exact-only: aliases such as `SJSU`, full institution names, profile details, and close spellings are ranked together. Filters and search reuse cached matches across animation, hover, zoom, counts, and the people list. Text entry applies after a 120 ms pause; unchanged collection polls do not rerun fuzzy matching. The map can also animate visible people into readable location clusters. Selecting a person shows progressively disclosed professional details, alternate observed routes, and a person-centered two-hop connection tree.
 
 ### Workspace and settings
 
