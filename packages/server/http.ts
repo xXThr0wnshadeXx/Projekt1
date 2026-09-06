@@ -1,3 +1,5 @@
+import type {PublicFactsService} from './public-facts/service.js';
+import {validatePublicReview,validatePublicResolution} from './public-facts/contracts.js';
 import type {DiscoveryApplication} from './discovery/composition.js';
 import {validateDiscoveryRequest} from './discovery/contracts.js';
 import {discoveryServiceError} from './discovery/composition.js';
@@ -17,7 +19,7 @@ export interface HttpAuthPort extends AuthPort {
   displaySession(userId:string):Promise<SessionView>;
   revokeSession(credential:unknown):Promise<void>;
 }
-export interface HttpDependencies { service:BackendService;auth:HttpAuthPort;browserOrigin:string;oauth?:Pick<GoogleLoginPort,'start'|'callback'|'clearTransactionCookie'>;contacts?:Pick<GoogleContacts,'start'|'callback'|'clearTransactionCookie'>;imports?:Pick<GoogleImportBridge,'start'|'review'|'approve'>;facts?:Pick<FactReviewService,'review'|'confirm'>;discovery?:Pick<DiscoveryApplication,'discover'|'capabilities'> }
+export interface HttpDependencies { service:BackendService;auth:HttpAuthPort;browserOrigin:string;oauth?:Pick<GoogleLoginPort,'start'|'callback'|'clearTransactionCookie'>;contacts?:Pick<GoogleContacts,'start'|'callback'|'clearTransactionCookie'>;imports?:Pick<GoogleImportBridge,'start'|'review'|'approve'>;facts?:Pick<FactReviewService,'review'|'confirm'>;discovery?:Pick<DiscoveryApplication,'discover'|'capabilities'>;publicFacts?:Pick<PublicFactsService,'review'|'resolve'> }
 const sessionShape = schema.object({actor:schema.object({id:schema.id,displayName:schema.string}),scopes:schema.array(schema.object({id:schema.id,label:schema.string}))});
 const cookieName='projekt1_session';
 const bodyLimit=16*1024;
@@ -94,6 +96,12 @@ export function createApiHandler(deps:HttpDependencies):RequestListener {
         await deps.auth.revokeSession(token);
         response.setHeader('Set-Cookie',`${cookieName}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${expectedOrigin.startsWith('https:')?'; Secure':''}`);
         response.writeHead(204);response.end();return;
+      }
+      if((method==='GET'&&url.pathname==='/api/public-facts/review')||(method==='POST'&&url.pathname==='/api/public-facts/resolve')) {
+        if(!await deps.auth.resolveSession(token))throw new ServiceError('UNAUTHENTICATED',401);
+        const input=method==='GET'?validatePublicReview({scopeId:url.searchParams.get('scopeId'),batchId:url.searchParams.get('batchId')}):validatePublicResolution(await readJson(request));
+        if(!deps.publicFacts)throw new ServiceError('SOURCE_UNAVAILABLE',502);
+        json(response,200,method==='GET'?await deps.publicFacts.review(token,input):await deps.publicFacts.resolve(token,input));return;
       }
       if((method==='GET'&&url.pathname==='/api/discovery/capabilities')||(method==='POST'&&url.pathname==='/api/discovery')) {
         if(!await deps.auth.resolveSession(token))throw new ServiceError('UNAUTHENTICATED',401);
