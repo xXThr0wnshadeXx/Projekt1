@@ -9,3 +9,6 @@ out/
 .env
 .env.*
 !.env.example
+
+# Share the installable companion with teammates.
+!downloads/orbit-network-mapper.zip

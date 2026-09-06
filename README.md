@@ -8,6 +8,36 @@ Orbit collects visible connection relationships through a local Chrome companion
 
 The repository is named `Projekt1`; the application is named **Orbit**. Both the source and the hosted application are public. Anyone can open the interface and download the companion. **Sign in with ChatGPT** inside Orbit to contribute to the shared team library. Public viewing does not grant database writes, deployment permissions, or access to the signed-in workspace. Ask the project owner for development/deployment access when needed.
 
+## Teammate downloads and local use
+
+- **[Download the Chrome companion ZIP](https://github.com/xXThr0wnshadeXx/Projekt1/raw/refs/heads/main/downloads/orbit-network-mapper.zip)**
+- **[Download the full frontend source](https://github.com/xXThr0wnshadeXx/Projekt1/archive/refs/heads/main.zip)**
+
+### Run the companion without a server
+
+1. Download and unzip the companion ZIP into a permanent folder.
+2. In Chrome, open `chrome://extensions`, enable **Developer mode**, and click **Load unpacked**.
+3. Select the extracted `orbit-network-mapper` folder containing `manifest.json`.
+4. Click Chrome's Extensions icon, then **Orbit — LinkedIn Network Mapper** to open its local workspace. Use the same Chrome profile as your LinkedIn session.
+
+The extension includes the frontend and can run locally without Node, npm, or a hosted server. Its collection checkpoint stays in that Chrome profile. A shared database and account sign-in still require a backend.
+
+To update, pause collection, replace the files in the same extension folder, click **Reload** in `chrome://extensions`, and refresh Orbit. Keep the folder in place while the extension is installed.
+
+### Preview or edit the frontend on localhost
+
+Download and unzip the full frontend source above (or clone this repository). With Python 3 installed, open a terminal in the extracted repository folder and run:
+
+```sh
+python3 tools/preview.py
+```
+
+On Windows, use `py -3 tools/preview.py` if `python3` is unavailable. Open **http://127.0.0.1:8770/** and choose **Preview setup on this device**. Keep the terminal running; Ctrl+C stops the preview. Use `--port 8771` if the default port is busy.
+
+Each teammate runs this on their own computer. Localhost is not a shareable hosted address. The HTTP preview displays the frontend but cannot connect to the companion under the current origin allowlist. Use the extension's own workspace for collection. Database features are unavailable in the static preview.
+
+Maintainers: after companion changes, run `npm run package`, copy `dist/orbit-network-mapper.zip` to `downloads/orbit-network-mapper.zip`, and commit both the source and updated download.
+
 ## Start here
 
 ### Prerequisites
