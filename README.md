@@ -6,8 +6,8 @@ Orbit builds an evidence-backed graph from LinkedIn pages that a contributor can
 
 - **Canonical application:** [orbit-shreev2703-graph-test.shreev2703.chatgpt.site](https://orbit-shreev2703-graph-test.shreev2703.chatgpt.site/)
 - **Repository:** [xXThr0wnshadeXx/Projekt1](https://github.com/xXThr0wnshadeXx/Projekt1)
-- **Companion download:** [download the current ZIP](https://orbit-shreev2703-graph-test.shreev2703.chatgpt.site/downloads/orbit-network-mapper.zip)
-- **Current application and companion version:** `2.4.1`
+- **Companion download:** [download the current ZIP](https://orbit-shreev2703-graph-test.shreev2703.chatgpt.site/downloads/orbit-network-mapper.zip?v=2.5.0)
+- **Current application and companion version:** `2.5.0`
 
 This is the single supported hosted application and database. Do not use the retired Turso setup or the older `doublejav.chatgpt.site` deployment.
 
@@ -52,7 +52,20 @@ The extension is a background collection companion; the permanent knowledge grap
 
 ## One account, one network
 
-Orbit now maintains one continuously growing network for each signed-in account. **Continue collecting** refreshes the same checkpoint from the direct layer outward; it does not create disposable maps. Every changed person and relationship is periodically upserted into the shared team graph, and reopening Orbit loads the account’s saved neighborhood from D1. **Reset my account network** is deliberately kept in Settings and removes only that account’s contribution—overlapping records supported by teammates remain.
+Orbit maintains one continuously growing network for each signed-in account. Resuming an unfinished collection keeps its checkpoint; duplicate starts leave an active collection alone. **Continue collecting** on a finished map refreshes it from the direct layer outward. Every changed person and relationship is periodically upserted into the shared team graph, and reopening Orbit loads the account’s saved neighborhood from D1. **Reset my account network** is deliberately kept in Settings and removes only that account’s contribution—overlapping records supported by teammates remain.
+
+### Collection pacing and recovery (2.5.0)
+
+- One collection tab, at least **120 seconds between load-triggering actions**, including navigation, Next, load-more, scrolling and retries. DOM reads consume no action budget. Parsing time overlaps the existing interval instead of starting another full wait.
+- Rolling local budgets of **25 actions/hour and 150 actions/day**, persisted in `orbitCollectionPolicy` independently of maps. Switching, cancelling, clearing, reloading the companion, or restarting Chrome preserves the reservation history. These are conservative Orbit guardrails, **not LinkedIn-published or approved quotas**. They do not cover manual browsing or other installed collectors.
+- HTTP **429/999**, document **401/403**, and visible verification/restriction notices stop collection. `Retry-After` seconds and HTTP dates are respected, with a minimum 15-minute cooldown for restrictions. Time alone and reopening the Site never clear a restriction: inspect LinkedIn and explicitly resume. Login pages pause for sign-in. Repeated platform notices can extend the cooldown.
+- Transient failures back off exponentially, with two navigation retries per job and a pause after repeated failures. A stalled Next/scroll gets at most three paced attempts without repeatedly reloading the list. A checkpoint-write failure stops further actions until the companion is reloaded.
+- Scrolling uses overlapping viewports and combines unique people across virtualized snapshots. Modern and legacy result cards can coexist. A person cap saves only accepted rows and resumes the remainder without inflating page counts. An uncertain end remains **Incomplete** in Coverage.
+- Incomplete direct lists resume from an already validated list URL when available, and deeper profiles wait until that layer is resolved. Browser restarts preserve the last paginated URL.
+
+The added `webRequest` permission observes status codes and `Retry-After` in the collector tab using Chrome's [response-header events](https://developer.chrome.com/docs/extensions/reference/api/webRequest). It does not request blocking interception, read response bodies or cookies, change headers, or expand host access beyond `www.linkedin.com`.
+
+LinkedIn [prohibits scraping extensions and automated activity](https://www.linkedin.com/help/linkedin/answer/a1341387/prohibited-software-and-extensions). No delay, quota, or browser agent guarantees that an account will avoid restrictions. Test collector changes with the local fixtures, not a live scraping run on a teammate's account.
 
 Use the filters to organize this persistent network by distance, location, estimated field, or school/employer/skill keywords. Search is suggestion-based rather than exact-only: aliases such as `SJSU`, full institution names, profile details, and close spellings are ranked together. Selecting a person shows progressively disclosed professional details and the shortest observed route across all teammates’ saved connections.
 

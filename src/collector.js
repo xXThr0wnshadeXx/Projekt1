@@ -7,9 +7,9 @@ export function inspectLinkedIn() {
   const text=clean(main.innerText||main.textContent),body=clean(document.body.innerText||document.body.textContent);
   const url=location.href;
   const notices=Array.from(document.querySelectorAll('[role="alert"],[role="dialog"],h1,h2,h3')).map(e=>clean(e.innerText||e.textContent)).join(' ');
-  const restriction=/security verification|verify your identity|unusual activity|temporarily restricted|commercial use limit|(?:you(?:'ve| have) reached|you reached)[^.!?]{0,100}(?:search|limit)|(?:reached|exceeded)[^.!?]{0,60}search limit/i;
+  const restriction=/security verification|verify your identity|unusual activity|temporarily restricted|account (?:has been |is )?restricted|too many requests|rate limit(?:ed| exceeded)?|automated activity|commercial use limit|(?:you(?:'ve| have) reached|you reached)[^.!?]{0,100}(?:search|limit)|(?:reached|exceeded)[^.!?]{0,60}search limit/i;
   if(/\/checkpoint\//.test(location.pathname)||restriction.test(notices)||(body.length<1500&&restriction.test(body)))return {kind:'blocked',url,reason:'LinkedIn is showing a verification, restriction, or search limit. Resolve it in the collection tab before resuming.'};
-  if(/\/(login|uas\/login|authwall)/.test(location.pathname)||document.querySelector('input[name="session_password"]'))return {kind:'blocked',url,reason:'Sign in to LinkedIn in the collection tab, then resume.'};
+  if(/\/(login|uas\/login|authwall)/.test(location.pathname)||document.querySelector('input[name="session_password"]'))return {kind:'blocked',blockType:'login',url,reason:'Sign in to LinkedIn in the collection tab, then resume.'};
   if(main.querySelector('[aria-busy="true"],.artdeco-loader,.search-results__loader'))return {kind:'loading',url};
   const links=Array.from(main.querySelectorAll('a[href], [role="link"][href]'));
   if(/^\/in\/[^/]+\/?$/.test(location.pathname)) {
@@ -37,7 +37,7 @@ export function inspectLinkedIn() {
   // New LinkedIn layout: each result is a link wrapping paragraphs.
   for(const a of links){const id=canonical(a.getAttribute('href'));if(!id)continue;const p=Array.from(a.querySelectorAll('p')).map(e=>clean(e.textContent)).filter(Boolean);if(p.length<1)continue;if(!isOwn&&!/•\s*(1st|2nd|3rd)/.test(p[0]))continue;people.push({url:id,name:p[0].replace(/\s*•\s*(1st|2nd|3rd\+?).*$/,'').trim(),headline:p[1]||'',location:isOwn?'':p[2]||''});}
   // Legacy layout: result cards expose a dedicated title and subtitle.
-  if(!people.length)for(const card of main.querySelectorAll('li.reusable-search__result-container,li.mn-connection-card')){
+  for(const card of main.querySelectorAll('li.reusable-search__result-container,li.mn-connection-card')){
     const a=card.querySelector('.entity-result__title-text a[href*="/in/"],a.mn-connection-card__link');if(!a)continue;
     const id=canonical(a.getAttribute('href'));if(!id)continue;
     const label=a.querySelector('[aria-hidden="true"],.mn-connection-card__name')||a;
@@ -49,7 +49,7 @@ export function inspectLinkedIn() {
   const next=controls.find(e=>e.classList.contains('artdeco-pagination__button--next'))||controls.find(e=>/^(?:go to (?:the )?)?next(?: page)?$/i.test(clean(e.getAttribute('aria-label')||e.textContent))||e.getAttribute('rel')==='next');
   const hasNext=Boolean(next&&!next.disabled&&next.getAttribute('aria-disabled')!=='true');
   const paginationState=hasNext?'next':next?'end':'missing';
-  const empty=/no results found|no results|no connections yet|no connections to show/i.test(text);
+  const empty=!unique.length&&/no results found|no results|no connections yet|no connections to show/i.test(text);
   const count=isOwn?Number((text.match(/([\d,]+)\s+connections/i)?.[1]||'').replaceAll(',','')):null;
   return {kind:unique.length||empty?'list':'loading',url,people:unique,hasNext,paginationState,isOwn,empty,expectedCount:count||null,signature:unique.map(p=>p.url).sort().join('|'),pageLabel:clean(main.querySelector('[aria-current="page"],[aria-current="true"]')?.textContent),scrollHeight:document.documentElement.scrollHeight};
 }
@@ -62,6 +62,10 @@ export async function advanceLinkedIn(expectedURL,own,scrollOnly=false) {
   const main=document.querySelector('[role="region"][aria-label="Primary content"]')||document.querySelector('main')||document.body;
   const pageRoot=main.closest('main')||main;
   if(own||scrollOnly){
+    // One load-triggering action per reservation. Clicking and scrolling together
+    // can issue two requests, so prefer an explicit enabled load-more control.
+    const more=Array.from(pageRoot.querySelectorAll('button')).find(e=>/^(show more|load more)$/i.test(e.textContent.trim())&&!e.disabled&&e.getAttribute('aria-disabled')!=='true');
+    if(more){more.click();return 'scrolled';}
     // Headers often contain a profile link before the actual virtualized list.
     // Prefer the scrollable ancestor shared by the most profile links.
     const candidates=new Map();
@@ -81,9 +85,8 @@ export async function advanceLinkedIn(expectedURL,own,scrollOnly=false) {
       await new Promise(resolve=>setTimeout(resolve,150));
       if(location.href!==current.href)throw Error('The collection tab changed.');
     }
-    scroll(bottom);
-    const more=Array.from(pageRoot.querySelectorAll('button')).find(e=>/^(show more|load more)$/i.test(e.textContent.trim()));
-    if(more&&!more.disabled&&more.getAttribute('aria-disabled')!=='true')more.click();
+    // Keep overlap so virtualized rows aren't skipped by jumping to the bottom.
+    scroll(own?Math.min(bottom,(container.scrollTop||0)+Math.max(100,container.clientHeight*.8)):bottom);
     return 'scrolled';
   }
   const controls=Array.from(pageRoot.querySelectorAll('button,a[href],[role="button"]'));

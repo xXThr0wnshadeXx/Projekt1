@@ -69,15 +69,15 @@ export function addEdge(state,a,b,source) {
 }
 export function ingestPage(state,job,snapshot) {
   if(!sameList(job.url,snapshot.url)) throw Error('The connection filter changed. Collection paused to prevent incorrect relationships.');
-  let added=0;
+  let added=0;const captured=[];
   for(const person of snapshot.people||[]) {
     const before=Boolean(state.nodes[profileURL(person.url)]),id=addPerson(state,person,job.depth+1);
-    if(id)addEdge(state,job.owner,id,snapshot.url);
+    if(id){addEdge(state,job.owner,id,snapshot.url);captured.push(id);}
     if(id&&!before)added++;
   }
   const branch=state.branches[job.owner] ||= {status:'collecting',pages:0,profiles:[],url:job.url};
-  branch.pages++;branch.profiles=[...new Set([...branch.profiles,...snapshot.people.map(p=>profileURL(p.url)).filter(Boolean)])];
-  state.pages++;
+  if(snapshot.countPage!==false){branch.pages++;state.pages++;}
+  branch.profiles=[...new Set([...branch.profiles,...captured])];
   return added;
 }
 export function route(state,target) {
