@@ -18,21 +18,20 @@ if (!preference.matches && 'IntersectionObserver' in window) {
   };
   const observer = new IntersectionObserver(entries => {
     for (const {target, isIntersecting} of entries) {
-      if (!isIntersecting) continue;
-      observer.unobserve(target);
+      if (!isIntersecting) { finish(target); continue; }
       // Hash navigation and keyboard focus must never animate active controls away.
       if (target.contains(document.activeElement)) continue;
       target.classList.add('scroll-revealed');
       active.add(target);
-      target.addEventListener('animationend', event => {
-        if (event.target === target) finish(target);
-      });
     }
   }, {threshold: 0, rootMargin: '0px 0px -24px 0px'});
   for (const [selector, motion, stagger] of groups) {
     document.querySelectorAll(selector).forEach((element, index) => {
       element.dataset.motion = motion;
       element.style.setProperty('--reveal-delay', `${index * stagger}ms`);
+      element.addEventListener('animationend', event => {
+        if (event.target === element) finish(element);
+      });
       observer.observe(element);
     });
   }
