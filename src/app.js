@@ -117,7 +117,7 @@ $('cancel-build').onclick=async()=>{try{await send({type:'CANCEL'});await refres
 $('filter-lines').onchange=e=>{graph.showAllConnections=e.target.checked;graph.draw();};
 
 function openWorkspaceSettings(settings){
- $('map-settings').hidden=!settings;document.querySelector('.main-panel').hidden=settings;if(settings)$('inspector').close();
+ $('map-settings').hidden=!settings;document.querySelector('.main-panel').hidden=settings;if(settings){$('inspector').close();document.querySelector('.collection-settings').open=true;}
  $('settings-tab').setAttribute('aria-pressed',String(settings));$('workspace-tab').setAttribute('aria-pressed',String(!settings));
  if(!settings)graph.resize();
 }
@@ -129,3 +129,5 @@ $('workspace-build').onclick=()=>{
  if(!$('setup-form').checkValidity()){openWorkspaceSettings(true);$('setup-form').reportValidity();return;}
  $('setup-form').requestSubmit();
 };
+
+$('zoom-speed').onchange=e=>{graph.zoomSpeed=Number(e.target.value);};

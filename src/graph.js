@@ -1,9 +1,9 @@
 import {matchesFilters,groupTargets,springProgress,locationOf,fieldOf} from './filters.js';
 export class NetworkGraph {
   constructor(canvas,onSelect){
-    this.canvas=canvas;this.ctx=canvas.getContext('2d');this.onSelect=onSelect;this.points=[];this.edges=[];this.positions=new Map();this.showAllConnections=false;this.filters={};this.groupBy="none";this.groupLabels=[];this.motion=null;this.scale=1;this.offset={x:0,y:0};this.selected=null;this.query='';this.path=new Set();this.autoFit=true;this.scrollZoom=false;this.zoomTarget=null;this.zoomTime=null;this.frame=null;this.childCounts=new Map();this.directCount=0;this.reducedMotion=globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches||false;
+    this.canvas=canvas;this.ctx=canvas.getContext('2d');this.onSelect=onSelect;this.points=[];this.edges=[];this.positions=new Map();this.showAllConnections=false;this.filters={};this.groupBy="none";this.groupLabels=[];this.motion=null;this.scale=1;this.offset={x:0,y:0};this.selected=null;this.query='';this.path=new Set();this.autoFit=true;this.scrollZoom=false;this.zoomSpeed=1;this.zoomTarget=null;this.zoomTime=null;this.frame=null;this.childCounts=new Map();this.directCount=0;this.reducedMotion=globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches||false;
     this.observer=new ResizeObserver(()=>this.resize());this.observer.observe(canvas.parentElement);
-    canvas.addEventListener('wheel',e=>{if(!this.scrollZoom)return;e.preventDefault();const pixels=e.deltaY*(e.deltaMode===1?16:e.deltaMode===2?this.h:1);this.queueZoom(Math.exp(-Math.max(-120,Math.min(120,pixels))*.002),e.offsetX,e.offsetY);},{passive:false});
+    canvas.addEventListener('wheel',e=>{if(!this.scrollZoom)return;e.preventDefault();const pixels=e.deltaY*(e.deltaMode===1?16:e.deltaMode===2?this.h:1);this.queueZoom(Math.exp(-Math.max(-120,Math.min(120,pixels))*.0025*this.zoomSpeed),e.offsetX,e.offsetY);},{passive:false});
     canvas.addEventListener('pointerdown',e=>{this.zoomTarget=null;this.drag={x:e.clientX,y:e.clientY,ox:this.offset.x,oy:this.offset.y,moved:false};canvas.setPointerCapture(e.pointerId);});
     canvas.addEventListener('pointermove',e=>{if(!this.drag)return;const dx=e.clientX-this.drag.x,dy=e.clientY-this.drag.y;if(Math.hypot(dx,dy)>3){this.drag.moved=true;this.autoFit=false;}this.offset={x:this.drag.ox+dx,y:this.drag.oy+dy};this.draw();});
     canvas.addEventListener('pointerup',e=>{if(this.drag&&!this.drag.moved){const r=canvas.getBoundingClientRect(),x=(e.clientX-r.left-this.w/2-this.offset.x)/this.scale,y=(e.clientY-r.top-this.h/2-this.offset.y)/this.scale;let near=null,dist=Infinity;for(const p of this.points){if(!this.isVisible(p)||p.bornAt>performance.now())continue;const d=Math.hypot(p.x-x,p.y-y);if(d<Math.max(9/this.scale,p.r+4)&&d<dist){near=p;dist=d;}}if(near)this.onSelect(near.id);}this.drag=null;});
@@ -35,7 +35,9 @@ export class NetworkGraph {
   zoom(factor,x=this.w/2,y=this.h/2){this.autoFit=false;const old=this.scale;this.scale=Math.max(.01,Math.min(12,this.scale*factor));const ratio=this.scale/old;this.offset={x:x-this.w/2-(x-this.w/2-this.offset.x)*ratio,y:y-this.h/2-(y-this.h/2-this.offset.y)*ratio};this.onZoom?.(this.scale);this.draw();}
   queueZoom(factor,x=this.w/2,y=this.h/2){
     if(this.reducedMotion){this.zoom(factor,x,y);return;}
-    this.zoomTarget={scale:Math.max(.01,Math.min(12,(this.zoomTarget?.scale??this.scale)*factor)),x,y};
+    const reversing=this.zoomTarget&&(this.zoomTarget.scale-this.scale)*(factor-1)<0;
+    const base=reversing?this.scale:(this.zoomTarget?.scale??this.scale);
+    this.zoomTarget={scale:Math.max(.01,Math.min(12,Math.max(this.scale/1.5,Math.min(this.scale*1.5,base*factor)))),x,y};
     if(this.zoomTime===null)this.zoomTime=performance.now();this.draw();
   }
   advanceZoom(now){
