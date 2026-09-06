@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
 import {readFileSync,readdirSync} from 'node:fs';
-import {ingest,stats,search,neighborhood} from '../server/database.js';
+import {ingest,stats,search,neighborhood,listImports} from '../server/database.js';
 function database(){
   const raw=new DatabaseSync(':memory:');for(const f of readdirSync(new URL('../drizzle/',import.meta.url)).filter(f=>f.endsWith('.sql')))raw.exec(readFileSync(new URL('../drizzle/'+f,import.meta.url),'utf8'));
   const db={prepare(sql){return {sql,args:[],bind(...args){this.args=args;return this;},async all(){return {results:raw.prepare(sql).all(...this.args)};},async first(){return raw.prepare(sql).get(...this.args)||null;}};},async batch(statements){raw.exec('BEGIN');try{const results=statements.map(s=>({results:raw.prepare(s.sql).all(...s.args)}));raw.exec('COMMIT');return results;}catch(e){raw.exec('ROLLBACK');throw e;}}};return {db,raw};
@@ -34,6 +34,7 @@ test('rich import records are preserved idempotently with their metadata',async(
   await ingest(db,'shared',payload);await ingest(db,'shared',payload);
   assert.equal((await stats(db,'shared')).imports,1);assert.equal(raw.prepare('SELECT COUNT(*) count FROM import_records WHERE owner=?').get('shared').count,1);
   assert.equal(JSON.parse(raw.prepare('SELECT metadata_json FROM imports WHERE owner=?').get('shared').metadata_json).counts.profiles,52);
+  assert.deepEqual((await listImports(db,'shared')).map(item=>[item.fileName,item.records]),[['archive.json',1]]);
 });
 test('invalid and orphaned links never become a silently saved graph',async()=>{
   const {db}=database();await assert.rejects(ingest(db,'one',{nodes:[person('a')],edges:[edge('a','b')]}),/save its people first/);assert.equal((await stats(db,'one')).people,0);

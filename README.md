@@ -7,21 +7,21 @@ Orbit builds an evidence-backed graph from LinkedIn pages that a contributor can
 - **Canonical application:** [orbit-shreev2703-graph-test.shreev2703.chatgpt.site](https://orbit-shreev2703-graph-test.shreev2703.chatgpt.site/)
 - **Repository:** [xXThr0wnshadeXx/Projekt1](https://github.com/xXThr0wnshadeXx/Projekt1)
 - **Companion download:** [download the current ZIP](https://orbit-shreev2703-graph-test.shreev2703.chatgpt.site/downloads/orbit-network-mapper.zip)
-- **Current application and companion version:** `2.1.0`
+- **Current application and companion version:** `2.2.0`
 
 This is the single supported hosted application and database. Do not use the retired Turso setup or the older `doublejav.chatgpt.site` deployment.
 
 ## Contributor setup
 
-1. Open the canonical application and sign in with ChatGPT.
+1. Open the canonical application and sign in with Google or ChatGPT.
 2. Download and unzip the Chrome companion.
 3. Open `chrome://extensions`.
 4. Enable **Developer mode** and choose **Load unpacked**.
 5. Select the extracted `orbit-network-mapper` folder.
-6. Reload the hosted Orbit page and click **Connect companion**.
+6. Reload the hosted Orbit page. Orbit connects to the companion automatically; use **Connect companion** only if it needs another attempt.
 7. Enter a full LinkedIn profile URL and start the collection.
 
-Each contributor installs the companion in their own Chrome profile because it reads their own visible LinkedIn pages. They do not run a database or web server. Discoveries are sent to the same hosted API and merged into the same graph.
+Each contributor installs the companion in their own Chrome profile because it reads their own visible LinkedIn pages. They do not run a database or web server. The hosted Site is the only workspace: clicking the extension icon returns to that Site instead of opening a second extension dashboard. Discoveries are sent to the same hosted API and merged into the same graph.
 
 ## One deployment model
 
@@ -37,7 +37,7 @@ Local Chrome companion
                 ▼
 Canonical Orbit Site
   - interface and companion download
-  - ChatGPT authentication
+  - Google or ChatGPT authentication
   - /api/library/* Worker routes
                 │
                 ▼
@@ -48,7 +48,7 @@ Sites D1 binding: DB
   - optional per-contributor rate limits
 ```
 
-The extension is local; the permanent knowledge graph is not. All authenticated contributors use the hard-coded shared workspace `demo-knowledge-graph`.
+The extension is a background collection companion; the permanent knowledge graph and user onboarding are not local. All authenticated contributors use the hard-coded shared workspace `demo-knowledge-graph`.
 
 ## Multiple local maps
 
@@ -76,7 +76,17 @@ Migrations live in [`drizzle/`](drizzle/) and are packaged with each deployment.
 - `people` — canonical profile URL, name, search name, headline, location, and timestamps;
 - `connections` — stable undirected endpoints and first/last observation times;
 - `evidence` — the visible connection-list source supporting a relationship;
-- `api_rate_limits` — atomic per-contributor request counters used when enforcement is enabled.
+- `api_rate_limits` — atomic per-contributor request counters used when enforcement is enabled;
+- `imports` and `import_records` — imported file metadata and lossless preserved source records;
+- `users`, `identities`, and `sessions` — server-backed account, onboarding, and hashed-session state.
+
+Open **Map settings → Database activity** to review recent imports without leaving Orbit. Site owners can inspect the raw D1 tables from the Orbit project in the Sites dashboard; the logical binding is named `DB`.
+
+### Google account login
+
+The hosted Site uses Google Identity Services with the configured Web client ID. Google returns a signed ID token; the Worker verifies its signature, audience, issuer, expiry, and per-attempt nonce before creating a seven-day Orbit session. Only a SHA-256 hash of the opaque session token is stored in D1. The browser never receives or needs a Google client secret.
+
+Set `GOOGLE_CLIENT_ID` in the Site environment to the public Web client ID, then publish a version. The Google Cloud client must list the exact Site origin under **Authorized JavaScript origins**. New users continue to LinkedIn setup, returning users with a saved starting profile go to the map, and onboarding is stored in D1 so it follows the account to another device. ChatGPT sign-in remains available during the transition.
 
 Ingestion uses idempotent upserts. Overlapping collections add evidence and relationships without duplicating people. Empty incoming fields do not replace existing nonempty profile information.
 
@@ -84,7 +94,7 @@ Ingestion uses idempotent upserts. Overlapping collections add evidence and rela
 
 A teammate does **not** need Sites editor access or direct D1 credentials to add data. They need to:
 
-1. Open the [canonical Orbit Site](https://orbit-shreev2703-graph-test.shreev2703.chatgpt.site/map.html) and sign in with ChatGPT.
+1. Open the [canonical Orbit Site](https://orbit-shreev2703-graph-test.shreev2703.chatgpt.site/map.html) and sign in with Google or ChatGPT.
 2. Open **Map settings → Team library**.
 3. Choose **Choose a JSON file**. Orbit previews the recognized totals locally and does not upload yet.
 4. Select **Import into shared D1** only after the totals look right, then keep the tab open until **Import complete** appears.
@@ -124,7 +134,7 @@ npm run build
 npm run preview
 ```
 
-The preview opens at `http://127.0.0.1:8770`. It serves the frontend and companion download but does not provide ChatGPT authentication or local D1. Use the canonical hosted Site for shared-library testing.
+The preview opens at `http://127.0.0.1:8770`. It serves the frontend and companion download but does not provide account authentication or local D1. Use the canonical hosted Site for shared-library testing.
 
 The npm tooling uses Node.js on Windows, macOS, and Linux. Python is not required.
 
@@ -174,7 +184,7 @@ There is no unattended cloud crawler, verification bypass, hidden-data inference
 ## Troubleshooting
 
 - **Companion not connected:** install the ZIP from the canonical Site, reload the extension, and refresh the Site.
-- **401:** sign in with ChatGPT on the canonical Site.
+- **401:** sign in with Google or ChatGPT on the canonical Site.
 - **403:** use the canonical Site rather than another origin.
 - **429:** wait for the indicated retry period.
 - **503:** the Sites deployment is missing its `DB` binding.

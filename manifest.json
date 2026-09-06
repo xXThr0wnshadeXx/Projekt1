@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Orbit \u2014 LinkedIn Network Mapper",
-  "version": "2.1.0",
-  "description": "Build a local, evidence-backed connection graph from LinkedIn pages you can view.",
+  "version": "2.2.0",
+  "description": "Collect visible LinkedIn connections for the hosted Orbit workspace.",
   "minimum_chrome_version": "120",
   "permissions": [
     "storage",
@@ -18,7 +18,7 @@
     "type": "module"
   },
   "action": {
-    "default_title": "Open Orbit network mapper"
+    "default_title": "Open the Orbit workspace"
   },
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'none'"
