@@ -31,8 +31,10 @@ function attributes(tag: string): Record<string,string> {
   const pattern = /([^\s=<>/]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s<>]+)))?/g;
   for (const match of body.matchAll(pattern)) {
     const key = match[1]!.toLowerCase();
-    if (Object.hasOwn(attrs,key)) throw new DiscoveryError('UNSUPPORTED_CONTENT');
-    attrs[key] = entities(match[2]??match[3]??match[4]??'');
+    const value = entities(match[2]??match[3]??match[4]??'');
+    // Repeated identical attributes are unambiguous; conflicting values still fail closed.
+    if (Object.hasOwn(attrs,key) && attrs[key] !== value) throw new DiscoveryError('UNSUPPORTED_CONTENT');
+    attrs[key] = value;
   }
   return attrs;
 }
