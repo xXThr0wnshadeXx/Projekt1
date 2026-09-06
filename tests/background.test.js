@@ -65,6 +65,11 @@ test('legacy saved page resumes, browser restart requeues every lane once',async
   assert.equal(h.data.orbitNetwork.workers.length,1);assert.equal(h.data.orbitNetwork.current.job.owner,root);
   h.listeners.startup();await h.flush();const saved=h.data.orbitNetwork;assert.equal(saved.status,'paused');assert.equal(saved.current,null);assert.equal(saved.queue.length,1);assert.ok(saved.workers.every(w=>!w.current&&!w.tabId));
 });
+test('resume renews the Site lease and repairs an incomplete direct checkpoint',async t=>{
+  const s=newState(root,{depth:2,delay:0});s.status='paused';s.pauseKind='coverage';s.workspaceManaged=true;s.workspaceLeaseUntil=0;s.branches[root]={status:'incomplete',pages:1,profiles:[a],url:list('root')};s.nodes[a]={...person('a'),id:a,depth:1};s.queue=[{kind:'profile',owner:a,depth:1}];s.workers=[{tabId:null,current:null}];
+  const h=await harness(t,s);h.snapshots={[root]:profile(person('root'),list('root'))};const response=await h.command({type:'RESUME',config:{maxNodes:1000,depth:2,delay:0}});
+  assert.equal(response.ok,true);assert.equal(response.status,'running');assert.ok(h.data.orbitNetwork.workspaceLeaseUntil>1000000);assert.equal(h.data.orbitNetwork.current.job.owner,root);assert.equal(h.data.orbitNetwork.branches[root].status,'queued');assert.match(h.data.orbitNetwork.reason,/exploring root/i);
+});
 
 test('a changed viewer-degree filter keeps the same owner and records adjusted coverage',async t=>{
   const h=await harness(t),requested=list('root')+'&network=%5B%22F%22%2C%22S%22%5D',actual=list('root')+'&page=1';
