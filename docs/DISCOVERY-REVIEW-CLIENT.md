@@ -25,6 +25,38 @@ Explicit identity resolution uses `POST /api/public-facts/resolve` with the exis
 
 Cancel and discard responses on session/scope/input change. Treat 400 as input error, 401 as sign-in required, 403 as unavailable to this workspace, 409 as refresh/review required, and 502 as source/service unavailable. Do not silently retry provider discovery with a new key after a lookup failure.
 
-The public-relationship acceptance module is present in source, but its HTTP composition and production citation policy are not enabled by this checkpoint. Do not invent an acceptance URL or submit public proposals to the manual-facts endpoint. Ben will supply the exact acceptance handoff after lifecycle integration and policy review.
+Public relationship review is now mounted at authenticated, same-origin `POST /api/public-facts/confirm`. The exact exported request/response types are `PublicClaimReviewRequest` and `PublicClaimReviewResponse` in `packages/server/public-facts/acceptance-contracts.ts`. The server expects:
+
+```ts
+{
+  scopeId: string;
+  expectedGraphVersion: string;
+  idempotencyKey: string;
+  confirm: true;
+  decisions: Array<{
+    sourceId: string;
+    proposalId: string;
+    proposalRevision: string;
+    decision: 'ACCEPT';
+    includeInSearch: boolean;
+    bindings: {
+      subject: {endpointId: string; endpointRevision: string; resolutionDecisionId: string};
+      object: {endpointId: string; endpointRevision: string; resolutionDecisionId: string};
+    };
+    relativeStrength?: number;
+  } | {
+    sourceId: string;
+    proposalId: string;
+    proposalRevision: string;
+    decision: 'REJECT';
+  }>;
+}
+```
+
+Use 1–10 decisions with no duplicate proposal. Bind both endpoints to their current explicit resolution decisions from the latest review response. Show the exact relationship quote, source, subject → object direction, resolved identities and known/unknown dates before confirmation. Offer rejection, acceptance without search, or explicit search opt-in with a deliberate positive relative weight. Do not silently supply a weight. The policy determines its semantics; it never measures willingness or probability of a successful introduction. An accepted private opt-out creates no searchable edge.
+
+The response provides current/base graph versions, review ID, duplicate flag, per-proposal decision IDs/state/relationshipId/searchable, graph events and warnings. Refresh graph and review after success. Preserve the exact payload/key for an uncertain retry; changed choices require current selectors and a new key. Display returned warnings with results. Do not send these proposals to `/api/facts/confirm`.
+
+Production policy wiring is still a separate gate: without an explicit server policy, searchable acceptance returns a service-unavailable error with no writes; acceptance without search remains available. Do not interpret an HTTP endpoint or identity decision as proof that a route exists.
 
 Frontend verification can use the existing Node runner and injected fetch-compatible responses for request/retry/stale-state behavior. Anonymous fixtures remain in tests. Production UI must receive actual server responses and must not seed people, citations or paths. A browser check is still required against the integrated server.
