@@ -19,17 +19,36 @@ test('unrelated profile content does not trigger a global account restriction',(
   assert.equal(page('<main><h1>Example</h1><div role="dialog">You have reached your commercial use limit</div></main>',profile).kind,'blocked');
 });
 
-test('pagination outside the primary region supports normal next-page anchors',()=>{
+test('pagination outside the primary region supports normal next-page anchors',async()=>{
   const s=page('<main><section role="region" aria-label="Primary content"><a href="https://www.linkedin.com/in/one/"><p>One • 2nd</p></a></section><nav><a aria-label="Go to next page" href="'+list+'&page=2">Next</a></nav></main>',list);
   assert.equal(s.hasNext,true);assert.equal(s.paginationState,'next');
-  let clicked=false;document.querySelector('nav a').click=()=>{clicked=true;};advanceLinkedIn(list,false);assert.equal(clicked,true);
+  let clicked=false;document.querySelector('nav a').click=()=>{clicked=true;};await advanceLinkedIn(list,false);assert.equal(clicked,true);
 });
 test('result ordering does not change page identity',()=>{
   const a='<a href="https://www.linkedin.com/in/a/"><p>A • 2nd</p></a>',b='<a href="https://www.linkedin.com/in/b/"><p>B • 2nd</p></a>';
   const first=page('<main>'+a+b+'</main>',list).signature;assert.equal(page('<main>'+b+a+'</main>',list).signature,first);
 });
-test('own-list scrolling uses a nested scroll container when present',()=>{
+test('own-list scrolling uses a nested scroll container when present',async()=>{
   const url='https://www.linkedin.com/mynetwork/invite-connect/connections/';page('<main><div class="scroller"><a href="https://www.linkedin.com/in/one/"><p>One</p></a></div></main>',url);
   const scroller=document.querySelector('.scroller');Object.defineProperties(scroller,{scrollHeight:{value:1000},clientHeight:{value:300}});let scrolled=false;scroller.scrollTo=()=>{scrolled=true;};globalThis.getComputedStyle=()=>({overflowY:'auto'});globalThis.window={scrollTo(){throw Error('Should scroll the inner list');}};
-  assert.equal(advanceLinkedIn(url,true),'scrolled');assert.equal(scrolled,true);
+  assert.equal(await advanceLinkedIn(url,true),'scrolled');assert.equal(scrolled,true);
+});
+test('scrolling finds the connection list when a header profile link comes first',async()=>{
+ const url='https://www.linkedin.com/mynetwork/invite-connect/connections/';
+ page('<main><header><a href="/in/me/">Me</a></header><div class="scroller"><a href="/in/a/">A</a><a href="/in/b/">B</a></div></main>',url);
+ const scroller=document.querySelector('.scroller'),moves=[];
+ Object.defineProperties(scroller,{scrollHeight:{value:1200},clientHeight:{value:400},scrollTop:{value:800}});
+ scroller.scrollTo=options=>moves.push(options.top);
+ globalThis.getComputedStyle=e=>({overflowY:e===scroller?'auto':'visible'});
+ globalThis.window={scrollTo(){throw Error('Must use the connection list');}};
+ assert.equal(await advanceLinkedIn(url,true),'scrolled');assert.deepEqual(moves,[600,800]);
+});
+test('document scrolling uses the scrolling element and ignores disabled load more',async()=>{
+ const url='https://www.linkedin.com/mynetwork/invite-connect/connections/';
+ page('<main><a href="/in/a/">A</a><button disabled>Load more</button></main>',url);
+ const root=document.documentElement,moves=[];
+ Object.defineProperties(root,{scrollHeight:{value:1500},clientHeight:{value:500},scrollTop:{value:0}});
+ root.scrollTo=options=>moves.push(options.top);globalThis.getComputedStyle=()=>({overflowY:'visible'});
+ document.querySelector('button').click=()=>{throw Error('Disabled button clicked');};
+ assert.equal(await advanceLinkedIn(url,true),'scrolled');assert.deepEqual(moves,[1000]);
 });

@@ -45,7 +45,7 @@ export function inspectLinkedIn() {
   return {kind:unique.length||empty?'list':'loading',url,people:unique,hasNext,paginationState,isOwn,empty,expectedCount:count||null,signature:unique.map(p=>p.url).sort().join('|'),pageLabel:clean(main.querySelector('[aria-current="page"],[aria-current="true"]')?.textContent),scrollHeight:document.documentElement.scrollHeight};
 }
 
-export function advanceLinkedIn(expectedURL,own,scrollOnly=false) {
+export async function advanceLinkedIn(expectedURL,own,scrollOnly=false) {
   const current=new URL(location.href),expected=new URL(expectedURL);
   const path=u=>u.pathname.replace(/\/?$/,'/');
   const owner=u=>{const values=u.searchParams.getAll('connectionOf');if(values.length!==1||!values[0])return null;try{const parsed=JSON.parse(values[0]);if(Array.isArray(parsed)&&parsed.length&&parsed.every(v=>typeof v==='string'&&v.length))return JSON.stringify([...new Set(parsed)].sort());if(typeof parsed==='string'&&parsed.length)return JSON.stringify([parsed]);}catch{}return JSON.stringify([values[0]]);};
@@ -53,16 +53,28 @@ export function advanceLinkedIn(expectedURL,own,scrollOnly=false) {
   const main=document.querySelector('[role="region"][aria-label="Primary content"]')||document.querySelector('main')||document.body;
   const pageRoot=main.closest('main')||main;
   if(own||scrollOnly){
-    // LinkedIn may scroll a nested list instead of the window.
-    let container=main.querySelector('a[href*="/in/"]')?.parentElement,scrolled=false;
-    while(container&&container!==document.body){
-      if(container.scrollHeight>container.clientHeight+20&&/auto|scroll/.test(getComputedStyle(container).overflowY)){
-        container.scrollTo(0,container.scrollHeight);scrolled=true;break;
+    // A header/avatar may be the first profile link. Find the scrollable
+    // ancestor shared by actual list links instead of trusting that first link.
+    const candidates=new Map();
+    for(const link of main.querySelectorAll('a[href*="/in/"]')){
+      for(let container=link.parentElement;container&&container!==document.body;container=container.parentElement){
+        if(container.scrollHeight>container.clientHeight+20&&/auto|scroll/.test(getComputedStyle(container).overflowY)){
+          candidates.set(container,(candidates.get(container)||0)+1);break;
+        }
       }
-      container=container.parentElement;
     }
-    if(!scrolled)window.scrollTo(0,document.documentElement.scrollHeight);
-    const more=Array.from(pageRoot.querySelectorAll('button')).find(e=>/^(show more|load more)$/i.test(e.textContent.trim()));if(more&&!more.disabled)more.click();return 'scrolled';
+    const container=[...candidates].sort((a,b)=>b[1]-a[1])[0]?.[0]||document.scrollingElement||document.documentElement;
+    const bottom=Math.max(0,container.scrollHeight-container.clientHeight);
+    const scroll=top=>container.scrollTo?container.scrollTo({top,behavior:'instant'}):window.scrollTo({top,behavior:'instant'});
+    // Re-enter the loading boundary even if the previous pass ended at bottom.
+    // Allow the browser to observe the upward move before returning to bottom.
+    if(bottom>0&&(container.scrollTop||0)>=bottom-2){
+      scroll(Math.max(0,bottom-Math.min(200,container.clientHeight/2)));
+      await new Promise(resolve=>setTimeout(resolve,150));
+      if(location.href!==current.href)throw Error('The collection tab changed.');
+    }
+    scroll(bottom);
+    const more=Array.from(pageRoot.querySelectorAll('button')).find(e=>/^(show more|load more)$/i.test(e.textContent.trim()));if(more&&!more.disabled&&more.getAttribute('aria-disabled')!=='true')more.click();return 'scrolled';
   }
   const controls=Array.from(pageRoot.querySelectorAll('button,a[href],[role="button"]'));
   const next=controls.find(e=>e.classList.contains('artdeco-pagination__button--next'))||controls.find(e=>/^(?:go to (?:the )?)?next(?: page)?$/i.test((e.getAttribute('aria-label')||e.textContent||'').trim())||e.getAttribute('rel')==='next');
