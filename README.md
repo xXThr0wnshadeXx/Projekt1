@@ -6,8 +6,8 @@ Orbit builds an evidence-backed graph from LinkedIn pages that a contributor can
 
 - **Canonical application:** [orbit-shreev2703-graph-test.shreev2703.chatgpt.site](https://orbit-shreev2703-graph-test.shreev2703.chatgpt.site/)
 - **Repository:** [xXThr0wnshadeXx/Projekt1](https://github.com/xXThr0wnshadeXx/Projekt1)
-- **Companion download:** [download the current ZIP](https://orbit-shreev2703-graph-test.shreev2703.chatgpt.site/downloads/orbit-network-mapper.zip?v=2.6.2)
-- **Current application and companion version:** `2.6.2`
+- **Companion download:** [download the current ZIP](https://orbit-shreev2703-graph-test.shreev2703.chatgpt.site/downloads/orbit-network-mapper.zip?v=2.6.3)
+- **Current application and companion version:** `2.6.3`
 
 This is the single supported hosted application and database. Do not use the retired Turso setup or the older `doublejav.chatgpt.site` deployment.
 
@@ -54,11 +54,11 @@ The extension is a background collection companion; the permanent knowledge grap
 
 Orbit maintains one continuously growing network for each signed-in account. Resuming an unfinished collection keeps its exact page, queue, and checkpoint; duplicate starts leave an active collection alone. A finished map becomes **Check for new connections**. Orbit never clears its saved coverage or requeues the whole known network: after 24 hours it checks the 24 stalest eligible branches, prioritizes the starting account, and rotates through the remainder on later runs. Newly discovered people still expand outward to the chosen degree. Reopening the Site starts a due daily batch, while reopening an unfinished run resumes exactly where it stopped. Every changed person and relationship is periodically upserted into the shared team graph. **Reset my account network** is deliberately kept in Settings and removes only that account’s contribution—overlapping records supported by teammates remain.
 
-### Comment relationships (2.6.2)
+### Comment relationships (2.6.3)
 
 A commenter and the actual author of a visible post get one **undirected, equal-weight relationship**, whether or not they are LinkedIn connections. Repeated comments and connection-list observations merge into the same pair while keeping separate evidence. Commenters on the same post are not automatically connected to each other.
 
-Enter your profile or another person's profile in **Map settings → Starting LinkedIn profile**. The collector follows a visible activity link, reads original posts by that profile, and expands comment/reply controls. It excludes reposts by other authors, mentions inside comment text, anonymous placeholders, and hidden comments. Each observation retains the source post, stable comment ID, commenter, author, and time. A hidden connection list can still produce paths through comment relationships. Paths and name/profile-URL search include those people.
+Enter your profile or another person's profile in **Map settings → Starting LinkedIn profile**. The collector follows a visible activity link, or checks the profile’s standard activity page if the Activity section has not mounted yet. It reads original posts and comment/reply controls in both normal pages and LinkedIn’s same-origin embedded activity feed. It excludes reposts by other authors, mentions inside comment text, anonymous placeholders, and hidden comments. Each observation retains the source post, stable comment ID, commenter, author, and time. A hidden connection list can still produce paths through comment relationships. Mutual-only and incomplete lists retain their coverage labels but no longer block expansion along observed relationships. Stable visible connections save before any paced pagination probe; they do not wait for that probe to appear in the map. Resuming an older checkpoint also recovers posts previously skipped because the Activity link was missing, without replaying the mutual list. Paths and name/profile-URL search include those people.
 
 Each activity job uses the same persisted action governor as connection collection. It stops after three unchanged expansion/scroll attempts or 20 actions per profile and marks uncertain coverage **Incomplete**. It never posts, likes, or sends replies. Available DOM layouts may omit activity links or comments; absent evidence is not invented.
 

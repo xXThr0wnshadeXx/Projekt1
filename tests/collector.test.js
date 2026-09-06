@@ -99,3 +99,44 @@ test('comment advancement expands only comments, never like or reply-composer co
   assert.equal(await advanceComments(activityProfile,{action:'more',urn:'urn:li:activity:123'}),'expanded');assert.deepEqual(clicked,['Load more comments']);
   await assert.rejects(async()=>advanceComments(activityProfile.replace('test-root','other'),{action:'more',urn:'urn:li:activity:123'}),/owner changed/);
 });
+
+
+test('a lazily mounted Activity section cannot make a readable profile skip posts',()=>{
+  const early=page('<main><h2>Example Person</h2><a href="'+list+'">Two mutual connections</a></main>',profile);
+  assert.equal(early.activityUrl,activityProfile);
+  const late=page('<main><h2>Example Person</h2><a href="/in/test-root/recent-activity/posts/">Show all posts</a></main>',profile);
+  assert.equal(late.activityUrl,profile+'recent-activity/posts/');
+});
+function embeddedActivity(html,src='/preload/?_bprMode=vanilla',top=''){
+  page('<iframe src="'+src+'"></iframe>'+top,activityProfile);
+  const inner=parseHTML('<html><body>'+html+'</body></html>').document;
+  Object.defineProperty(document.querySelector('iframe'),'contentDocument',{value:inner});
+  return inner;
+}
+test('same-origin embedded posts retain modern commenter names, evidence, and safe expansion',async()=>{
+  const {advanceComments}=await import('../src/collector.js');
+  const comment='<article data-id="urn:li:comment:(ugcPost:111,456)"><a aria-label="View: Example Commenter 3rd+ Engineer" href="/in/commenter/"><h3><span class="comments-comment-meta__description-title">Example Commenter</span><span aria-hidden="true"> • 3rd+</span><span class="visually-hidden">3rd+</span></h3><div class="comments-comment-meta__description-subtitle">Engineer</div></a></article>';
+  const inner=embeddedActivity('<main>'+postHTML(comment+'<button>Like</button><button>Reply</button><button>Load more comments</button>')+'</main>');
+  const snap=inspectLinkedIn();assert.equal(snap.kind,'posts');assert.equal(snap.owner,profile);assert.equal(snap.cards[0].comments[0].commenter.name,'Example Commenter');assert.equal(snap.cards[0].comments[0].commenter.headline,'Engineer');
+  assert.equal(snap.cards[0].comments[0].commentId,'urn:li:comment:(ugcPost:111,456)');
+  const clicked=[];inner.querySelectorAll('button').forEach(b=>b.click=()=>clicked.push(b.textContent));
+  assert.equal(advanceComments(activityProfile,{action:'more',urn:'urn:li:activity:123'}),'expanded');assert.deepEqual(clicked,['Load more comments']);
+});
+test('embedded ads and stale frames cannot replace a readable top-level activity feed',()=>{
+  embeddedActivity('<main>'+postHTML(commentHTML(456))+'</main>','https://other.example/preload/');assert.equal(inspectLinkedIn().kind,'loading');
+  embeddedActivity('<main>'+postHTML(commentHTML(456))+'</main>','/preload/?_bprMode=vanilla','<main>No posts yet</main>');
+  assert.equal(inspectLinkedIn().empty,true);assert.deepEqual(inspectLinkedIn().cards,[]);
+});
+test('embedded verification stops collection and another author cannot create an owner edge',()=>{
+  embeddedActivity('<h2>Verify your identity</h2>');assert.equal(inspectLinkedIn().kind,'blocked');
+  embeddedActivity('<input name="session_password">');assert.equal(inspectLinkedIn().blockType,'login');
+  embeddedActivity('<main>'+postHTML(commentHTML(456))+'</main>','/preload/?_bprMode=vanilla','<div role="alert">Too many requests</div>');assert.equal(inspectLinkedIn().kind,'blocked');
+  embeddedActivity('<main>'+postHTML(commentHTML(456),'other-author')+'</main>');assert.deepEqual(inspectLinkedIn().cards,[]);
+});
+test('activity pagination uses one explicit Show more results action',async()=>{
+  const {advanceComments}=await import('../src/collector.js');
+  const inner=embeddedActivity('<main>'+postHTML('')+'<button>Show more results</button></main>');let clicks=0;
+  inner.querySelector('button').click=()=>clicks++;
+  globalThis.getComputedStyle=()=>{throw Error('Must not also scroll');};
+  assert.equal(advanceComments(activityProfile,{action:'scroll'}),'expanded');assert.equal(clicks,1);
+});
