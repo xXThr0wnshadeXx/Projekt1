@@ -29,6 +29,12 @@ test('repeated and reversed imports update details without duplicating people or
   await ingest(db,'shared',{nodes:[],edges:[{source:person('root').id,target:person('a').id,evidence:[{url:'https://www.linkedin.com/search/results/people/?connectionOf=second-source',observedAt:'2026-09-06T01:00:00Z'}]}]});
   assert.equal((await stats(db,'shared')).connections,1);assert.equal(raw.prepare('SELECT COUNT(*) count FROM evidence WHERE owner=?').get('shared').count,2);
 });
+test('rich import records are preserved idempotently with their metadata',async()=>{
+  const {db,raw}=database(),id='a'.repeat(64),payload={nodes:[],edges:[],imports:[{id,fileName:'archive.json',format:'knowledge-graph',schemaVersion:'2',exportedAt:'2026-09-06T00:00:00Z',metadata:{counts:{profiles:52}}}],records:[{importId:id,section:'profileDetails',index:0,data:{person:person('a').id,key:'skill',value:'SQLite'}}]};
+  await ingest(db,'shared',payload);await ingest(db,'shared',payload);
+  assert.equal((await stats(db,'shared')).imports,1);assert.equal(raw.prepare('SELECT COUNT(*) count FROM import_records WHERE owner=?').get('shared').count,1);
+  assert.equal(JSON.parse(raw.prepare('SELECT metadata_json FROM imports WHERE owner=?').get('shared').metadata_json).counts.profiles,52);
+});
 test('invalid and orphaned links never become a silently saved graph',async()=>{
   const {db}=database();await assert.rejects(ingest(db,'one',{nodes:[person('a')],edges:[edge('a','b')]}),/save its people first/);assert.equal((await stats(db,'one')).people,0);
   await assert.rejects(ingest(db,'one',{nodes:[person('a')],edges:[{...edge('a','b'),evidence:[]}]}),/source observations/);

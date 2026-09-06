@@ -86,10 +86,12 @@ A teammate does **not** need Sites editor access or direct D1 credentials to add
 
 1. Open the [canonical Orbit Site](https://orbit-shreev2703-graph-test.shreev2703.chatgpt.site/map.html) and sign in with ChatGPT.
 2. Open **Map settings → Team library**.
-3. Choose **Choose JSON and import**, then select an Orbit-compatible JSON file containing `nodes` and `edges` arrays.
-4. Keep that browser tab open until **Import complete** appears.
+3. Choose **Choose a JSON file**. Orbit previews the recognized totals locally and does not upload yet.
+4. Select **Import into shared D1** only after the totals look right, then keep the tab open until **Import complete** appears.
 
-People must use canonical LinkedIn profile URLs. Every edge must name its `source` and `target` profile URLs and include at least one evidence object with a visible LinkedIn connection-list `url` and a valid `observedAt` timestamp. Orbit uploads people first, then connections in atomic batches.
+The importer recognizes `profiles`/`connections`, `nodes`/`edges`, `people`/`relationships`, and `people`/`links`. Rich archives can also contain sections such as `profileDetails`, `commentObservations`, and `sources`. Every source array record and the top-level metadata are preserved in `import_records` and `imports`, while recognized people and connections are also normalized into the visual graph. Unsupported relationships remain preserved and are clearly counted in the preview rather than silently discarded.
+
+People must use canonical LinkedIn profile URLs. Every visual graph edge must name its source and target profile URLs and include at least one visible LinkedIn connection-list observation. Evidence may use Orbit's `url`/`observedAt` fields or archive-style `source`/`firstSeen`/`lastSeen` fields. Orbit uploads people first, then connections and preserved records in atomic batches.
 
 Duplicate protection is enforced in D1, not just in the browser. A person is unique by canonical LinkedIn URL; a connection is unique by its alphabetically ordered endpoint pair; evidence is unique by connection and source URL. Re-imports update newer details and observations, while genuinely new people, connections, and evidence are added.
 

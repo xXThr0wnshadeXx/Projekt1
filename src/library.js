@@ -1,22 +1,23 @@
+import {prepareImport} from './import.js';
 // The hosted page uses its Sites session; no LinkedIn credentials leave Chrome.
 export function createLibrary({getCollection,showGraph,showCollection}){
   const $=id=>document.getElementById(id),enabled=location.protocol==='https:'||location.hostname==='127.0.0.1';
-  let pending=null,saving=false,importing=false,timer=null,searchTimer=null,searchSerial=0;
+  let pending=null,prepared=null,saving=false,importing=false,timer=null,searchTimer=null,searchSerial=0;
   const savedNodes=new Map(),savedEdges=new Map();
   async function api(path,body){const r=await fetch('/api/library/'+path,{method:body?'POST':'GET',headers:body?{'Content-Type':'application/json'}:undefined,body:body?JSON.stringify(body):undefined});const data=await r.json();if(r.status===401){$('library-signin').hidden=false;$('library-counts').textContent='Sign in to view the shared team library';}else if(r.ok)$('library-signin').hidden=true;if(!r.ok){const error=Error(data.error||'Library request failed.');error.status=r.status;error.retryAfter=Number(r.headers.get('Retry-After'))||0;throw error;}return data;}
   const status=text=>{$('library-status').textContent=text;};
   const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-  async function refreshStats(){const s=await api('stats');$('library-counts').textContent=`${Number(s.people).toLocaleString()} people · ${Number(s.connections).toLocaleString()} links saved`;}
+  async function refreshStats(){const s=await api('stats');$('library-counts').textContent=`${Number(s.people).toLocaleString()} people · ${Number(s.connections).toLocaleString()} links saved${Number(s.imports)?` · ${Number(s.imports).toLocaleString()} imports`:''}`;}
   async function ingestBatch(body,progress){
     for(;;){
       try{return await api('ingest',body);}
       catch(error){if(error.status!==429)throw error;const seconds=Math.max(1,error.retryAfter||60);progress(`Rate limit reached · continuing automatically in ${seconds} seconds…`);await delay(seconds*1000);}
     }
   }
-  async function upload(nodes,edges,progress){
-    const total=nodes.length+edges.length;let uploaded=0;
-    for(const [key,items] of [['nodes',nodes],['edges',edges]])for(let i=0;i<items.length;i+=100){
-      const batch=items.slice(i,i+100);await ingestBatch({nodes:[],edges:[],[key]:batch},progress);uploaded+=batch.length;
+  async function upload(data,progress){
+    const fields=['nodes','edges','imports','records'],total=fields.reduce((sum,key)=>sum+data[key].length,0);let uploaded=0;
+    for(const key of fields)for(let i=0;i<data[key].length;i+=100){
+      const batch=data[key].slice(i,i+100),body={nodes:[],edges:[],imports:[],records:[],[key]:batch};await ingestBatch(body,progress);uploaded+=batch.length;
       progress(`Uploading to D1 · ${uploaded.toLocaleString()} of ${total.toLocaleString()} records`);
     }
   }
@@ -56,16 +57,15 @@ export function createLibrary({getCollection,showGraph,showCollection}){
   $('save-library').onclick=()=>{queue(getCollection());clearTimeout(timer);sync();};
   $('import-library').onclick=()=>$('library-import-file').click();
   $('library-import-file').onchange=async event=>{
-    const file=event.target.files?.[0];event.target.value='';if(!file||importing)return;
-    importing=true;$('import-library').disabled=true;
+    const file=event.target.files?.[0];event.target.value='';if(!file||importing)return;$('import-library').disabled=true;
     try{
-      status(`Reading ${file.name}…`);const data=JSON.parse(await file.text());
-      const nodes=data?.nodes,edges=data?.edges;if(!Array.isArray(nodes)||!Array.isArray(edges))throw Error('The JSON needs nodes and edges arrays.');
-      if(!nodes.length&&!edges.length)throw Error('The file contains no people or connections.');
-      await upload(nodes,edges,status);await refreshStats();status(`Import complete · ${nodes.length.toLocaleString()} people and ${edges.length.toLocaleString()} links processed without duplicates`);
-    }catch(error){status(error.status===401?'Sign in with ChatGPT, then choose the file again.':`Import stopped: ${error.message}`);}
-    finally{importing=false;$('import-library').disabled=false;if(pending){clearTimeout(timer);timer=setTimeout(sync,1000);}}
+      status(`Reading ${file.name} locally…`);const raw=await file.text();prepared=await prepareImport(JSON.parse(raw),raw,file.name);
+      const p=prepared;$('library-import-summary').textContent=`Ready to import ${p.nodes.length.toLocaleString()} people, ${p.edges.length.toLocaleString()} connections, and ${p.records.length.toLocaleString()} preserved source records.${p.skippedPeople||p.skippedConnections?` ${p.skippedPeople.toLocaleString()} invalid people and ${p.skippedConnections.toLocaleString()} unsupported connections will stay preserved in the source records but will not be added to the visual graph.`:''}`;$('library-import-preview').hidden=false;status('Review the totals, then confirm. Nothing has been uploaded yet.');
+    }catch(error){prepared=null;$('library-import-preview').hidden=true;status(`Import stopped: ${error.message}`);}
+    finally{$('import-library').disabled=false;}
   };
+  $('confirm-library-import').onclick=async()=>{if(!prepared||importing)return;importing=true;$('confirm-library-import').disabled=true;$('cancel-library-import').disabled=true;try{await upload(prepared,status);await refreshStats();status(`Import complete · ${prepared.nodes.length.toLocaleString()} people, ${prepared.edges.length.toLocaleString()} links, and ${prepared.records.length.toLocaleString()} source records processed without duplicates`);prepared=null;$('library-import-preview').hidden=true;}catch(error){status(error.status===401?'Sign in with ChatGPT, then confirm again.':`Import stopped: ${error.message}`);}finally{importing=false;$('confirm-library-import').disabled=false;$('cancel-library-import').disabled=false;if(pending){clearTimeout(timer);timer=setTimeout(sync,1000);}}};
+  $('cancel-library-import').onclick=()=>{prepared=null;$('library-import-preview').hidden=true;status('Import cancelled · nothing was uploaded.');};
   $('back-collection').onclick=()=>{showCollection();$('back-collection').hidden=true;};
   if(enabled)refreshStats().then(()=>status('Shared team library ready · discoveries save automatically while this page is open')).catch(error=>{if(error.status===401)status('Sign in with ChatGPT to contribute to the shared team library.');else{$('library-counts').textContent='Library unavailable';status('Open the hosted Orbit site to use the shared team library.');}});
   else status('Use the hosted Orbit site for permanent storage.');

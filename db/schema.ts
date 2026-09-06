@@ -11,3 +11,9 @@ export const evidence=sqliteTable('evidence',{
 export const apiRateLimits=sqliteTable('api_rate_limits',{
   key:text('key').primaryKey(),count:integer('count').notNull(),resetAt:integer('reset_at').notNull()
 });
+export const imports=sqliteTable('imports',{
+  owner:text('owner').notNull(),id:text('id').notNull(),fileName:text('file_name').notNull(),format:text('format').notNull(),schemaVersion:text('schema_version').notNull(),exportedAt:text('exported_at').notNull(),metadataJson:text('metadata_json').notNull(),firstSeen:text('first_seen').notNull(),lastSeen:text('last_seen').notNull()
+},t=>[primaryKey({columns:[t.owner,t.id]})]);
+export const importRecords=sqliteTable('import_records',{
+  owner:text('owner').notNull(),importId:text('import_id').notNull(),section:text('section').notNull(),recordIndex:integer('record_index').notNull(),dataJson:text('data_json').notNull()
+},t=>[primaryKey({columns:[t.owner,t.importId,t.section,t.recordIndex]}),index('import_records_section').on(t.owner,t.section)]);
