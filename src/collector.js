@@ -73,8 +73,21 @@ export function inspectLinkedIn() {
     const selected=candidate||mutual;
     const activity=links.find(a=>{try{const u=new URL(a.getAttribute('href'),url);return u.origin===location.origin&&u.pathname.startsWith(location.pathname.replace(/\/?$/,'/')+'recent-activity/')&&/\/recent-activity\/(?:all|posts)\/?$/.test(u.pathname);}catch{return false;}});
     const subtitle=main.querySelector('.text-body-medium');
-    const locationText=clean(main.querySelector('.text-body-small.inline.t-black--light.break-words,.pv-text-details__left-panel .text-body-small')?.textContent);
-    return {kind:'profile',url,activityUrl:activity?new URL(activity.getAttribute('href'),url).href:canonical(url)+'recent-activity/all/',person:{url:canonical(url),name:clean(title.textContent),headline:clean(subtitle?.textContent),location:locationText,about:sectionText('about',4000),experience:sectionText('experience',6000),education:sectionText('education',4000),skills:sectionText('skills',3000)},listUrl:selected?new URL(selected.getAttribute('href'),url).href:null,scope:candidate?'connections':mutual?'mutuals_only':'hidden',totalLabel:clean(candidate?.textContent)};
+    let locationText=clean(main.querySelector('.text-body-small.inline.t-black--light.break-words,.pv-text-details__left-panel .text-body-small')?.textContent),headline=clean(subtitle?.textContent);
+    // Current profiles use generated classes. Read only the displayed metadata row;
+    // the contact-info link is an anchor for its position, never opened or scraped.
+    const contact=links.find(a=>{try{const u=new URL(a.getAttribute('href'),url);return u.origin===location.origin&&u.pathname===new URL(canonical(url)).pathname+'overlay/contact-info/';}catch{return false;}});
+    const visible=e=>!e.closest('[hidden],[aria-hidden="true"]')&&e.style?.display!=='none';
+    let row=contact?.closest('p')?.parentElement;
+    if(row&&row!==main&&!row.querySelector('h1,h2,h3')){
+      const values=Array.from(row.querySelectorAll('p')).filter(e=>visible(e)&&!e.querySelector('a,button')).map(e=>clean(e.textContent)).filter(value=>value&&!/^[·•|]+$/.test(value)&&!/(?:connections?|followers?)$/i.test(value));
+      if(!locationText&&values.length===1)locationText=values[0];
+      const header=row.parentElement;
+      if(!headline&&header?.contains(title)){
+        headline=Array.from(header.children).filter(e=>e.tagName==='P'&&visible(e)).map(e=>clean(e.textContent)).find(value=>value&&!/^(?:[·•]\s*)?(?:1st|2nd|3rd\+?)$/.test(value)&&!/^\(?[\w]+\/[\w]+(?:\/[\w]+)?\)?$/.test(value))||'';
+      }
+    }
+    return {kind:'profile',url,activityUrl:activity?new URL(activity.getAttribute('href'),url).href:canonical(url)+'recent-activity/all/',person:{url:canonical(url),name:clean(title.textContent),headline,location:locationText,about:sectionText('about',4000),experience:sectionText('experience',6000),education:sectionText('education',4000),skills:sectionText('skills',3000)},listUrl:selected?new URL(selected.getAttribute('href'),url).href:null,scope:candidate?'connections':mutual?'mutuals_only':'hidden',totalLabel:clean(candidate?.textContent)};
   }
   const path=location.pathname.replace(/\/?$/,'/');
   const isOwn=path==='/mynetwork/invite-connect/connections/';

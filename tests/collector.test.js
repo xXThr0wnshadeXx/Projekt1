@@ -140,3 +140,15 @@ test('activity pagination uses one explicit Show more results action',async()=>{
   globalThis.getComputedStyle=()=>{throw Error('Must not also scroll');};
   assert.equal(advanceComments(activityProfile,{action:'scroll'}),'expanded');assert.equal(clicks,1);
 });
+
+
+test('current profile metadata supplies location and headline without old CSS classes',()=>{
+  const html='<main><section aria-label="Primary content"><div><div><h2>Example Person</h2><p>They/Them</p><p>· 1st</p></div><p>Computer Science @ Example College</p><div><p>Greater Example Metro</p><p>·</p><p><a href="/in/test-root/overlay/contact-info/">Contact info</a></p></div></div><h2>Activity</h2><p>A post about Paris</p></section><aside><p>Wrong Location</p></aside></main>';
+  const snap=page(html,profile);assert.equal(snap.person.location,'Greater Example Metro');assert.equal(snap.person.headline,'Computer Science @ Example College');
+});
+test('metadata extraction does not use another profile contact link or ambiguous rows',()=>{
+  const other=page('<main><h2>Example</h2><div><p>Wrong City</p><p><a href="/in/other/overlay/contact-info/">Contact info</a></p></div></main>',profile);
+  assert.equal(other.person.location,'');
+  const ambiguous=page('<main><h2>Example</h2><div><p>Engineer</p><p>Example City</p><p><a href="/in/test-root/overlay/contact-info/">Contact info</a></p></div></main>',profile);assert.equal(ambiguous.person.location,'');
+  const hidden=page('<main><h2>Example</h2><div><p hidden>Hidden City</p><p>Visible City</p><p>·</p><p><a href="/in/test-root/overlay/contact-info/">Contact info</a></p></div></main>',profile);assert.equal(hidden.person.location,'Visible City');
+});
