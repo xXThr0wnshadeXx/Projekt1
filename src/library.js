@@ -23,7 +23,7 @@ export function createLibrary({getCollection,showGraph,showCollection}){
   async function lookup(url){
     try{
       status('Loading saved connections…');const data=await api('graph?url='+encodeURIComponent(url)+'&depth=2&limit=1000');
-      if(!data.found){status('This person is not in your library yet. Collect or import a network containing them.');return;}
+      if(!data.found){status('This person is not in your library yet. Collect a network containing them.');return;}
       const nodes=Object.fromEntries(data.nodes.map(p=>[p.id,p])),edges=Object.fromEntries(data.edges.map(e=>[e.id,e]));
       showGraph({schemaVersion:1,id:'library:'+data.root+':'+Date.now(),root:data.root,nodes,edges,branches:{},queue:[],status:'imported',cloudView:true,pages:0,config:{maxNodes:1000,depth:2,delay:120},createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),reason:data.truncated?'Showing a bounded sample of saved connections. Search another person to explore from there.':'Loaded observed connections from your permanent library.'});
       $('back-collection').hidden=false;status(data.truncated?'Saved neighborhood loaded · sample limited to keep the map responsive':'Saved neighborhood loaded · no LinkedIn requests');

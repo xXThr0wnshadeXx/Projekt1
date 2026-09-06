@@ -10,8 +10,8 @@ out=root/'out'
 if out.exists():rmtree(out)
 (out/'src').mkdir(parents=True)
 (out/'downloads').mkdir()
-for name in ['index.html','styles.css']:copy2(root/name,out/name)
-for name in ['app.js','core.js','graph.js','companion.js','library.js']:copy2(root/'src'/name,out/'src'/name)
+for name in ['index.html','setup.html','map.html','styles.css']:copy2(root/name,out/name)
+for name in ['app.js','core.js','graph.js','companion.js','library.js','onboarding.js','workspace.js','filters.js']:copy2(root/'src'/name,out/'src'/name)
 copy2(root/'dist/orbit-network-mapper.zip',out/'downloads/orbit-network-mapper.zip')
 assert (out/'index.html').is_file()
 assert json.loads((root/'.openai/hosting.json').read_text())['d1']=='DB'

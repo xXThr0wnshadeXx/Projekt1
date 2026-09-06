@@ -249,3 +249,36 @@ Keep credentials, browser profiles, personal datasets, and database dumps out of
 - [Cloudflare D1 limits](https://developers.cloudflare.com/d1/platform/limits/)
 - [LinkedIn connection API documentation](https://learn.microsoft.com/en-us/linkedin/shared/integrations/people/connections-api)
 - [LinkedIn prohibited software guidance](https://www.linkedin.com/help/linkedin/answer/a1341387)
+
+## Homepage and onboarding
+
+The root `index.html` is the welcome page. `setup.html` collects a validated
+LinkedIn profile URL before opening `map.html`. Profiles are remembered on the
+current device, scoped to the authenticated Sites user. This is a starting URL,
+not LinkedIn OAuth or verified ownership of the profile.
+
+The hosted setup/workspace routes require the existing trusted Sites identity;
+`GET /api/session` exposes only the current user's session with no-store caching.
+Localhost and the Chrome companion remain device-local tools and do not create
+accounts. The local homepage explicitly labels this as a preview.
+
+**Google account creation is not enabled.** The homepage displays its unavailable
+state rather than simulating authentication. Before enabling it, the project
+owner must confirm the hosting platform's external identity support, configure
+a Google OAuth web client for the final domain and callback, store its secret in
+the hosting secret manager, and implement verified server sessions with explicit
+library ownership mapping. Do not substitute browser flags or email alone for
+authentication. Existing library identities must not be silently reassigned.
+
+Graph zoom buttons change magnification by 8%. Scroll zoom is off by default;
+when enabled it uses small bounded changes around the pointer. New discoveries
+do not recenter or rescale the current view; use Fit when desired. The companion
+opens `map.html` directly. Reload the unpacked extension after this update.
+
+## Database-first workspace
+
+Network file import and JSON/CSV export have been removed from the workspace,
+including the companion IMPORT message handler. Use the saved library to find
+and view database records. The local preview still has no database backend.
+Earlier import/export instructions above describe the original 2.0.0 baseline
+and no longer apply to the current interface.

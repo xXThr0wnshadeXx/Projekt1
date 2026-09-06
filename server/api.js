@@ -2,6 +2,10 @@ import {ingest,stats,search,neighborhood} from './database.js';
 const json=(value,status=200)=>Response.json(value,{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
 export async function handleAPI(request,env){
   const url=new URL(request.url);
+  if(url.pathname==='/api/session'&&request.method==='GET'){
+    const id=request.headers.get('oai-authenticated-user-id');
+    return json(id?{authenticated:true,id,email:request.headers.get('oai-authenticated-user-email')}:{authenticated:false});
+  }
   if(url.pathname.startsWith('/api/')){
     const owner=request.headers.get('oai-authenticated-user-id');if(!owner)return json({error:'Sign in to this private Site to use the library.'},401);
     if(!env.DB)return json({error:'The database is not available.'},503);

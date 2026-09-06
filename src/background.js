@@ -1,4 +1,4 @@
-import {newState,options,profileURL,listURL,sameList,sameConnectionOwner,addPerson,ingestPage,log,importGraph} from './core.js';
+import {newState,options,profileURL,listURL,sameList,sameConnectionOwner,addPerson,ingestPage,log} from './core.js';
 import {inspectLinkedIn,advanceLinkedIn} from './collector.js';
 import {SITE_ORIGIN} from './companion.js';
 
@@ -183,7 +183,6 @@ async function tick(){
 async function command(message){
   if(message.type==='PING')return {ok:true,name:'Orbit',version:VERSION};
   if(message.type==='GET_STATE'){const s=await read(),revision=s?`${s.id}:${s.revision||0}:${s.updatedAt}`:'empty';return message.revision===revision?{ok:true,unchanged:true,revision}:{ok:true,state:s,revision};}
-  if(message.type==='IMPORT'){const old=await read();if(old&&['running','paused','limit'].includes(old.status))throw Error('Clear the existing collection before importing another network.');const s=importGraph(message.data);await save(s);await schedule(s);return {ok:true};}
   if(message.type==='START'){
     const old=await read();if(old&&['running','paused','limit'].includes(old.status))throw Error('Export or clear the current collection before starting another.');
     const s=newState(message.url,message.config);s.engineVersion=2;await save(s);await schedule(s);await tick();return {ok:true};
@@ -213,7 +212,7 @@ chrome.runtime.onMessageExternal?.addListener((message,sender,reply)=>{
 });
 chrome.alarms.onAlarm.addListener(alarm=>{if(alarm.name===ALARM)serialize(tick);});
 chrome.tabs.onUpdated?.addListener((id,change)=>{if(change.status==='complete'&&cached?.status==='running'&&cached.workers?.some(w=>w.tabId===id))wake(0);});
-chrome.action.onClicked.addListener(()=>chrome.tabs.create({url:chrome.runtime.getURL('index.html')}));
+chrome.action.onClicked.addListener(()=>chrome.tabs.create({url:chrome.runtime.getURL('map.html')}));
 chrome.runtime.onStartup.addListener(()=>serialize(async()=>{
   const s=await read();if(!s)return;
   for(const w of workers(s)){if(w.current)s.queue.unshift(w.current.job);w.current=null;w.tabId=null;}

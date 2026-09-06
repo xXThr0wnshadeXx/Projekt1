@@ -4,12 +4,12 @@ import {NetworkGraph} from '../src/graph.js';
 import {newState,addPerson,addEdge} from '../src/core.js';
 const root='https://www.linkedin.com/in/root/',source='https://www.linkedin.com/search/results/people/?connectionOf=root';
 function graph(t){
-  let callback,scheduled=0;const arcs=[];
+  let callback,scheduled=0;const arcs=[],handlers={};
   t.mock.method(globalThis,'requestAnimationFrame',fn=>{callback=fn;return ++scheduled;});
   globalThis.ResizeObserver=class {observe(){}};globalThis.window={devicePixelRatio:1};
   const context=new Proxy({arc(x,y,r){arcs.push({x,y,r});}},{get:(o,k)=>o[k]||(()=>{})});
-  const canvas={getContext:()=>context,addEventListener(){},parentElement:{getBoundingClientRect:()=>({width:1000,height:700})}};
-  const g=new NetworkGraph(canvas,()=>{});g.resize();return {g,arcs,paint(now){const fn=callback;callback=null;fn?.(now);},get scheduled(){return scheduled;}};
+  const canvas={getContext:()=>context,addEventListener(name,fn){handlers[name]=fn;},parentElement:{getBoundingClientRect:()=>({width:1000,height:700})}};
+  const g=new NetworkGraph(canvas,()=>{});g.resize();return {g,arcs,handlers,paint(now){const fn=callback;callback=null;fn?.(now);},get scheduled(){return scheduled;}};
 }
 // Node has no animation frame API; these tests exercise timing/layout without a browser.
 globalThis.requestAnimationFrame=()=>0;
@@ -31,4 +31,31 @@ test('10,000-node layout has a bounded reveal window and supports reduced motion
   assert.equal(h.g.points.length,10000);assert.ok(h.g.points.at(-1).bornAt-h.g.points[0].bornAt<=1200);assert.ok(elapsed<5000,`10k graph setup took ${elapsed}ms`);
   h.g.reducedMotion=true;const copy={...s,id:'new'};h.g.setData(copy);h.paint(performance.now());assert.equal(h.g.frame,null);
   t.diagnostic(`Synthetic 10,000 people / 9,999 edges: data assembly + layout ${elapsed.toFixed(0)}ms (no browser paint or LinkedIn network time).`);
+});
+
+test('scroll is opt-in, zoom is bounded and anchored, arrivals preserve the viewport',t=>{
+  const h=graph(t),s=newState(root);h.g.setData(s);
+  let prevented=false;
+  const wheel={deltaY:1000,deltaMode:0,offsetX:170,offsetY:220,preventDefault(){prevented=true;}};
+  const initial=h.g.scale;
+  h.handlers.wheel(wheel);assert.equal(h.g.scale,initial);assert.equal(prevented,false);
+  h.g.scrollZoom=true;
+  const before=(wheel.offsetX-h.g.w/2-h.g.offset.x)/h.g.scale;
+  h.handlers.wheel(wheel);assert.equal(prevented,true);assert.ok(h.g.scale/initial>.95);
+  assert.ok(Math.abs((wheel.offsetX-h.g.w/2-h.g.offset.x)/h.g.scale-before)<1e-9);
+  const scale=h.g.scale,offset={...h.g.offset};
+  for(let i=0;i<50;i++)addPerson(s,{url:`https://www.linkedin.com/in/new-${i}/`,name:`New ${i}`},1);
+  h.g.setData(s);assert.equal(h.g.scale,scale);assert.deepEqual(h.g.offset,offset);
+  h.g.fit();assert.notEqual(h.g.scale,scale);
+});
+test('group movement survives refreshes, settles and resets without losing people',t=>{
+ const h=graph(t),s=newState(root);
+ for(let i=0;i<8;i++)addPerson(s,{url:`https://www.linkedin.com/in/group-${i}/`,name:`Person ${i}`,location:i%2?'Paris':'Boston'},1);
+ h.g.setData(s);h.g.setFilters({},'location');assert.notEqual(h.g.motion,null);
+ const start=h.g.motion;h.g.setData(s);assert.equal(h.g.motion,start);
+ h.paint(start+1000);assert.equal(h.g.motion,null);
+ for(const p of h.g.points){assert.equal(p.x,p.tx);assert.equal(p.y,p.ty);}
+ h.g.reducedMotion=true;h.g.setFilters({location:'boston'},'location');assert.equal(h.g.motion,null);assert.equal(h.g.points.filter(p=>h.g.isVisible(p)).length,4);
+ h.g.setFilters({},'none');for(const p of h.g.points){assert.equal(p.x,p.homeX);assert.equal(p.y,p.homeY);}
+ h.g.setData({...s,id:'different'});for(const p of h.g.points)assert.ok(Number.isFinite(p.x));
 });
