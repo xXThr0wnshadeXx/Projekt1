@@ -1,10 +1,10 @@
 import {newState,options,profileURL,listURL,sameList,sameConnectionOwner,addPerson,ingestPage,log} from './core.js';
 import {inspectLinkedIn,advanceLinkedIn} from './collector.js';
-import {SITE_ORIGIN} from './companion.js';
+import {SITE_ORIGIN,COMPANION_VERSION} from './companion.js';
 
-const KEY='orbitNetwork',ALARM='orbit-collect',VERSION='2.3.0';
+const KEY='orbitNetwork',ALARM='orbit-collect',VERSION=COMPANION_VERSION;
 const POLL=1000,SETTLE=200,LOAD_TIMEOUT=60000,UNCHANGED_TIMEOUT=15000;
-let chain=Promise.resolve(),cached,timer=null,timerAt=Infinity;
+let chain=Promise.resolve(),cached,timer=null,timerAt=Infinity,workspaceTabs=new Map();
 const serialize=fn=>{const p=chain.then(fn);chain=p.catch(()=>{});return p;};
 const read=async()=>{if(cached===undefined)cached=(await chrome.storage.local.get(KEY))[KEY]||null;return cached;};
 function workers(s){
@@ -249,13 +249,18 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
 chrome.runtime.onMessageExternal?.addListener((message,sender,reply)=>{
   let origin;try{origin=new URL(sender.url).origin;}catch{return false;}
   if(origin!==SITE_ORIGIN)return false;
+  if(sender.tab?.id)workspaceTabs.set(sender.tab.id,{id:sender.tab.id,windowId:sender.tab.windowId,lastSeen:Date.now()});
   serialize(()=>command(message)).then(reply,e=>reply({ok:false,error:e.message}));return true;
 });
 chrome.alarms.onAlarm.addListener(alarm=>{if(alarm.name===ALARM)serialize(tick);});
 chrome.tabs.onUpdated?.addListener((id,change)=>{if(change.status==='complete'&&cached?.status==='running'&&cached.workers?.some(w=>w.tabId===id))wake(0);});
 // The Site is the only user-facing workspace. The extension stays in the
 // background and supplies collection capabilities through external messages.
-chrome.action.onClicked.addListener(()=>chrome.tabs.create({url:`${SITE_ORIGIN}/map.html?source=companion`}));
+async function openWorkspace(){
+  for(const remembered of [...workspaceTabs.values()].sort((a,b)=>b.lastSeen-a.lastSeen)){try{const existing=await chrome.tabs.get(remembered.id);if(chrome.windows?.update&&existing.windowId)await chrome.windows.update(existing.windowId,{focused:true});await chrome.tabs.update(existing.id,{active:true});remembered.lastSeen=Date.now();return existing;}catch{workspaceTabs.delete(remembered.id);}}
+  const created=await chrome.tabs.create({url:`${SITE_ORIGIN}/map.html?source=companion`});workspaceTabs.set(created.id,{id:created.id,windowId:created.windowId,lastSeen:Date.now()});return created;
+}
+chrome.action.onClicked.addListener(()=>openWorkspace().catch(()=>chrome.tabs.create({url:`${SITE_ORIGIN}/map.html?source=companion`})));
 chrome.runtime.onStartup.addListener(()=>serialize(async()=>{
   const s=await read();if(!s)return;
   for(const w of workers(s)){if(w.current)s.queue.unshift(w.current.job);w.current=null;w.tabId=null;}

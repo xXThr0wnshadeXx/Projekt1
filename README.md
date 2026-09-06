@@ -7,7 +7,7 @@ Orbit builds an evidence-backed graph from LinkedIn pages that a contributor can
 - **Canonical application:** [orbit-shreev2703-graph-test.shreev2703.chatgpt.site](https://orbit-shreev2703-graph-test.shreev2703.chatgpt.site/)
 - **Repository:** [xXThr0wnshadeXx/Projekt1](https://github.com/xXThr0wnshadeXx/Projekt1)
 - **Companion download:** [download the current ZIP](https://orbit-shreev2703-graph-test.shreev2703.chatgpt.site/downloads/orbit-network-mapper.zip)
-- **Current application and companion version:** `2.3.0`
+- **Current application and companion version:** `2.4.0`
 
 This is the single supported hosted application and database. Do not use the retired Turso setup or the older `doublejav.chatgpt.site` deployment.
 
@@ -21,7 +21,7 @@ This is the single supported hosted application and database. Do not use the ret
 6. Reload the hosted Orbit page. Orbit connects to the companion automatically; use **Connect companion** only if it needs another attempt.
 7. Enter a full LinkedIn profile URL and start the collection.
 
-Each contributor installs the companion in their own Chrome profile because it reads their own visible LinkedIn pages. They do not run a database or web server. The hosted Site is the only workspace: clicking the extension icon returns to that Site instead of opening a second extension dashboard. Discoveries are sent to the same hosted API and merged into the same graph.
+Each contributor installs the companion in their own Chrome profile because it reads their own visible LinkedIn pages. They do not run a database or web server. The hosted Site is the only workspace: clicking the extension icon focuses the most recently used Orbit Site tab, or opens one only when none exists. Discoveries are sent to the same hosted API and merged into the same graph.
 
 ## One deployment model
 
@@ -173,7 +173,7 @@ manifest.json          Chrome companion manifest and allowed Site origin
 
 Pushing GitHub does not automatically publish Sites. The Sites version is production. Do not create another Site or database for ordinary development.
 
-After companion changes, also run `npm run package`, copy `dist/orbit-network-mapper.zip` to `downloads/orbit-network-mapper.zip`, and commit the refreshed download. Installed unpacked extensions do not update themselves; teammates must replace the files and click **Reload** in `chrome://extensions`.
+After companion changes, also run `npm run package`, copy `dist/orbit-network-mapper.zip` to `downloads/orbit-network-mapper.zip`, and commit the refreshed download. Installed unpacked extensions do not update themselves. The Site compares its current companion version with the version reported by Chrome and shows a small update notice when they differ; teammates then replace the files and click **Reload** in `chrome://extensions`.
 
 ## Capacity and limitations
 
