@@ -6,7 +6,7 @@ Orbit collects visible connection relationships through a local Chrome companion
 - **Hosted application:** [Orbit](https://orbit-network-mapper.doublejav.chatgpt.site/)
 - **Current application / companion version:** `2.0.0`
 
-The repository is named `Projekt1`; the application is named **Orbit**. The source is public, but the deployed application currently has owner-only access. GitHub access does not grant access to the Site or its database. Ask the project owner for the appropriate development/deployment access.
+The repository is named `Projekt1`; the application is named **Orbit**. Both the source and the hosted application are public. Anyone can open the interface and download the companion. **Sign in with ChatGPT** inside Orbit to use the permanent library; records remain private to each signed-in account. Public viewing does not grant deployment permissions or access to another user's data. Ask the project owner for development/deployment access when needed.
 
 ## Start here
 
@@ -30,7 +30,9 @@ npm run build
 npm run preview
 ```
 
-Open [http://127.0.0.1:8770](http://127.0.0.1:8770). Stop the preview with Ctrl+C. If port 8770 is occupied, stop the old preview process before restarting it.
+Open [http://127.0.0.1:8770](http://127.0.0.1:8770). Stop the preview with Ctrl+C. If port 8770 is occupied, stop the old preview process before restarting it, or choose a port with `npm run preview -- --port 8771`.
+
+The preview packages the Chrome companion at startup and serves it at `/downloads/orbit-network-mapper.zip`, so the page's download buttons work locally without a production build. Restart the preview after companion source changes to refresh the download. Use `npm run preview`, not a bare `python3 -m http.server`: a generic server does not map that download URL to the generated ZIP.
 
 **The preview is a static Python server, not a local backend.** It serves the UI and supports local Orbit JSON import/export, graph rendering, and directory work. `/api/library/*` is unavailable there. A library connection error in this preview is expected. There is currently no `npm run dev`, local Worker/D1 emulator, or automated GitHub-to-production deployment.
 
@@ -108,6 +110,7 @@ drizzle.config.ts          Migration generation configuration
 vite.config.js            Worker bundle and Sites metadata plugin
 .openai/hosting.json       Existing Site project ID and logical DB binding
 tools/package.py           Packages the Chrome companion
+tools/preview.py           Local UI server and companion download route
 tools/build.py             Builds assets, companion download, and Worker artifact
 tests/                     Unit tests and isolated synthetic UI fixtures
 ```
@@ -195,13 +198,21 @@ Before a PR, run the checks relevant to the change and the production build. Inc
 
 ## Troubleshooting
 
+### Hosted Orbit says “You don't have access to this site”
+
+The Site has been changed from owner-only access to public access. Reopen the main Orbit URL or refresh an old access-denied page. The interface and companion download do not require sign-in. Permanent library access does: use the **Sign in with ChatGPT** link in the library panel. Chrome profiles have separate sessions, and different signed-in accounts still have separate libraries. If access is still denied, ask the owner to verify the Site's current audience in Sites settings.
+
+### Local companion download says “No internet connection” or returns 404
+
+Pull the current code, stop the old local server with Ctrl+C, and run `npm run preview` again. The preview prints the packaged ZIP path and the local URL. Open that URL and retry the download. The previous generic Python server did not serve the `/downloads/` path; restarting with the new preview script fixes that missing route. Unzip the file before using Chrome's **Load unpacked**.
+
 ### Companion is disconnected
 
 Use Chrome with the installed extension in the same browser profile, reload the extension, refresh the hosted page, and connect again. Check the extension ID and both origin allowlists if using a development deployment. The local preview is not on the external-message allowlist.
 
 ### Library says it is unavailable or not yet saved
 
-The Python preview has no library API. On the hosted Site, verify that you are signed in and that your account has access. Check the browser Network panel for `/api/library/*` responses. A 503 points to a missing `DB` binding; a 400 can indicate invalid imported evidence or missing endpoints. Keep the page open for retry, and do not clear the checkpoint until saving succeeds. Never share session cookies or auth headers in a bug report.
+The Python preview has no library API. On the hosted Site, use **Sign in with ChatGPT** if prompted. Check the browser Network panel for `/api/library/*` responses. A 503 points to a missing `DB` binding; a 400 can indicate invalid imported evidence or missing endpoints. Keep the page open for retry, and do not clear the checkpoint until saving succeeds. Never share session cookies or auth headers in a bug report.
 
 ### Pages increase but the people count stays still
 

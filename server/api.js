@@ -7,7 +7,7 @@ export async function handleAPI(request,env){
     return json(id?{authenticated:true,id,email:request.headers.get('oai-authenticated-user-email')}:{authenticated:false});
   }
   if(url.pathname.startsWith('/api/')){
-    const owner=request.headers.get('oai-authenticated-user-id');if(!owner)return json({error:'Sign in to this private Site to use the library.'},401);
+    const owner=request.headers.get('oai-authenticated-user-id');if(!owner)return json({error:'Sign in with ChatGPT to use your private library.'},401);
     if(!env.DB)return json({error:'The database is not available.'},503);
     if(request.method==='POST'&&request.headers.get('origin')!==url.origin)return json({error:'Invalid request origin.'},403);
     try{

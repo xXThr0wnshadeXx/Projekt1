@@ -3,7 +3,7 @@ export function createLibrary({getCollection,showGraph,showCollection}){
   const $=id=>document.getElementById(id),enabled=location.protocol==='https:'||location.hostname==='127.0.0.1';
   let pending=null,saving=false,timer=null,searchTimer=null,searchSerial=0;
   const savedNodes=new Map(),savedEdges=new Map();
-  async function api(path,body){const r=await fetch('/api/library/'+path,{method:body?'POST':'GET',headers:body?{'Content-Type':'application/json'}:undefined,body:body?JSON.stringify(body):undefined});const data=await r.json();if(!r.ok)throw Error(data.error||'Library request failed.');return data;}
+  async function api(path,body){const r=await fetch('/api/library/'+path,{method:body?'POST':'GET',headers:body?{'Content-Type':'application/json'}:undefined,body:body?JSON.stringify(body):undefined});const data=await r.json();if(r.status===401){$('library-signin').hidden=false;$('library-counts').textContent='Sign in to view your saved library';}else if(r.ok)$('library-signin').hidden=true;if(!r.ok){const error=Error(data.error||'Library request failed.');error.status=r.status;throw error;}return data;}
   const status=text=>{$('library-status').textContent=text;};
   async function refreshStats(){const s=await api('stats');$('library-counts').textContent=`${Number(s.people).toLocaleString()} people · ${Number(s.connections).toLocaleString()} links saved`;}
   async function sync(){
@@ -16,7 +16,7 @@ export function createLibrary({getCollection,showGraph,showCollection}){
         for(let i=0;i<entries.length;i+=100){const batch=entries.slice(i,i+100);await api('ingest',{nodes:[],edges:[],[key]:batch.map(v=>v.value)});for(const e of batch)cache.set(e.value.id,e.signature);}
       }
       status(`Saved to library · ${new Date().toLocaleTimeString()}`);await refreshStats();
-    }catch(error){pending ||= snapshot;status(`Not yet saved: ${error.message}. Will retry.`);}
+    }catch(error){pending ||= snapshot;status(error.status===401?'Sign in with ChatGPT to save this collection to your private library.':`Not yet saved: ${error.message}. Will retry.`);}
     finally{saving=false;if(pending){clearTimeout(timer);timer=setTimeout(sync,30000);}}
   }
   function queue(state){if(!enabled||!state||state.cloudView)return;pending=state;clearTimeout(timer);timer=setTimeout(sync,2000);}
@@ -41,7 +41,7 @@ export function createLibrary({getCollection,showGraph,showCollection}){
   $('library-form').onsubmit=e=>{e.preventDefault();const value=$('library-query').value.trim();if(value.startsWith('https://'))lookup(value);};
   $('save-library').onclick=()=>{queue(getCollection());clearTimeout(timer);sync();};
   $('back-collection').onclick=()=>{showCollection();$('back-collection').hidden=true;};
-  if(enabled)refreshStats().then(()=>status('Private library ready · discoveries save automatically while this page is open')).catch(()=>status('Open the hosted Orbit site to use the permanent library.'));
+  if(enabled)refreshStats().then(()=>status('Private library ready · discoveries save automatically while this page is open')).catch(error=>{if(error.status===401)status('Orbit is public. Sign in with ChatGPT to use your private permanent library.');else{$('library-counts').textContent='Library unavailable';status('Open the hosted Orbit site to use the permanent library.');}});
   else status('Use the hosted Orbit site for permanent storage.');
   return {queue};
 }
