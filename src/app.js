@@ -113,7 +113,7 @@ graph.onZoom=(scale,ratio=graph.zoomRatio())=>{if($('zoom-level'))set('zoom-leve
 graph.onZoom(graph.scale,graph.zoomRatio());
 
 function activeKeywords(){return keywordTerms($('filter-keywords').value);}
-function activeFilters(){return {location:$('filter-location').value.trim(),field:$('filter-field').value.trim(),keywords:activeKeywords(),relationship:$('filter-relationship').value,first:$('degree-first').checked,second:$('degree-second').checked,extended:$('degree-extended').checked,maxDepth:Number($('max-distance').value)};}
+function activeFilters(){return {location:$('filter-location').value.trim(),field:$('filter-field').value.trim(),keywords:activeKeywords(),relationship:$('filter-relationship').value,maxDepth:Number($('max-distance').value)};}
 function syncArrangementButtons(){for(const [id,value] of [['arrange-network','none'],['arrange-location','location']])$(id).setAttribute('aria-pressed',String(value===mapArrangement&&!graph.treeRoot));}
 function closeTreeView(){if(!graph.treeRoot)return;graph.clearTree();show('tree-focus',false);if(selected)graph.focus(selected,route(state,selected));syncArrangementButtons();}
 function openPersonTree(person){$('search').value='';graph.search('');mapArrangement='none';syncArrangementButtons();const summary=graph.showTree(person.id);if(!summary){toast('No observed connection tree is available for this person yet.');return;}set('tree-focus-name',person.name);set('tree-focus-count',`${summary.direct.toLocaleString()} nearby · ${summary.extended.toLocaleString()} one more step away`);show('tree-focus',true);graph.focus(person.id,[]);switchView('graph');$('inspector').close();toast(`Centered the map on ${person.name}. Select any visible person to keep exploring.`);}
@@ -133,8 +133,8 @@ $('arrange-network').onclick=()=>arrangeMap('none');
 $('arrange-location').onclick=()=>arrangeMap('location');
 $('exit-tree').onclick=()=>closeTreeView();
 for(const id of ['filter-location','filter-field','filter-keywords'])$(id).oninput=applyFilters;
-  for(const id of ['filter-relationship','degree-first','degree-second','degree-extended','max-distance'])$(id).onchange=applyFilters;
-  $('reset-filters').onclick=()=>{for(const id of ['filter-location','filter-field','filter-keywords'])$(id).value='';$('filter-relationship').value='all';for(const id of ['degree-first','degree-second','degree-extended'])$(id).checked=true;$('max-distance').value='6';applyFilters();};
+  for(const id of ['filter-relationship','max-distance'])$(id).onchange=applyFilters;
+  $('reset-filters').onclick=()=>{for(const id of ['filter-location','filter-field','filter-keywords'])$(id).value='';$('filter-relationship').value='all';$('max-distance').value='6';applyFilters();};
 
 $('cancel-build').onclick=async()=>{try{await send({type:'CANCEL'});await refresh();toast('This collection run stopped. Every discovered person already saved remains in your account network.');}catch(e){toast(e.message);}};
 $('filter-lines').onchange=e=>{graph.showAllConnections=e.target.checked;graph.draw();};
