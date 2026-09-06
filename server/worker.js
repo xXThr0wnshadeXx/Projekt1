@@ -7,8 +7,9 @@ export default {async fetch(request,env){
   const databaseEnv = {
     ...env,
     // The hosted Site supplies the built-in D1 DB binding. Every signed-in
-    // contributor writes to the same demo graph, while rate limits still use
-    // each contributor's authenticated identity.
+    // contributor writes to the same demo graph through the authenticated API.
+    // Application rate limiting remains available but is off during team testing.
+    ORBIT_RATE_LIMIT_ENABLED: env.ORBIT_RATE_LIMIT_ENABLED || 'false',
     SHARED_OWNER: SHARED_WORKSPACE,
   };
   const response=await handleAPI(request,databaseEnv);if(response)return response;

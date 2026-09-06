@@ -1,13 +1,27 @@
 // The hosted page uses its Sites session; no LinkedIn credentials leave Chrome.
 export function createLibrary({getCollection,showGraph,showCollection}){
   const $=id=>document.getElementById(id),enabled=location.protocol==='https:'||location.hostname==='127.0.0.1';
-  let pending=null,saving=false,timer=null,searchTimer=null,searchSerial=0;
+  let pending=null,saving=false,importing=false,timer=null,searchTimer=null,searchSerial=0;
   const savedNodes=new Map(),savedEdges=new Map();
-  async function api(path,body){const r=await fetch('/api/library/'+path,{method:body?'POST':'GET',headers:body?{'Content-Type':'application/json'}:undefined,body:body?JSON.stringify(body):undefined});const data=await r.json();if(r.status===401){$('library-signin').hidden=false;$('library-counts').textContent='Sign in to view the shared team library';}else if(r.ok)$('library-signin').hidden=true;if(!r.ok){const error=Error(data.error||'Library request failed.');error.status=r.status;throw error;}return data;}
+  async function api(path,body){const r=await fetch('/api/library/'+path,{method:body?'POST':'GET',headers:body?{'Content-Type':'application/json'}:undefined,body:body?JSON.stringify(body):undefined});const data=await r.json();if(r.status===401){$('library-signin').hidden=false;$('library-counts').textContent='Sign in to view the shared team library';}else if(r.ok)$('library-signin').hidden=true;if(!r.ok){const error=Error(data.error||'Library request failed.');error.status=r.status;error.retryAfter=Number(r.headers.get('Retry-After'))||0;throw error;}return data;}
   const status=text=>{$('library-status').textContent=text;};
+  const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
   async function refreshStats(){const s=await api('stats');$('library-counts').textContent=`${Number(s.people).toLocaleString()} people · ${Number(s.connections).toLocaleString()} links saved`;}
+  async function ingestBatch(body,progress){
+    for(;;){
+      try{return await api('ingest',body);}
+      catch(error){if(error.status!==429)throw error;const seconds=Math.max(1,error.retryAfter||60);progress(`Rate limit reached · continuing automatically in ${seconds} seconds…`);await delay(seconds*1000);}
+    }
+  }
+  async function upload(nodes,edges,progress){
+    const total=nodes.length+edges.length;let uploaded=0;
+    for(const [key,items] of [['nodes',nodes],['edges',edges]])for(let i=0;i<items.length;i+=100){
+      const batch=items.slice(i,i+100);await ingestBatch({nodes:[],edges:[],[key]:batch},progress);uploaded+=batch.length;
+      progress(`Uploading to D1 · ${uploaded.toLocaleString()} of ${total.toLocaleString()} records`);
+    }
+  }
   async function sync(){
-    if(saving||!pending||!enabled)return;saving=true;
+    if(saving||importing||!pending||!enabled)return;saving=true;
     const snapshot=pending;pending=null;
     try{
       status('Saving discoveries to the shared team library…');
@@ -40,6 +54,18 @@ export function createLibrary({getCollection,showGraph,showCollection}){
   });
   $('library-form').onsubmit=e=>{e.preventDefault();const value=$('library-query').value.trim();if(value.startsWith('https://'))lookup(value);};
   $('save-library').onclick=()=>{queue(getCollection());clearTimeout(timer);sync();};
+  $('import-library').onclick=()=>$('library-import-file').click();
+  $('library-import-file').onchange=async event=>{
+    const file=event.target.files?.[0];event.target.value='';if(!file||importing)return;
+    importing=true;$('import-library').disabled=true;
+    try{
+      status(`Reading ${file.name}…`);const data=JSON.parse(await file.text());
+      const nodes=data?.nodes,edges=data?.edges;if(!Array.isArray(nodes)||!Array.isArray(edges))throw Error('The JSON needs nodes and edges arrays.');
+      if(!nodes.length&&!edges.length)throw Error('The file contains no people or connections.');
+      await upload(nodes,edges,status);await refreshStats();status(`Import complete · ${nodes.length.toLocaleString()} people and ${edges.length.toLocaleString()} links processed without duplicates`);
+    }catch(error){status(error.status===401?'Sign in with ChatGPT, then choose the file again.':`Import stopped: ${error.message}`);}
+    finally{importing=false;$('import-library').disabled=false;if(pending){clearTimeout(timer);timer=setTimeout(sync,1000);}}
+  };
   $('back-collection').onclick=()=>{showCollection();$('back-collection').hidden=true;};
   if(enabled)refreshStats().then(()=>status('Shared team library ready · discoveries save automatically while this page is open')).catch(error=>{if(error.status===401)status('Sign in with ChatGPT to contribute to the shared team library.');else{$('library-counts').textContent='Library unavailable';status('Open the hosted Orbit site to use the shared team library.');}});
   else status('Use the hosted Orbit site for permanent storage.');
