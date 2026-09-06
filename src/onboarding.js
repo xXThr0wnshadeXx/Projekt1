@@ -9,9 +9,19 @@ export async function session(){
 }
 export function profileKey(user){return `orbitProfile:${user.local?'local':user.id}`;}
 if($('google-signin')){
-  $('auth-status').textContent='Google sign-in is coming soon. Account setup is not yet available through Google.';
+  const requestedReturnTo=new URLSearchParams(location.search).get('return_to');
+  const returnTo=requestedReturnTo&&requestedReturnTo.startsWith('/')&&!requestedReturnTo.startsWith('//')?requestedReturnTo:'/setup.html';
   if(localPreview){$('local-preview').hidden=false;$('preview-note').hidden=false;}
-  else {$('existing-signin').hidden=false;}
+  else {
+    $('existing-signin').hidden=false;
+    $('existing-signin').href='/signin-with-chatgpt?return_to='+encodeURIComponent(returnTo);
+    session().then(user=>{
+      if(!user.googleEnabled){$('auth-status').textContent='Google sign-in is not configured for this Site yet. You can continue with ChatGPT.';return;}
+      $('google-signin').disabled=false;
+      $('google-signin').onclick=()=>location.assign('/auth/google/start?return_to='+encodeURIComponent(returnTo));
+      $('auth-status').textContent='Use your Google account to continue. Orbit only requests basic account identity.';
+    }).catch(()=>{$('auth-status').textContent='Account sign-in is temporarily unavailable. Please reload and try again.';});
+  }
 }
 if($('onboarding-form')){
   try{

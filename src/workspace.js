@@ -1,7 +1,7 @@
 import {session,profileKey} from './onboarding.js';
 try {
   const user=await session();
-  if(!user.local&&!user.authenticated)location.replace('/signin-with-chatgpt?return_to=%2Fsetup.html');
+  if(!user.local&&!user.authenticated)location.replace('/?return_to=%2Fsetup.html#login');
   else {
     const profile=localStorage.getItem(profileKey(user));
     const extension=location.protocol==='chrome-extension:';

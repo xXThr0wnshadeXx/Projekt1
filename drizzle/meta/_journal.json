@@ -15,6 +15,13 @@
       "when": 1788668040335,
       "tag": "0001_thin_shape",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1788748800000,
+      "tag": "0002_google_sessions",
+      "breakpoints": true
     }
   ]
 }

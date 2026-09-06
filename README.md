@@ -135,7 +135,17 @@ Authenticated routes are under `/api/library/`:
 - `GET /api/library/graph?url=...&depth=2&limit=1000` — bounded neighborhood;
 - `POST /api/library/ingest` — validate and merge a collection batch.
 
-`GET /api/session` reports whether Sites supplied a trusted identity. Clients cannot choose their own identity. Anonymous library requests return 401, cross-origin writes return 403, oversized bodies return 413, and a missing database binding returns 503.
+`GET /api/session` reports whether Sites supplied a trusted identity or a verified Google session. Clients cannot choose their own identity. Anonymous library requests return 401, cross-origin writes return 403, oversized bodies return 413, and a missing database binding returns 503.
+
+## Google sign-in setup
+
+Google sign-in is optional. The Site continues to support **Sign in with ChatGPT** when Google is not configured.
+
+1. In Google Cloud, create an OAuth 2.0 **Web application** client and add the exact production callback URL: `https://YOUR-SITE.chatgpt.site/auth/google/callback`.
+2. In the Site's server-side secret settings, add `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`. Never commit either value or place them in browser code.
+3. Deploy the same version that contains those settings, then open the landing page and select **Continue with Google**.
+
+The server uses OAuth authorization-code flow with PKCE and a short-lived state cookie. It requests only `openid`, `email`, and `profile`, then stores an opaque, seven-day server session in D1. The callback URL must exactly match Google Cloud's registered value.
 
 ## Repository layout
 

@@ -11,3 +11,6 @@ export const evidence=sqliteTable('evidence',{
 export const apiRateLimits=sqliteTable('api_rate_limits',{
   key:text('key').primaryKey(),count:integer('count').notNull(),resetAt:integer('reset_at').notNull()
 });
+export const googleSessions=sqliteTable('google_sessions',{
+  id:text('id').primaryKey(),actor:text('actor').notNull(),email:text('email'),expiresAt:integer('expires_at').notNull(),createdAt:integer('created_at').notNull()
+},t=>[index('google_sessions_expiry').on(t.expiresAt)]);

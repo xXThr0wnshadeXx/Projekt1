@@ -13,8 +13,8 @@ test('API rejects oversized bodies before parsing or writing',async()=>{
 
 test('session uses trusted identity, works without a database, and is never cached',async()=>{
   const anonymous=await handleAPI(new Request(base+'/api/session'),{});
-  assert.deepEqual(await anonymous.json(),{authenticated:false});
+  assert.deepEqual(await anonymous.json(),{authenticated:false,googleEnabled:false});
   assert.equal(anonymous.headers.get('Cache-Control'),'no-store');
   const signedIn=await handleAPI(new Request(base+'/api/session',{headers:{'oai-authenticated-user-id':'alice','oai-authenticated-user-email':'alice@example.com'}}),{});
-  assert.deepEqual(await signedIn.json(),{authenticated:true,id:'alice',email:'alice@example.com'});
+  assert.deepEqual(await signedIn.json(),{authenticated:true,id:'alice',email:'alice@example.com',provider:'chatgpt',googleEnabled:false});
 });

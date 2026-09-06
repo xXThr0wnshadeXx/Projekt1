@@ -1,5 +1,6 @@
 import assets from '../.build/assets.js';
 import {handleAPI} from './api.js';
+import {authenticatedActor} from './auth.js';
 
 const SHARED_WORKSPACE = 'demo-knowledge-graph';
 
@@ -14,7 +15,7 @@ export default {async fetch(request,env){
   };
   const response=await handleAPI(request,databaseEnv);if(response)return response;
   const url=new URL(request.url);
-  if(['/setup.html','/map.html'].includes(url.pathname)&&!request.headers.get('oai-authenticated-user-id'))return Response.redirect(url.origin+'/signin-with-chatgpt?return_to='+encodeURIComponent(url.pathname),302);
+  if(['/setup.html','/map.html'].includes(url.pathname)&&!await authenticatedActor(request,databaseEnv))return Response.redirect(url.origin+'/?return_to='+encodeURIComponent(url.pathname)+'#login',302);
   if(!['GET','HEAD'].includes(request.method))return new Response('Method not allowed',{status:405});
   const asset=assets[url.pathname==='/'?'/index.html':url.pathname];if(!asset)return new Response('Not found',{status:404});
   const bytes=asset.binary?Uint8Array.from(atob(asset.body),c=>c.charCodeAt(0)):asset.body;
