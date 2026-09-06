@@ -1,6 +1,10 @@
 import {PublicFactsService} from './public-facts/service.js';
 import {PgPublicFactsStore} from './public-facts/postgres.js';
 import {migratePublicFactsStorage} from './public-facts/migrate.js';
+import {PgPublicClaimStore,PublicClaimReviewService} from './public-facts/acceptance.js';
+import {migratePublicClaimDecisions} from './public-facts/acceptance-migrate.js';
+import type {PublicCitationPolicy} from './public-facts/acceptance-contracts.js';
+import {withPublicCitationWarnings} from './public-facts/acceptance-search.js';
 import type {PublicFactsStore} from './public-facts/contracts.js';
 import {PublicSourceProvisioner} from './storage/public-source-provision.js';
 import {DiscoveryApplication} from './discovery/composition.js';
@@ -34,7 +38,8 @@ export interface ApplicationStorage {
  importStore?:PgStore;
  facts?:FactStore;
  discoveryReceipts?:DiscoveryReceipts;
- publicFacts?:PublicFactsStore;
+  publicFacts?:PublicFactsStore;
+  publicClaims?:PgPublicClaimStore;
  publicSources?:PublicSourceProvisioner;
  migrate():Promise<void>;
  probe(signal:AbortSignal):Promise<boolean>;
@@ -43,7 +48,8 @@ export interface ApplicationStorage {
 export interface ApplicationOptions {
  env?:NodeJS.ProcessEnv;
  config?:RuntimeConfig;
- openStorage?:(databaseUrl:string)=>Promise<ApplicationStorage>;
+  openStorage?:(databaseUrl:string,options?:{publicCitationPolicy?:PublicCitationPolicy})=>Promise<ApplicationStorage>;
+  publicCitationPolicy?:PublicCitationPolicy;
  search?:{goals:GoalPort;engine:SearchEngine};
  retrieveAndNormalize?:RetrieveAndNormalizeGoogleContacts;
  discovery?:Pick<DiscoverySourcesOptions,'provider'|'documents'>;
@@ -58,7 +64,7 @@ export async function createApplication(options:ApplicationOptions={}) {
  try {
   if(env.DATABASE_URL){
    if(!options.openStorage)throw new ServiceError('SOURCE_UNAVAILABLE',502);
-   storage=await options.openStorage(env.DATABASE_URL);
+   storage=await options.openStorage(env.DATABASE_URL,options.publicCitationPolicy?{publicCitationPolicy:options.publicCitationPolicy}:{});
    await storage.migrate();
   }
   const oauth=storage && googleConfig?new GoogleAuth(storage.store,googleConfig):undefined;
@@ -72,7 +78,7 @@ export async function createApplication(options:ApplicationOptions={}) {
    if(!contacts)throw new ServiceError('SOURCE_UNAVAILABLE',502);
    return contacts.getFreshAccessToken(credential,sourceId);
   }};
-  const service=new BackendService({auth,reads:storage?.store??{authorizePrivateScope:async()=>null,readSnapshot:async()=>null},...(storage?{imports:storage.store}:{}),...(options.search?{goals:options.search.goals,engine:withFactWarnings(options.search.engine)}:{})});
+  const service=new BackendService({auth,reads:storage?.store??{authorizePrivateScope:async()=>null,readSnapshot:async()=>null},...(storage?{imports:storage.store}:{}),...(options.search?{goals:options.search.goals,engine:withFactWarnings(withPublicCitationWarnings(options.search.engine))}:{})});
   const bridge=oauth&&storage?.importStore?new GoogleImportBridge({auth,store:storage.importStore,contacts:contactsAccess,retrieveAndNormalize:options.retrieveAndNormalize?withGoogleRetrievalErrors(options.retrieveAndNormalize):(async()=>{throw new ServiceError('SOURCE_UNAVAILABLE',502);})}):undefined;
   const imports=bridge?{
    start:async(credential:unknown,input:unknown)=>{
@@ -85,8 +91,9 @@ export async function createApplication(options:ApplicationOptions={}) {
   const ready=async(signal:AbortSignal)=>Boolean(storage&&oauth&&options.search)&&!signal.aborted&&await storage!.probe(signal);
   const facts=storage?.facts?new FactReviewService({auth,facts:storage.facts}):undefined;
   const publicFacts=storage?.publicFacts?new PublicFactsService({auth,publicFacts:storage.publicFacts}):undefined;
+  const publicClaims=storage?.publicClaims?new PublicClaimReviewService({auth,claims:storage.publicClaims}):undefined;
   const discovery=storage?.discoveryReceipts&&storage.publicSources&&publicFacts&&options.discovery?new DiscoveryApplication({auth,receipts:storage.discoveryReceipts,publicSources:storage.publicSources,publicFacts,...options.discovery}):undefined;
-  const api=createApiHandler({auth,service,browserOrigin:config.browserOrigin,...(oauth?{oauth}:{}),...(contacts?{contacts}:{}),...(imports?{imports}:{}),...(facts?{facts}:{}),...(discovery?{discovery}:{}),...(publicFacts?{publicFacts}:{})});
+  const api=createApiHandler({auth,service,browserOrigin:config.browserOrigin,...(oauth?{oauth}:{}),...(contacts?{contacts}:{}),...(imports?{imports}:{}),...(facts?{facts}:{}),...(discovery?{discovery}:{}),...(publicFacts?{publicFacts}:{}),...(publicClaims?{publicClaims}:{})});
   const handler=config.production?await createProductionHandler({apiHandler:api,webRoot:config.webRoot,readiness:ready}):api;
   const server=createServer(handler);server.requestTimeout=25000;server.headersTimeout=10000;
   return {server,config,contactsAccess,publicFacts,publicSources:storage?.publicSources,readiness:ready,close:()=>closeApplication(server,storage),configured:{storage:Boolean(storage),auth:Boolean(oauth),contacts:Boolean(contacts),retrieval:Boolean(imports&&contacts&&options.retrieveAndNormalize),search:Boolean(options.search)}};
@@ -101,7 +108,7 @@ async function closeApplication(server:Server,storage:ApplicationStorage|undefin
 }
 
 /** Real PostgreSQL only; no in-memory fallback. URLs and database errors are never logged. */
-export async function openPostgresStorage(databaseUrl:string):Promise<ApplicationStorage> {
+export async function openPostgresStorage(databaseUrl:string,options:{publicCitationPolicy?:PublicCitationPolicy}={}):Promise<ApplicationStorage> {
  const pool=new Pool({connectionString:databaseUrl,max:10,connectionTimeoutMillis:1000,statement_timeout:10000,query_timeout:12000});
  pool.on('error',()=>{console.error('Database connection unavailable.');});
  const store=new PgStore(pool);
@@ -111,8 +118,9 @@ export async function openPostgresStorage(databaseUrl:string):Promise<Applicatio
   facts:new PgFactStore(pool),
   discoveryReceipts:new PgDiscoveryReceipts(pool),
   publicFacts:new PgPublicFactsStore(pool),
+  publicClaims:new PgPublicClaimStore(pool,options.publicCitationPolicy?{policy:options.publicCitationPolicy}:{}),
   publicSources:new PublicSourceProvisioner(pool),
-  migrate:async()=>{await migratePrivateStorage(pool,resolve('migrations/001_private_storage.sql'));await migrateContactsStorage(pool,resolve('migrations/002_contacts_grants.sql'));await migrateFactsStorage(pool,resolve('migrations/003_fact_reviews.sql'));await migratePublicFactsStorage(pool,resolve('migrations/004_public_fact_staging.sql'));await migrateDiscoveryStorage(pool,resolve('migrations/005_discovery_receipts.sql'));await migrateDiscoveryStaging(pool,resolve('migrations/007_discovery_staging.sql'));await store.pruneExpiredAuth(Date.now());await store.pruneExpiredContactsTransactions(Date.now());},
+  migrate:async()=>{await migratePrivateStorage(pool,resolve('migrations/001_private_storage.sql'));await migrateContactsStorage(pool,resolve('migrations/002_contacts_grants.sql'));await migrateFactsStorage(pool,resolve('migrations/003_fact_reviews.sql'));await migratePublicFactsStorage(pool,resolve('migrations/004_public_fact_staging.sql'));await migrateDiscoveryStorage(pool,resolve('migrations/005_discovery_receipts.sql'));await migratePublicClaimDecisions(pool,resolve('migrations/006_public_claim_decisions.sql'));await migrateDiscoveryStaging(pool,resolve('migrations/007_discovery_staging.sql'));await store.pruneExpiredAuth(Date.now());await store.pruneExpiredContactsTransactions(Date.now());},
   close:()=>pool.end(),
   probe:async(signal)=>{
    if(signal.aborted)return false;
