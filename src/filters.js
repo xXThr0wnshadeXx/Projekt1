@@ -36,6 +36,7 @@ export function keywordTerms(value){
 }
 export function keywordMatches(p,terms=[]){const text=normalizeSearch([p.name,p.headline,p.location,p.about,p.experience,p.education,p.skills,p.keywords].filter(Boolean).join(' '));return keywordTerms(terms).filter(term=>queryExpansions(term).some(value=>text.includes(value))||scorePerson(p,term).score>=70);}
 export function keywordGroupOf(p,terms=[]){const matches=keywordMatches(p,terms);return matches.length?`Matches: ${matches.join(' + ')}`:'No keyword match';}
+function compactLocationLabel(value){return String(value||'Not specified').replace(/,\s*United States$/i,'').replace(/,\s*USA$/i,'').trim();}
 function fuzzyTextMatch(value,query,threshold=62){
  if(!query)return true;const text=normalizeSearch(value),needle=normalizeSearch(query);if(!needle)return true;
  if(queryExpansions(query).some(term=>text.includes(term)||term.includes(text)))return true;
@@ -55,14 +56,14 @@ export function groupTargets(points,by,keywords=[]){
  const groups=new Map();
  for(const p of points){
   const key=by==='location'?locationOf(p):by==='keyword'?keywordGroupOf(p,keywords):fieldOf(p);
-  if(!groups.has(key))groups.set(key,{name:by==='location'?locationLabelOf(p):key,members:[]});
+  if(!groups.has(key))groups.set(key,{name:by==='location'?compactLocationLabel(locationLabelOf(p)):key,members:[]});
   groups.get(key).members.push(p);
  }
  let ordered=[...groups.values()].sort((a,b)=>b.members.length-a.members.length||a.name.localeCompare(b.name));
  // A long tail of one-person locations makes the map unreadable. Keep the
  // strongest clusters and place every remaining person in one honest catch-all.
  if(by==='location'&&ordered.length>12){const kept=ordered.slice(0,11),rest=ordered.slice(11).flatMap(group=>group.members);ordered=[...kept,{name:'Other locations',members:rest}];}
- const columns=Math.max(1,Math.ceil(Math.sqrt(ordered.length*1.55))),rows=Math.ceil(ordered.length/columns),targets=new Map(),labels=[];
+ const naturalColumns=Math.max(1,Math.ceil(Math.sqrt(ordered.length*1.55))),columns=by==='location'?Math.min(3,naturalColumns):naturalColumns,rows=Math.ceil(ordered.length/columns),targets=new Map(),labels=[];
  const metrics=ordered.map(group=>{const radius=Math.max(32,18*Math.sqrt(Math.max(0,group.members.length-1))+22);return {radius,width:Math.max(radius*2+54,Math.min(370,group.name.length*8+90)),height:radius*2+90};});
  const columnWidths=Array.from({length:columns},(_,column)=>Math.max(220,...metrics.filter((_,i)=>i%columns===column).map(item=>item.width))),rowHeights=Array.from({length:rows},(_,row)=>Math.max(190,...metrics.slice(row*columns,(row+1)*columns).map(item=>item.height))),totalWidth=columnWidths.reduce((a,b)=>a+b,0)+(columns-1)*55,totalHeight=rowHeights.reduce((a,b)=>a+b,0)+(rows-1)*55;
  ordered.forEach(({name,members},i)=>{const column=i%columns,row=Math.floor(i/columns),cx=-totalWidth/2+columnWidths.slice(0,column).reduce((a,b)=>a+b,0)+column*55+columnWidths[column]/2,cy=-totalHeight/2+rowHeights.slice(0,row).reduce((a,b)=>a+b,0)+row*55+rowHeights[row]/2,sorted=[...members].sort((a,b)=>a.id.localeCompare(b.id));sorted.forEach((p,j)=>{const r=18*Math.sqrt(j),angle=j*2.3999632297;targets.set(p.id,{x:cx+Math.cos(angle)*r,y:cy+Math.sin(angle)*r});});labels.push({name,count:sorted.length,x:cx,y:cy-metrics[i].radius-31});});

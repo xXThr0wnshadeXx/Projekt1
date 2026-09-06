@@ -16,6 +16,7 @@ test('filters combine location and estimated field without losing unknown profil
 test('location clusters keep every person while consolidating an unreadable long tail',()=>{
  const points=Array.from({length:30},(_,i)=>({id:String(i),location:`Place ${i}`})),grouped=groupTargets(points,'location');
  assert.equal(grouped.targets.size,30);assert.equal(grouped.totalGroups,30);assert.equal(grouped.labels.length,12);assert.equal(grouped.labels.at(-1).name,'Other locations');assert.equal(grouped.labels.at(-1).count,19);
+ assert.ok(new Set(grouped.labels.map(label=>label.x)).size<=3);
 });
 test('locations normalize metro variants and infer a known college location only when needed',()=>{
  assert.equal(locationOf({location:'Greater Sacramento'}),'sacramento area');
@@ -28,6 +29,7 @@ test('locations normalize metro variants and infer a known college location only
  assert.equal(locationMatches({location:'Los Angeles, California'},'ucla'),true);
  // A meaningful recorded home location wins over a different college clue.
  assert.equal(locationOf({location:'New York',education:'UC Berkeley'}),'new york');
+ assert.equal(groupTargets([{id:'p',location:'Portland, Oregon, United States'}],'location').labels[0].name,'Portland, Oregon');
 });
 test('facet search is fuzzy and one person can belong to several useful sectors',()=>{
  const person={depth:2,location:'San Francisco Bay Area',headline:'Biomedical software engineer',education:'San Jose State University',skills:['genomics','machine learning']};
