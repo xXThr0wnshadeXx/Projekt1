@@ -128,10 +128,10 @@ export class NetworkGraph {
   setFilters(filters,by='none',keywords=[]){
     const changed=JSON.stringify(this.filters)!==JSON.stringify(filters);
     if(!changed&&this.groupBy===by&&JSON.stringify(this.groupKeywords||[])===JSON.stringify(keywords))return;
-    const before=new Map(this.points.map(p=>[p.id,this.isVisible(p)])),now=performance.now();this.filters=structuredClone(filters);this.groupBy=by;this.groupKeywords=[...keywords];
+    const previousMax=Number(this.filters.maxDepth||6),nextMax=Number(filters.maxDepth||6),distanceReduced=nextMax<previousMax,before=new Map(this.points.map(p=>[p.id,this.isVisible(p)])),now=performance.now();this.filters=structuredClone(filters);this.groupBy=by;this.groupKeywords=[...keywords];
     this.filterDirty=changed;this.refreshMatches();if(this.treeRoot)this.buildTree(this.treeRoot);
     let removed=0;
-    for(const [i,p] of this.points.entries()){const was=before.get(p.id),visible=this.isVisible(p);if(was&&!visible&&!this.reducedMotion){p.snapAt=removed++<180?now+Math.min(i,60)*5:null;p.restoreAt=null;}else if(!was&&visible&&!this.reducedMotion){p.restoreAt=now+Math.min(i,40)*4;p.snapAt=null;}else if(visible)p.snapAt=null;}
+    for(const [i,p] of this.points.entries()){const was=before.get(p.id),visible=this.isVisible(p);if(was&&!visible&&!this.reducedMotion&&!distanceReduced){p.snapAt=removed++<180?now+Math.min(i,60)*5:null;p.restoreAt=null;}else if(was&&!visible){p.snapAt=null;p.restoreAt=null;}else if(!was&&visible&&!this.reducedMotion){p.restoreAt=now+Math.min(i,40)*4;p.snapAt=null;}else if(visible)p.snapAt=null;}
     this.layout();this.fit();
   }
   buildTree(root,maxDepth=2,maxNodes=600){

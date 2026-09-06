@@ -30,7 +30,7 @@ The long-term aspiration is millions of relationships, but the current implement
 - Shared graph namespace: `demo-knowledge-graph`
 - Current application checkpoint: commit `7f2eb4d9f320bd08ec7bab5b30f31bfb61905076`
 - Current deployed Sites version at the time of this handoff: version 19
-- Current companion/application version: `2.8.4`
+- Current companion/application version: `2.8.5`
 - Installable companion archive: `downloads/orbit-network-mapper.zip`
 
 The repository contains `.openai/hosting.json`, so all website build or deployment work must follow the Sites building and hosting skills. The Site also has its own private source Git remote named `sites`. A valid deployment requires the exact source commit to be pushed to both the intended GitHub branch and the Site source repository before saving the version.
@@ -174,7 +174,7 @@ Do not expose D1 credentials to browser code. Every browser write goes through t
 
 1. Pull `main` from GitHub if working on code.
 2. Visit the public Orbit Site and sign in with Google.
-3. Download Companion 2.8.4 from the Site/README.
+3. Download Companion 2.8.5 from the Site/README.
 4. Unzip it to a stable folder, enable Developer Mode in `chrome://extensions`, choose **Load unpacked**, and select that folder.
 5. If updating, replace files in the same folder and click **Reload** instead of removing the extension.
 6. Stay signed in to LinkedIn in Chrome.
@@ -209,7 +209,7 @@ npm run build
 npm run package
 ```
 
-Current verified state: 147 tests passing, syntax checks passing, migration replay passing, Worker build passing, companion packaging passing, and local visual verification completed for Nicolas's landing interaction at a compact viewport.
+Current verified state: 166 tests passing, syntax checks passing, migration replay passing, Worker build passing, companion packaging passing, and local visual verification completed for the compact graph-first workspace and Settings drawer.
 
 Test coverage includes authentication, body limits, collector pacing, exact resume checkpoints, daily refreshes, reusable teammate coverage, deeper exploration, optional comments, current LinkedIn result layouts, parser restrictions, metadata extraction, canonical deduplication, contributor reset semantics, six-hop shared neighborhoods, search aliases/misspellings, 10,000-node layout assembly, scale-independent zoom, selectable search results, filter transitions, route alternatives, imports, rate-limit primitives, landing motion, and the 3D node system.
 

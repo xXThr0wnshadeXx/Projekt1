@@ -482,7 +482,7 @@ async function command(message){
   if(message.type==='CANCEL'){
     const s=await read();if(s&&['running','paused','limit'].includes(s.status)){
       s.status='cancelled';s.queue=[];for(const w of workers(s))w.current=null;
-      log(s,'Build cancelled. Discovered people are kept in this map.');await save(s);await schedule(s);
+      log(s,'Pending collection queue cleared. Every saved person and relationship remains in this map.');await save(s);await schedule(s);
     }return {ok:true};
   }
   if(message.type==='START'){

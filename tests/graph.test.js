@@ -136,6 +136,12 @@ test('filter changes mark removed nodes for a dust transition and fit the surviv
  const h=graph(t),s=newState(root);const a=addPerson(s,{url:'https://www.linkedin.com/in/boston/',location:'Boston'},1),b=addPerson(s,{url:'https://www.linkedin.com/in/paris/',location:'Paris'},1);addEdge(s,root,a,source);addEdge(s,root,b,source);h.g.setData(s);h.g.setFilters({location:'boston'});
  assert.ok(Number.isFinite(h.g.positions.get(b).snapAt));assert.equal(h.g.isVisible(h.g.positions.get(a)),true);assert.equal(h.g.isVisible(h.g.positions.get(b)),false);assert.ok(h.g.scale>0);
 });
+test('reducing maximum distance removes farther people immediately',t=>{
+ const h=graph(t),s=newState(root),direct=addPerson(s,{url:'https://www.linkedin.com/in/direct/'},1),far=addPerson(s,{url:'https://www.linkedin.com/in/far/'},4);addEdge(s,root,direct,source);addEdge(s,direct,far,source);h.g.setData(s);
+ h.g.setFilters({maxDepth:6});assert.equal(h.g.isVisible(h.g.positions.get(far)),true);
+ h.g.setFilters({maxDepth:2});assert.equal(h.g.isVisible(h.g.positions.get(far)),false);assert.equal(h.g.positions.get(far).snapAt,null);
+ h.g.setFilters({maxDepth:6});assert.equal(h.g.isVisible(h.g.positions.get(far)),true);
+});
 test('relationship filter limits both visible people and drawable edges before search',t=>{
  const h=graph(t),s=newState(root),a=addPerson(s,{url:'https://www.linkedin.com/in/listed/'},1),b=addPerson(s,{url:'https://www.linkedin.com/in/commenter/'},1);
  addEdge(s,root,a,source);addEdge(s,root,b,{type:'comment_interaction',post:'https://www.linkedin.com/feed/update/urn:li:activity:123/',commentId:'urn:li:comment:(activity:123,456)',commenter:b,author:root,observedAt:'2026-09-06T00:00:00Z'});h.g.setData(s);h.g.setFilters({relationship:'comments'});

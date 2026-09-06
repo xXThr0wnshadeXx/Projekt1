@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Orbit \u2014 LinkedIn Network Mapper",
-  "version": "2.8.4",
+  "version": "2.8.5",
   "description": "Collect visible LinkedIn connections for the hosted Orbit workspace.",
   "minimum_chrome_version": "120",
   "permissions": [
