@@ -1,6 +1,7 @@
 import {profileURL,normalizeEvidence} from '../src/core.js';
 import {buildKeywords,ftsQuery,rankPeople} from '../src/search.js';
 const MAX_BATCH=100;
+const MAX_NEIGHBORHOOD_EDGES=12000;
 const short=(v,n)=>String(v||'').slice(0,n);
 export function validateBatch(data){
   const inputNodes=data.nodes||[],inputEdges=data.edges||[],imports=data.imports||[],records=data.records||[],inputCoverage=data.coverage||[];
@@ -116,7 +117,7 @@ export async function neighborhood(db,owner,root,depth=2,limit=1000,since=''){
   const start=await db.prepare('SELECT * FROM people WHERE owner=? AND id=?').bind(owner,root).first();if(!start)return {found:false,nodes:[],edges:[]};
   const revision=await db.prepare(`SELECT MAX(value) updatedAt FROM (SELECT MAX(last_seen) value FROM people WHERE owner=? UNION ALL SELECT MAX(last_seen) value FROM connections WHERE owner=? UNION ALL SELECT MAX(checked_at) value FROM collection_coverage WHERE owner=? AND reusable=1)`).bind(owner,owner,owner).first();
   if(since&&revision?.updatedAt===since)return {found:true,unchanged:true,root,updatedAt:revision.updatedAt};
-  const nodes=new Map([[root,{...start,url:root,depth:0}]]),edges=new Map();let frontier=[root],truncated=false,queriesUsed=0;
+  const nodes=new Map([[root,{...start,url:root,depth:0}]]),edges=new Map();let frontier=[root],truncated=false,edgeTruncated=false,queriesUsed=0;
   for(let layer=1;layer<=depth&&frontier.length;layer++){
     const next=[];
     // Each node receives a bounded share so one highly connected person cannot dominate.
@@ -126,8 +127,8 @@ export async function neighborhood(db,owner,root,depth=2,limit=1000,since=''){
       const batch=frontier.slice(i,i+Math.min(25,400-queriesUsed));queriesUsed+=batch.length;const queries=batch.map(id=>db.prepare(`SELECT a,b FROM connections WHERE owner=? AND a=? UNION SELECT a,b FROM connections WHERE owner=? AND b=? LIMIT ?`).bind(owner,id,owner,id,perNode+1));
       const results=await db.batch(queries);
       for(const result of results){if(result.results.length>perNode)truncated=true;for(const e of result.results.slice(0,perNode)){
-        const candidate=nodes.has(e.a)?e.b:e.a;if(!nodes.has(candidate)){if(nodes.size>=limit){truncated=true;continue;}nodes.set(candidate,{id:candidate,url:candidate,depth:layer});next.push(candidate);}
-        edges.set(`${e.a}|${e.b}`,{id:`${e.a}|${e.b}`,source:e.a,target:e.b,evidence:[]});
+        const candidate=nodes.has(e.a)?e.b:e.a,isNew=!nodes.has(candidate);if(isNew){if(nodes.size>=limit){truncated=true;continue;}nodes.set(candidate,{id:candidate,url:candidate,depth:layer});next.push(candidate);}
+        if(isNew||edges.size<MAX_NEIGHBORHOOD_EDGES)edges.set(`${e.a}|${e.b}`,{id:`${e.a}|${e.b}`,source:e.a,target:e.b,evidence:[]});else edgeTruncated=true;
       }}
       if(nodes.size>=limit){truncated=true;break;}
     }
@@ -136,11 +137,17 @@ export async function neighborhood(db,owner,root,depth=2,limit=1000,since=''){
   const ids=[...nodes.keys()];
   const details=(await db.prepare('SELECT * FROM people WHERE owner=? AND id IN (SELECT value FROM json_each(?))').bind(owner,JSON.stringify(ids)).all()).results;
   for(const p of details)Object.assign(nodes.get(p.id),p);
+  // Once the connected people are selected, include every saved relationship
+  // among them (within a responsive bound), not only the edges encountered by BFS.
+  const internal=(await db.prepare(`SELECT c.a,c.b FROM json_each(?) selected JOIN connections c ON c.owner=? AND c.a=selected.value
+    WHERE c.b IN (SELECT value FROM json_each(?)) ORDER BY c.a,c.b LIMIT ?`).bind(JSON.stringify(ids),owner,JSON.stringify(ids),MAX_NEIGHBORHOOD_EDGES+1).all()).results;
+  if(internal.length>MAX_NEIGHBORHOOD_EDGES)edgeTruncated=true;
+  for(const e of internal.slice(0,MAX_NEIGHBORHOOD_EDGES)){if(edges.size>=MAX_NEIGHBORHOOD_EDGES&&!edges.has(`${e.a}|${e.b}`)){edgeTruncated=true;continue;}edges.set(`${e.a}|${e.b}`,{id:`${e.a}|${e.b}`,source:e.a,target:e.b,evidence:[]});}
   // Indexed edge evidence lookup, bounded to the displayed links.
   const pairs=[...edges.values()].map(e=>({a:e.source,b:e.target}));
   const sources=await edgeSources(db,owner,pairs);
   for(const edge of edges.values())edge.evidence=sources.get(`${edge.source}|${edge.target}`)||[];
-  return {found:true,root,nodes:[...nodes.values()],edges:[...edges.values()],coverage:await sharedCoverage(db,owner,ids),truncated,depth,limit,updatedAt:revision?.updatedAt||start.last_seen};
+  return {found:true,root,nodes:[...nodes.values()],edges:[...edges.values()],coverage:await sharedCoverage(db,owner,ids),truncated,edgeTruncated,depth,limit,updatedAt:revision?.updatedAt||start.last_seen};
 }
 export async function shortestPath(db,owner,from,to,maxDepth=6,limit=10000){
   from=profileURL(from);to=profileURL(to);if(!from||!to)throw Error('Choose two valid LinkedIn profiles.');

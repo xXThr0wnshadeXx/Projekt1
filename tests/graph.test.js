@@ -125,6 +125,12 @@ test('filter changes mark removed nodes for a dust transition and fit the surviv
  const h=graph(t),s=newState(root);const a=addPerson(s,{url:'https://www.linkedin.com/in/boston/',location:'Boston'},1),b=addPerson(s,{url:'https://www.linkedin.com/in/paris/',location:'Paris'},1);addEdge(s,root,a,source);addEdge(s,root,b,source);h.g.setData(s);h.g.setFilters({location:'boston'});
  assert.ok(Number.isFinite(h.g.positions.get(b).snapAt));assert.equal(h.g.isVisible(h.g.positions.get(a)),true);assert.equal(h.g.isVisible(h.g.positions.get(b)),false);assert.ok(h.g.scale>0);
 });
+test('relationship filter limits both visible people and drawable edges before search',t=>{
+ const h=graph(t),s=newState(root),a=addPerson(s,{url:'https://www.linkedin.com/in/listed/'},1),b=addPerson(s,{url:'https://www.linkedin.com/in/commenter/'},1);
+ addEdge(s,root,a,source);addEdge(s,root,b,{type:'comment_interaction',post:'https://www.linkedin.com/feed/update/urn:li:activity:123/',commentId:'urn:li:comment:(activity:123,456)',commenter:b,author:root,observedAt:'2026-09-06T00:00:00Z'});h.g.setData(s);h.g.setFilters({relationship:'comments'});
+ assert.equal(h.g.isVisible(h.g.positions.get(root)),true);assert.equal(h.g.isVisible(h.g.positions.get(a)),false);assert.equal(h.g.isVisible(h.g.positions.get(b)),true);assert.equal(h.g.edgeVisible(Object.values(s.edges).find(edge=>edge.target===a||edge.source===a)),false);
+ h.g.search('listed');assert.equal(h.g.points.filter(point=>h.g.isVisible(point)&&h.g.isSearchVisible(point)).length,0);
+});
 
 test('unfiltered name search retains the starter and real intermediate route only',t=>{
  const h=graph(t),s=newState(root);h.g.reducedMotion=true;

@@ -45,6 +45,11 @@ test('library neighborhoods are bounded even for high-degree profiles',async()=>
   for(let i=0;i<5;i++){const names=Array.from({length:100},(_,j)=>'p'+(i*100+j));await ingest(db,'one',{nodes:names.map(person),edges:names.map(n=>edge('root',n))});}
   const graph=await neighborhood(db,'one',person('root').id,2,100);assert.equal(graph.nodes.length,100);assert.equal(graph.truncated,true);assert.ok(graph.edges.every(e=>graph.nodes.some(n=>n.id===e.source)&&graph.nodes.some(n=>n.id===e.target)));
 });
+test('database-first maps include saved links between every selected connected person',async()=>{
+  const {db}=database();await ingest(db,'shared',{nodes:['root','a','b'].map(person),edges:[edge('root','a'),edge('root','b'),edge('a','b')]},'nicolas');
+  const graph=await neighborhood(db,'shared',person('root').id,1,100);assert.equal(graph.nodes.length,3);assert.equal(graph.edges.length,3);assert.equal(graph.edgeTruncated,false);
+  assert.deepEqual(new Set(graph.edges.map(item=>item.id)),new Set([edge('root','a'),edge('root','b'),edge('a','b')].map(item=>[item.source,item.target].sort().join('|'))));
+});
 test('a shared neighborhood expands to six hops and enriches duplicates in place',async()=>{
   const {db}=database(),names=['root','a','b','c','d','e','f'];
   await ingest(db,'shared',{nodes:names.map(person),edges:names.slice(1).map((name,index)=>edge(names[index],name))},'ben');
