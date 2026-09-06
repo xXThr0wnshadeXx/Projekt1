@@ -28,8 +28,8 @@ It allows only an accepted directional claim between explicitly resolved
 identities with direct attributable evidence. Co-mentions, follows,
 co-employment and shared organizations remain context-only and non-traversable.
 
-The policy applies relative factors (not probabilities): direct attributable
-support is `0.85`, corroborated direct support is `1.00`; current, recent,
-stale and unknown freshness are `1.00`, `0.85`, `0.65` and `0.50`. Reviewer
-preference is a deterministic tie-breaker only, never a score boost. Existing
-reviewed relationship strength remains the sole relationship-strength input.
+The policy intentionally assigns no numeric factors. A trusted server policy
+must assess and record the strength, confidence and freshness factors together;
+when none is approved, searchable acceptance fails closed. Reviewer preference
+is a deterministic tie-breaker only, never a score boost. Existing reviewed
+relationship strength remains the sole relationship-strength input.
