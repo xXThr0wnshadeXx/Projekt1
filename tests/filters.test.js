@@ -37,3 +37,9 @@ test('degree and alias-aware keyword filters combine without losing the root',()
  assert.equal(matchesFilters(sjsu,{first:true,second:true,extended:false,keywords:['SJSU'],keywordOnly:true}),true);assert.equal(matchesFilters({...sjsu,depth:3},{extended:false}),false);assert.equal(matchesFilters({...sjsu,depth:0},{first:false,second:false,extended:false}),true);
  const grouped=groupTargets([sjsu,{id:'x',depth:2,headline:'Designer'}],'keyword',['SJSU']);assert.deepEqual(grouped.labels.map(label=>label.name),['Matches: SJSU','No keyword match']);
 });
+
+test('full LinkedIn URLs find people reached through comment links',async()=>{
+  const {rankPeople}=await import('../src/search.js');
+  const people=[{id:'https://www.linkedin.com/in/commenter/',name:'New Person'},{id:'https://www.linkedin.com/in/unrelated/',name:'Other'}];
+  assert.deepEqual(rankPeople(people,'https://www.linkedin.com/in/commenter/?trk=example').map(p=>p.name),['New Person']);
+});

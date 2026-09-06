@@ -61,3 +61,31 @@ test('cross-account paths retain shared evidence and reset only one contributor'
   await resetContribution(db,'shared','shreev');assert.equal(raw.prepare('SELECT COUNT(*) count FROM connections WHERE owner=?').get('shared').count,2);
   await resetContribution(db,'shared','nicolas');assert.equal(raw.prepare('SELECT COUNT(*) count FROM connections WHERE owner=?').get('shared').count,1);assert.equal((await shortestPath(db,'shared',person('root').id,person('b').id,6)).found,false);
 });
+
+test('comment-only relationships survive storage, search, reverse paths and contributor resets',async()=>{
+  const {db,raw}=database(),a=person('author'),b={...person('commenter'),name:'Someone Not Connected'};
+  const evidence={type:'comment_interaction',commenter:b.id,author:a.id,post:'https://www.linkedin.com/feed/update/urn:li:activity:123/',commentId:'urn:li:comment:(activity:123,456)',observedAt:'2026-09-06T00:00:00Z'};
+  const link={source:b.id,target:a.id,evidence:[evidence]};
+  await ingest(db,'shared',{nodes:[a,b],edges:[link]},'ben');await ingest(db,'shared',{edges:[link]},'shreev');
+  assert.equal((await stats(db,'shared')).connections,1);assert.equal(raw.prepare('SELECT COUNT(*) n FROM evidence').get().n,1);
+  assert.equal((await search(db,'shared','Someone Not Connected'))[0].id,b.id);
+  const graph=await neighborhood(db,'shared',a.id);assert.equal(graph.edges[0].evidence[0].type,'comment_interaction');assert.equal(graph.edges[0].evidence[0].commenter,b.id);
+  const path=await shortestPath(db,'shared',a.id,b.id);assert.equal(path.hops,1);assert.equal(path.edges[0].evidence[0].author,a.id);
+  assert.equal((await shortestPath(db,'shared',b.id,a.id)).hops,1);
+  await resetContribution(db,'shared','ben');assert.equal((await shortestPath(db,'shared',a.id,b.id)).found,true);
+  await resetContribution(db,'shared','shreev');assert.equal((await stats(db,'shared')).connections,0);
+});
+
+test('invalid comment identity evidence rejects the entire batch',async()=>{
+  const {db}=database(),a=person('author'),b=person('commenter'),c=person('unrelated');
+  await assert.rejects(ingest(db,'shared',{nodes:[a,b,c],edges:[{source:a.id,target:b.id,evidence:[{type:'comment_interaction',author:a.id,commenter:c.id,post:'https://www.linkedin.com/feed/update/urn:li:activity:123/',commentId:'urn:li:comment:(activity:123,456)',observedAt:'2026-09-06T00:00:00Z'}]}]}),/Invalid connection evidence/);
+  assert.equal((await stats(db,'shared')).people,0);
+});
+
+test('long comment histories save in bounded batches without losing observations',async()=>{
+  const {splitEvidence}=await import('../src/library.js'),{db,raw}=database(),a=person('author'),b=person('commenter');
+  const edge={source:b.id,target:a.id,evidence:Array.from({length:45},(_,i)=>({type:'comment_interaction',commenter:b.id,author:a.id,post:'https://www.linkedin.com/feed/update/urn:li:activity:123/',commentId:`urn:li:comment:(activity:123,${1000+i})`,observedAt:'2026-09-06T00:00:00Z'}))};
+  const chunks=splitEvidence(edge);assert.deepEqual(chunks.map(e=>e.evidence.length),[20,20,5]);
+  await ingest(db,'shared',{nodes:[a,b],edges:chunks});await ingest(db,'shared',{edges:chunks});
+  assert.equal(raw.prepare('SELECT COUNT(*) n FROM evidence').get().n,45);assert.equal((await stats(db,'shared')).connections,1);
+});

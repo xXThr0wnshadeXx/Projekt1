@@ -17,6 +17,32 @@ export function listURL(value) {
   } catch { /* Invalid input. */ }
   return null;
 }
+export function postURL(value){
+  try{const u=new URL(value);if(u.origin!=='https://www.linkedin.com'||u.username||u.password)return null;
+    const match=u.pathname.match(/^\/feed\/update\/(urn:li:(?:activity|ugcPost):\d+)\/?$/);
+    return match?`${u.origin}/feed/update/${match[1]}/`:null;
+  }catch{return null;}
+}
+export function activityURL(value,owner){
+  try{const u=new URL(value),p=profileURL(owner);if(!p||u.origin!=='https://www.linkedin.com'||u.username||u.password)return null;
+    return new RegExp('^'+new URL(p).pathname.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'recent-activity/(?:all|posts)/?$').test(u.pathname)?u.origin+u.pathname:null;
+  }catch{return null;}
+}
+export function normalizeEvidence(value,a,b){
+  if(!value||!Number.isFinite(Date.parse(value.observedAt)))return null;
+  const observedAt=new Date(value.observedAt).toISOString();
+  if(value.type==='comment_interaction'){
+    const post=postURL(value.post||value.url),commenter=profileURL(value.commenter),author=profileURL(value.author);
+    const commentId=String(value.commentId||''),match=commentId.match(/^urn:li:comment:\((activity|ugcPost):(\d+),(\d+)\)$/);
+    if(!post||!match||!commenter||!author||commenter===author||[commenter,author].sort().join('|')!==[a,b].sort().join('|'))return null;
+    const postUrn=new URL(post).pathname.split('/')[3];
+    if(postUrn.startsWith(`urn:li:${match[1]}:`)&&postUrn!==`urn:li:${match[1]}:${match[2]}`)return null;
+    return {type:'comment_interaction',url:post+'?commentUrn='+encodeURIComponent(commentId),post,commentId,commenter,author,observedAt};
+  }
+  if(value.type&&value.type!=='visible_connection_list')return null;
+  const url=listURL(value.url);return url?{url,type:'visible_connection_list',observedAt}:null;
+}
+export function relationshipTypes(edge){return [...new Set((edge.evidence||[]).map(e=>e.type||'visible_connection_list'))];}
 function filterValues(url,key){
   const values=url.searchParams.getAll(key);if(values.length!==1)return null;
   const value=values[0];if(!value)return null;
@@ -63,9 +89,29 @@ export function addPerson(state,person,depth) {
 export function addEdge(state,a,b,source) {
   if(a===b||!state.nodes[a]||!state.nodes[b])return;
   const [from,to]=[a,b].sort(),id=`${from}|${to}`;
-  const evidence={url:source,observedAt:new Date().toISOString(),type:'visible_connection_list'};
+  const evidence=normalizeEvidence(typeof source==='string'?{url:source,observedAt:new Date().toISOString()}:source,a,b);
+  if(!evidence)throw Error('A relationship needs valid source evidence.');
   if(!state.edges[id]){state.edges[id]={id,source:from,target:to,evidence:[evidence]};state.graphRevision=(state.graphRevision||0)+1;}
-  else if(!state.edges[id].evidence.some(e=>e.url===source))state.edges[id].evidence.push(evidence);
+  else if(!state.edges[id].evidence.some(e=>e.url===evidence.url)){state.edges[id].evidence.push(evidence);state.graphRevision=(state.graphRevision||0)+1;}
+}
+export function ingestComments(state,job,comments){
+  if(!activityURL(job.url,job.owner))throw Error('The post activity owner changed.');
+  const coverage=(state.commentCoverage||={})[job.owner]||={status:'collecting',posts:[],comments:0,profiles:[]};
+  let added=0,observations=0;
+  for(const item of comments){
+    const commenter=profileURL(item.commenter?.url||item.commenter),author=profileURL(item.author);
+    const evidence=normalizeEvidence({...item,type:'comment_interaction',commenter,author},commenter,author);
+    if(!evidence||author!==job.owner||!state.nodes[author])continue;
+    const before=Boolean(state.nodes[commenter]),id=addPerson(state,typeof item.commenter==='object'?item.commenter:{url:commenter,name:item.name,headline:item.headline},job.depth+1);
+    if(!id)continue;
+    const key=[commenter,author].sort().join('|'),known=state.edges[key]?.evidence.some(e=>e.url===evidence.url);
+    addEdge(state,commenter,author,evidence);
+    if(!known){observations++;coverage.comments++;}
+    if(!before)added++;
+    if(!coverage.profiles.includes(id))coverage.profiles.push(id);
+    if(!coverage.posts.includes(evidence.post))coverage.posts.push(evidence.post);
+  }
+  return {added,observations};
 }
 export function ingestPage(state,job,snapshot) {
   if(!sameList(job.url,snapshot.url)) throw Error('The connection filter changed. Collection paused to prevent incorrect relationships.');
@@ -97,7 +143,7 @@ export function importGraph(data) {
   const state=newState(root,{maxNodes:Math.max(1000,data.nodes.length),depth:2});state.queue=[];state.nodes={};
   for(const p of data.nodes){const id=profileURL(p.url||p.id);if(!id||p.id!==id)throw Error('A profile has an invalid URL.');state.nodes[id]={id,url:id,name:String(p.name||'').slice(0,200),headline:String(p.headline||'').slice(0,1000),location:String(p.location||'').slice(0,300),about:String(p.about||'').slice(0,4000),experience:String(p.experience||'').slice(0,6000),education:String(p.education||'').slice(0,4000),skills:String(p.skills||'').slice(0,3000),depth:3};}
   if(!state.nodes[root])throw Error('The starting person is missing.');
-  for(const e of data.edges){if(!state.nodes[e.source]||!state.nodes[e.target]||e.source===e.target)throw Error('A connection references a missing person.');const id=[e.source,e.target].sort().join('|');const evidence=(e.evidence||[]).filter(v=>listURL(v.url)).map(v=>({url:v.url,type:'visible_connection_list',observedAt:String(v.observedAt||'').slice(0,40)}));if(!evidence.length)throw Error('Every connection needs a LinkedIn connection-list source.');state.edges[id]={id,source:e.source,target:e.target,evidence};}
+  for(const e of data.edges){if(!state.nodes[e.source]||!state.nodes[e.target]||e.source===e.target)throw Error('A connection references a missing person.');const id=[e.source,e.target].sort().join('|');const evidence=(e.evidence||[]).map(v=>normalizeEvidence(v,e.source,e.target)).filter(Boolean);if(!evidence.length)throw Error('Every connection needs a LinkedIn list or comment source.');state.edges[id]={id,source:e.source,target:e.target,evidence};}
   const adj={};for(const e of Object.values(state.edges)){(adj[e.source]||=[]).push(e.target);(adj[e.target]||=[]).push(e.source);}const q=[root];state.nodes[root].depth=0;const seen=new Set(q);for(let i=0;i<q.length;i++)for(const id of adj[q[i]]||[])if(!seen.has(id)){seen.add(id);state.nodes[id].depth=state.nodes[q[i]].depth+1;q.push(id);}
   state.status='imported';state.reason='Imported network • collection history is read-only';state.createdAt=String(data.createdAt||state.createdAt);state.pages=Number(data.pages)||0;return state;
 }

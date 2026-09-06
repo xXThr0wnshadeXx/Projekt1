@@ -1,4 +1,5 @@
 import {prepareImport} from './import.js';
+export function splitEvidence(edge){const parts=[];for(let i=0;i<(edge.evidence||[]).length;i+=20)parts.push({...edge,evidence:edge.evidence.slice(i,i+20)});return parts;}
 // The hosted page uses its Sites session; no LinkedIn credentials leave Chrome.
 export function createLibrary({getCollection,showGraph,showCollection}){
   const $=id=>document.getElementById(id),enabled=location.protocol==='https:'||location.hostname==='127.0.0.1';
@@ -17,7 +18,7 @@ export function createLibrary({getCollection,showGraph,showCollection}){
   async function upload(data,progress){
     const fields=['nodes','edges','imports','records'],total=fields.reduce((sum,key)=>sum+data[key].length,0);let uploaded=0;
     for(const key of fields)for(let i=0;i<data[key].length;i+=100){
-      const batch=data[key].slice(i,i+100),body={nodes:[],edges:[],imports:[],records:[],[key]:batch};await ingestBatch(body,progress);uploaded+=batch.length;
+      const batch=data[key].slice(i,i+100),values=key==='edges'?batch.flatMap(splitEvidence):batch;for(let j=0;j<values.length;j+=100)await ingestBatch({nodes:[],edges:[],imports:[],records:[],[key]:values.slice(j,j+100)},progress);uploaded+=batch.length;
       progress(`Uploading to D1 · ${uploaded.toLocaleString()} of ${total.toLocaleString()} records`);
     }
   }
@@ -28,7 +29,7 @@ export function createLibrary({getCollection,showGraph,showCollection}){
       status('Saving discoveries to the shared team library…');
       for(const [field,cache,key] of [['nodes',savedNodes,'nodes'],['edges',savedEdges,'edges']]){
         const entries=Object.values(snapshot[field]||{}).map(v=>({value:v,signature:JSON.stringify(v)})).filter(v=>cache.get(v.value.id)!==v.signature);
-        for(let i=0;i<entries.length;i+=100){const batch=entries.slice(i,i+100);await api('ingest',{nodes:[],edges:[],[key]:batch.map(v=>v.value)});for(const e of batch)cache.set(e.value.id,e.signature);}
+        for(let i=0;i<entries.length;i+=100){const batch=entries.slice(i,i+100),values=field==='edges'?batch.flatMap(v=>splitEvidence(v.value)):batch.map(v=>v.value);for(let j=0;j<values.length;j+=100)await api('ingest',{nodes:[],edges:[],[key]:values.slice(j,j+100)});for(const e of batch)cache.set(e.value.id,e.signature);}
       }
       status(`Saved to library · ${new Date().toLocaleTimeString()}`);await refreshStats();
     }catch(error){pending ||= snapshot;status(error.status===401?'Sign in to save this collection to the shared team library.':`Not yet saved: ${error.message}. Will retry.`);}

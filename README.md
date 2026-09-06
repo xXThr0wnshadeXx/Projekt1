@@ -6,8 +6,8 @@ Orbit builds an evidence-backed graph from LinkedIn pages that a contributor can
 
 - **Canonical application:** [orbit-shreev2703-graph-test.shreev2703.chatgpt.site](https://orbit-shreev2703-graph-test.shreev2703.chatgpt.site/)
 - **Repository:** [xXThr0wnshadeXx/Projekt1](https://github.com/xXThr0wnshadeXx/Projekt1)
-- **Companion download:** [download the current ZIP](https://orbit-shreev2703-graph-test.shreev2703.chatgpt.site/downloads/orbit-network-mapper.zip?v=2.5.0)
-- **Current application and companion version:** `2.5.0`
+- **Companion download:** [download the current ZIP](https://orbit-shreev2703-graph-test.shreev2703.chatgpt.site/downloads/orbit-network-mapper.zip?v=2.6.0)
+- **Current application and companion version:** `2.6.0`
 
 This is the single supported hosted application and database. Do not use the retired Turso setup or the older `doublejav.chatgpt.site` deployment.
 
@@ -54,10 +54,20 @@ The extension is a background collection companion; the permanent knowledge grap
 
 Orbit maintains one continuously growing network for each signed-in account. Resuming an unfinished collection keeps its checkpoint; duplicate starts leave an active collection alone. **Continue collecting** on a finished map refreshes it from the direct layer outward. Every changed person and relationship is periodically upserted into the shared team graph, and reopening Orbit loads the account’s saved neighborhood from D1. **Reset my account network** is deliberately kept in Settings and removes only that account’s contribution—overlapping records supported by teammates remain.
 
-### Collection pacing and recovery (2.5.0)
+### Comment relationships (2.6.0)
 
-- One collection tab, at least **120 seconds between load-triggering actions**, including navigation, Next, load-more, scrolling and retries. DOM reads consume no action budget. Parsing time overlaps the existing interval instead of starting another full wait.
-- Rolling local budgets of **25 actions/hour and 150 actions/day**, persisted in `orbitCollectionPolicy` independently of maps. Switching, cancelling, clearing, reloading the companion, or restarting Chrome preserves the reservation history. These are conservative Orbit guardrails, **not LinkedIn-published or approved quotas**. They do not cover manual browsing or other installed collectors.
+A commenter and the actual author of a visible post get one **undirected, equal-weight relationship**, whether or not they are LinkedIn connections. Repeated comments and connection-list observations merge into the same pair while keeping separate evidence. Commenters on the same post are not automatically connected to each other.
+
+Enter your profile or another person's profile in **Map settings → Starting LinkedIn profile**. The collector follows a visible activity link, reads original posts by that profile, and expands comment/reply controls. It excludes reposts by other authors, mentions inside comment text, anonymous placeholders, and hidden comments. Each observation retains the source post, stable comment ID, commenter, author, and time. A hidden connection list can still produce paths through comment relationships. Paths and name/profile-URL search include those people.
+
+Each activity job uses the same persisted action governor as connection collection. It stops after three unchanged expansion/scroll attempts or 20 actions per profile and marks uncertain coverage **Incomplete**. It never posts, likes, or sends replies. Available DOM layouts may omit activity links or comments; absent evidence is not invented.
+
+Existing exports with `commentObservations`, combined comment evidence, or `kind: "commented_on_post"` links can be imported into the graph. Autosave splits long evidence histories into API-sized batches without discarding observations. The `0007_comment_evidence` migration adds typed evidence metadata with a backward-compatible default for existing list sources. **Deploy the site with this migration before using companion 2.6.0**; the older backend rejects comment links.
+
+### Collection pacing and recovery (2.6.0)
+
+- One collection tab. The **first two actions of a fresh run have no mandatory gap**; **action three onward waits at least 120 seconds after the preceding action**, including navigation, Next, load-more, scrolling and retries. DOM reads consume no action budget. Parsing time overlaps the existing interval instead of starting another full wait.
+- Rolling local budgets of **25 actions/hour and 150 actions/day**, persisted in `orbitCollectionPolicy` independently of maps. Switching, cancelling, clearing, reloading the companion, or restarting Chrome preserves the reservation history. These are conservative Orbit guardrails, **not LinkedIn-published or approved quotas**. They do not cover manual browsing or other installed collectors. The two-action startup allowance belongs to a persisted run ID; pause, resume, browser restart, and duplicate Start do not reset it. Starting another run still honors the preceding run’s cooldown, and restriction/backoff events invalidate any unused allowance.
 - HTTP **429/999**, document **401/403**, and visible verification/restriction notices stop collection. `Retry-After` seconds and HTTP dates are respected, with a minimum 15-minute cooldown for restrictions. Time alone and reopening the Site never clear a restriction: inspect LinkedIn and explicitly resume. Login pages pause for sign-in. Repeated platform notices can extend the cooldown.
 - Transient failures back off exponentially, with two navigation retries per job and a pause after repeated failures. A stalled Next/scroll gets at most three paced attempts without repeatedly reloading the list. A checkpoint-write failure stops further actions until the companion is reloaded.
 - Scrolling uses overlapping viewports and combines unique people across virtualized snapshots. Modern and legacy result cards can coexist. A person cap saves only accepted rows and resumes the remainder without inflating page counts. An uncertain end remains **Incomplete** in Coverage.
@@ -120,7 +130,7 @@ Application rate limiting is currently disabled for team development. The implem
 Orbit processes only LinkedIn pages that the contributor can access in their browser. It does not bypass sign-in, verification, privacy controls, hidden lists, or commercial-use restrictions.
 
 - One collection tab is used at a time.
-- Collector-initiated LinkedIn actions are spaced by at least two minutes.
+- The first two actions of a fresh collection run start promptly; action three onward is spaced by at least two minutes. Existing server cooldowns and rolling budgets still apply to every action.
 - Orbit completes or explicitly marks the starting profile’s visible direct list before expanding connections-of-connections; jobs are always ordered from the shallowest layer outward.
 - The collector identifies LinkedIn’s actual virtualized connection-list scroller and performs bounded loading retries rather than silently skipping the first layer.
 - Checkpoints survive browser restarts.

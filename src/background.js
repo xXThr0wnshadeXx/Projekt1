@@ -1,7 +1,7 @@
-import {newState,options,profileURL,listURL,sameList,sameConnectionOwner,addPerson,ingestPage,log} from './core.js';
-import {inspectLinkedIn,advanceLinkedIn} from './collector.js';
+import {newState,options,profileURL,listURL,activityURL,sameList,sameConnectionOwner,addPerson,ingestPage,ingestComments,log} from './core.js';
+import {inspectLinkedIn,advanceLinkedIn,advanceComments} from './collector.js';
 import {SITE_ORIGIN,COMPANION_VERSION} from './companion.js';
-import {normalizePolicy,nextAction,reserveAction,backoffPolicy,blockPolicy,retryAfter} from './collection-policy.js';
+import {normalizePolicy,nextAction,reserveAction,backoffPolicy,blockPolicy,retryAfter,beginRun} from './collection-policy.js';
 
 const KEY='orbitNetwork',ALARM='orbit-collect',VERSION=COMPANION_VERSION;
 const POLL=1000,SETTLE=200,LOAD_TIMEOUT=60000,UNCHANGED_TIMEOUT=15000;
@@ -25,13 +25,14 @@ async function savePolicy(value){
 }
 async function permit(s){
   if(storageFailed)throw Error('Checkpoint storage failed. Reload the companion before collecting again.');
-  const p=await readPolicy(s),gate=nextAction(p,s.config.delay);
+  const p=await readPolicy(s),gate=nextAction(p,s.config.delay,Date.now(),s.runId);
   s.nextRequestAt=gate.at;s.pacing={...gate,actionsToday:p.actions.length};
   if(p.blocked){s.pauseKind='restriction';await pause(s,p.blocked.reason);return false;}
   if(gate.at>Date.now())return false;
-  const reserved=reserveAction(p,s.config.delay);await savePolicy(reserved);
-  s.nextRequestAt=reserved.nextAt;return true;
+  const reserved=reserveAction(p,s.config.delay,Date.now(),s.runId);await savePolicy(reserved);
+  s.nextRequestAt=nextAction(reserved,s.config.delay,Date.now(),s.runId).at;return true;
 }
+async function startRun(s){s.runId=crypto.randomUUID();await savePolicy(beginRun(await readPolicy(s),s.runId));}
 async function restriction(s,w,reason,until=0){
   await savePolicy(blockPolicy(await readPolicy(s),reason,until));
   s.nextRequestAt=policy.nextAt;s.pauseKind='restriction';await pause(s,reason,w);
@@ -65,10 +66,10 @@ async function schedule(s){
   else {clearTimeout(timer);timer=null;await chrome.alarms.clear(ALARM);}
 }
 const pause=async(s,reason,w)=>{s.attentionTabId=w?.tabId||null;s.status='paused';log(s,reason);try{await save(s);}finally{await schedule(s);}};
-function finishBranch(s,w,status,reason){const b=s.branches[w.current.job.owner];if(b){b.status=status;b.reason=reason;}log(s,reason);w.current=null;}
+function finishBranch(s,w,status,reason){const b=w.current.job.kind==='posts'?s.commentCoverage?.[w.current.job.owner]:s.branches[w.current.job.owner];if(b){b.status=status;b.reason=reason;}log(s,reason);w.current=null;}
 function limit(s){s.status='limit';log(s,'Person limit reached. Increase the limit and resume to expand further.');}
 async function navigate(s,w,job,replayURL=job.replayURL){
-  const url=job.kind==='profile'?profileURL(job.owner):listURL(replayURL&&sameList(job.url,replayURL)?replayURL:job.url);
+  const url=job.kind==='profile'?profileURL(job.owner):job.kind==='posts'?activityURL(job.url,job.owner):listURL(replayURL&&sameList(job.url,replayURL)?replayURL:job.url);
   if(!url)throw Error('A queued URL is invalid.');
   w.current={job,since:Date.now(),navPending:true,resumeURL:url};
   if(!await permit(s)){await save(s);return;}
@@ -76,7 +77,46 @@ async function navigate(s,w,job,replayURL=job.replayURL){
   // Save intent before navigation; an interrupted operation can be replayed.
   w.current={job,since:Date.now(),lastSignature:null,advancePending:false,resumeURL:url,replaying:Boolean(replayURL)};await save(s);
   if(!tab)tab=await chrome.tabs.create({url,active:false});else tab=await chrome.tabs.update(tab.id,{url});
-  w.tabId=tab.id;log(s,`Exploring ${s.nodes[job.owner]?.name||'profile'}’s connections`);await save(s);
+  w.tabId=tab.id;log(s,`Exploring ${s.nodes[job.owner]?.name||'profile'}’s ${job.kind==='posts'?'post comments':'connections'}`);await save(s);
+}
+function queueComments(s,job,snap){
+  s.commentCoverage||={};
+  if(s.commentCoverage[job.owner])return;
+  const url=activityURL(snap.activityUrl,job.owner);
+  s.commentCoverage[job.owner]={status:url?'queued':'hidden',posts:[],comments:0,profiles:[],url,reason:url?'Queued visible post comments.':'No visible post activity link.'};
+  if(url)s.queue.push({kind:'posts',owner:job.owner,depth:job.depth,url});
+}
+async function collectComments(s,w,snap){
+  const c=w.current,job=c.job,now=Date.now();
+  if(snap.kind!=='posts'||!activityURL(snap.url,job.owner)||snap.owner!==job.owner){if(now-c.since<4000)return;await recover(s,w,'The activity page changed owner. No comment links were recorded.');return;}
+  const coverage=s.commentCoverage[job.owner];coverage.status='collecting';
+  const cards=snap.cards.filter(card=>card.author===job.owner);
+  const signature=JSON.stringify(cards.map(card=>[card.urn,card.control,card.comments.map(c=>c.commentId).sort()]));
+  if(c.candidate!==signature){c.candidate=signature;c.stableSince=now;return;}
+  if(now-c.stableSince<SETTLE)return;
+  const before=Object.keys(s.edges).length;
+  const result=c.capturedSignature===signature?{added:0,observations:0}:ingestComments(s,job,cards.flatMap(card=>card.comments));
+  if(Object.keys(s.nodes).length<s.config.maxNodes)c.capturedSignature=signature;
+  if(result.observations){c.stalls=0;s.lastBatch={added:result.added,links:Object.keys(s.edges).length-before,existing:0,rows:result.observations,owner:job.owner,at:new Date().toISOString()};log(s,`${s.nodes[job.owner].name}: ${result.added} new people · ${result.observations} comment observations`);await save(s);}
+  if(Object.keys(s.nodes).length>=s.config.maxNodes){limit(s);await save(s);return;}
+  if(snap.empty){finishBranch(s,w,'exhausted','No visible posts on this profile.');await save(s);return;}
+  if(c.awaitingComments){
+    if(signature===c.actionSignature&&now-c.since<UNCHANGED_TIMEOUT)return;
+    if(signature===c.actionSignature)c.stalls=(c.stalls||0)+1;
+    else c.stalls=0;
+    c.awaitingComments=false;
+    if((c.stalls||0)>=3){finishBranch(s,w,'incomplete','Post comments stopped changing after three paced actions. Visible evidence is saved.');await save(s);return;}
+  }
+  // Bound each author's work so one long post cannot consume the entire run.
+  if((c.commentActions||0)>=20){finishBranch(s,w,'incomplete','Saved visible post comments; this profile reached its 20-action collection budget.');await save(s);return;}
+  const card=cards.find(card=>card.control);
+  const request=card?{action:card.control,urn:card.urn}:{action:'scroll'};
+  if(now<(s.nextRequestAt||0))return;
+  if(!await permit(s)){await save(s);return;}
+  c.commentActions=(c.commentActions||0)+1;c.awaitingComments=true;c.actionSignature=signature;c.since=now;
+  // Save intent before expansion; a suspended worker consumes new comments on resume.
+  await save(s);
+  await chrome.scripting.executeScript({target:{tabId:w.tabId},func:advanceComments,args:[job.url,request]});
 }
 async function advance(s,w,snap){
   const c=w.current;c.advancePending=true;c.nextActionAt=s.nextRequestAt||0;await save(s);
@@ -120,6 +160,7 @@ async function step(s,w,assign=true){
   if(snap.kind==='blocked'){if(snap.blockType==='login'){s.pauseKind='login';await pause(s,snap.reason,w);}else await restriction(s,w,snap.reason);return;}
   if(snap.kind==='unexpected'){if(now-c.since<4000)return;await recover(s,w,snap.reason);return;}
   if(snap.kind==='loading'){if(now-c.since>LOAD_TIMEOUT)await recover(s,w,'The page did not expose readable results.');return;}
+  if(job.kind==='posts'){await collectComments(s,w,snap);return;}
   if(!c.lastSignature&&!c.advancePending&&(snap.paginationState!=='missing'||c.paginationRevealedAt)&&now-c.since>LOAD_TIMEOUT){await recover(s,w,'The rendered content never settled.');return;}
   if(job.kind==='profile'){
     if(snap.kind!=='profile'||profileURL(snap.url)!==job.owner){if(now-c.since<4000)return;await recover(s,w,'The tab left the expected profile. No data from that page was recorded.');return;}
@@ -128,6 +169,7 @@ async function step(s,w,assign=true){
     if(c.candidate!==signature){c.candidate=signature;c.stableSince=now;return;}
     if(now-c.stableSince<(snap.listUrl?SETTLE:2000))return;
     addPerson(s,snap.person,job.depth);
+    queueComments(s,job,snap);
     if(!snap.listUrl){s.branches[job.owner]={status:'hidden',pages:0,profiles:[],reason:'No visible connection-list link on this profile.'};log(s,`${s.nodes[job.owner].name}: connection list not visible`);w.current=null;await save(s);}
     else {
       const url=listURL(snap.listUrl);if(!url)throw Error('LinkedIn provided an unsupported connection-list link.');
@@ -216,7 +258,8 @@ async function tick(){
     if(s.workspaceManaged&&Date.now()>(s.workspaceLeaseUntil||0)){s.pauseKind='workspace_closed';await pause(s,'Orbit paused because the Site was closed. Reopen it to continue from this exact checkpoint.');return;}
     if(Object.keys(s.nodes).length>=s.config.maxNodes){limit(s);await save(s);return;}
     const rootBranch=s.branches[s.root],hasExpansion=s.queue.some(job=>(job.depth??0)>0);
-    if(hasExpansion&&rootBranch&&['incomplete','hidden','mutuals_only'].includes(rootBranch.status)){
+    const rootCommentsPending=s.queue.some(job=>job.kind==='posts'&&job.owner===s.root)||s.workers?.some(w=>w.current?.job.kind==='posts'&&w.current.job.owner===s.root);
+    if(hasExpansion&&!rootCommentsPending&&!s.commentCoverage?.[s.root]?.profiles.length&&rootBranch&&['incomplete','hidden','mutuals_only'].includes(rootBranch.status)){
       await pause(s,`Direct-layer check needed: Orbit found ${rootBranch.profiles?.length||0}${rootBranch.expectedCount?` of ${rootBranch.expectedCount}`:''} visible direct connections. Resolve this in the collection tab before connections-of-connections are expanded.`);return;
     }
     // Always finish shallower jobs first so every displayed distance has a verified chain.
@@ -283,8 +326,8 @@ async function command(message){
     if(current&&root===current.root&&current.status==='running')return {ok:true};
     if(current&&root===current.root&&['paused','limit'].includes(current.status))return command({type:'RESUME',config});
     await acknowledgeRestriction(current);
-    if(current&&root===current.root){if(Object.keys(current.nodes).length>config.maxNodes)throw Error('Increase the person limit above the number already saved.');current.config={...config,delay:Math.max(120,config.delay||120),depth:Math.max(current.config.depth,config.depth)};current.queue=[];for(const person of Object.values(current.nodes).sort((a,b)=>a.depth-b.depth))if(person.depth<current.config.depth)current.queue.push({kind:'profile',owner:person.id,depth:person.depth});for(const w of workers(current))w.current=null;if(current.branches[root])current.branches[root].status='queued';current.status='running';current.attentionTabId=null;current.engineVersion=3;log(current,'Refreshing your single account network from the direct layer outward');await save(current);await schedule(current);await tick();return {ok:true};}
-    const s=newState(message.url,config);s.nextRequestAt=Math.max(current?.nextRequestAt||0,(await chrome.storage.local.get('orbitNextRequestAt')).orbitNextRequestAt||0);s.engineVersion=3;await save(s);await schedule(s);await tick();return {ok:true};
+    if(current&&root===current.root){if(Object.keys(current.nodes).length>config.maxNodes)throw Error('Increase the person limit above the number already saved.');current.config={...config,delay:Math.max(120,config.delay||120),depth:Math.max(current.config.depth,config.depth)};current.queue=[];current.commentCoverage={};await startRun(current);for(const person of Object.values(current.nodes).sort((a,b)=>a.depth-b.depth))if(person.depth<current.config.depth)current.queue.push({kind:'profile',owner:person.id,depth:person.depth});for(const w of workers(current))w.current=null;if(current.branches[root])current.branches[root].status='queued';current.status='running';current.attentionTabId=null;current.engineVersion=3;log(current,'Refreshing your single account network from the direct layer outward');await save(current);await schedule(current);await tick();return {ok:true};}
+    const s=newState(message.url,config);s.nextRequestAt=Math.max(current?.nextRequestAt||0,(await chrome.storage.local.get('orbitNextRequestAt')).orbitNextRequestAt||0);s.engineVersion=4;await startRun(s);await save(s);await schedule(s);await tick();return {ok:true};
   }
   if(message.type==='PAUSE'){const s=await read();if(s?.status==='running'){s.pauseKind='user';await pause(s,'Paused by you. Your progress and queue are saved.');}return {ok:true};}
   if(message.type==='RESUME'){
@@ -293,7 +336,7 @@ async function command(message){
     if(Object.keys(s.nodes).length>=config.maxNodes)throw Error('Increase the person limit above the current number of people.');
     await acknowledgeRestriction(s);
     s.config=config;s.engineVersion=3;s.status='running';s.pauseKind=null;s.attentionTabId=null;if(s.workspaceManaged)s.workspaceLeaseUntil=Date.now()+180000;
-    const rootBranch=s.branches[s.root],repair=['incomplete','hidden','mutuals_only'].includes(rootBranch?.status);
+    const rootBranch=s.branches[s.root],repair=['incomplete','hidden','mutuals_only'].includes(rootBranch?.status)&&!s.commentCoverage?.[s.root]?.profiles.length&&!workers(s).some(w=>w.current?.job.kind==='posts'&&w.current.job.owner===s.root);
     if(repair){const interrupted=[];for(const w of workers(s)){if(w.current)interrupted.push(w.current.job);w.current=null;}const direct=rootBranch.scope==='connections'&&listURL(rootBranch.url)?{kind:'list',owner:s.root,depth:0,url:rootBranch.url,replayURL:rootBranch.resumeURL||rootBranch.url}:{kind:'profile',owner:s.root,depth:0};const jobs=[direct,...interrupted,...s.queue],seen=new Set();s.queue=jobs.filter(job=>{const key=`${job.kind}|${job.owner}|${job.depth??0}`;if(seen.has(key)||job.owner===s.root&&job!==direct)return false;seen.add(key);return true;});rootBranch.status='queued';rootBranch.reason='Rechecking the complete direct layer before continuing.';log(s,'Resuming by rechecking your direct connections, then continuing the saved queue');}
     else for(const w of workers(s)){if(w.current){w.current.since=Date.now();w.current.candidate=null;w.current.nextActionAt=0;}}
     // Slower mode drains existing lanes before assigning new work to its single lane.

@@ -69,3 +69,33 @@ test('virtualized scrolling uses overlapping windows rather than skipping to the
   container.scrollTo=options=>{target=options.top;};globalThis.getComputedStyle=()=>({overflowY:'auto'});
   await advanceLinkedIn(own,true);assert.equal(target,1400);
 });
+
+const activityProfile='https://www.linkedin.com/in/test-root/recent-activity/all/';
+const commentHTML=(id,name='Commenter',slug='commenter')=>`<article data-id="urn:li:comment:(activity:123,${id})"><a class="comments-post-meta__actor-link" href="/in/${slug}/"><h3>${name}</h3></a><div class="comments-post-meta__headline">Engineer</div><div class="comments-comment-item-content-body"><a href="/in/mentioned/">Mentioned person</a></div></article>`;
+const postHTML=(comments,author='test-root',extra='')=>`<div class="feed-shared-update-v2" data-urn="urn:li:activity:123"><a class="update-components-actor__meta-link" href="/in/${author}/">Author</a>${extra}${comments}</div>`;
+test('profile activity links are collected even with no visible connection list',()=>{
+  const snap=page('<main><h1>Not a direct connection</h1><a href="/in/test-root/recent-activity/all/">Show all activity</a></main>',profile);
+  assert.equal(snap.listUrl,null);assert.equal(snap.activityUrl,activityProfile);
+});
+test('post comments bind the actual commenter to the actual author, excluding mentions',()=>{
+  const snap=page('<main>'+postHTML(commentHTML(456))+'</main>',activityProfile);
+  assert.equal(snap.kind,'posts');assert.equal(snap.cards.length,1);assert.equal(snap.cards[0].comments.length,1);
+  const c=snap.cards[0].comments[0];assert.equal(c.commenter.url,'https://www.linkedin.com/in/commenter/');assert.equal(c.author,profile);assert.equal(c.post,'https://www.linkedin.com/feed/update/urn:li:activity:123/');
+});
+test('reposts, unrelated authors and hidden comments cannot create links to the activity owner',()=>{
+  const foreign=page('<main>'+postHTML(commentHTML(456),'another-author')+'</main>',activityProfile);assert.equal(foreign.cards.length,0);
+  const repost=page('<main>'+postHTML(commentHTML(456),'test-root','<div class="update-components-header__text-view">Test reposted</div>')+'</main>',activityProfile);assert.equal(repost.cards.length,0);
+  const hidden=page('<main>'+postHTML('<div hidden>'+commentHTML(456)+'</div>')+'</main>',activityProfile);assert.equal(hidden.cards[0].comments.length,0);
+});
+test('nested replies retain their own author without duplicating the parent commenter',()=>{
+  const parent=commentHTML(456).replace('</article>',commentHTML(789,'Reply Author','reply-author')+'</article>');
+  const snap=page('<main>'+postHTML(parent)+'</main>',activityProfile);
+  assert.deepEqual(snap.cards[0].comments.map(c=>c.commenter.name),['Commenter','Reply Author']);
+});
+test('comment advancement expands only comments, never like or reply-composer controls',async()=>{
+  const {advanceComments}=await import('../src/collector.js');
+  page('<main>'+postHTML('<button>Like</button><button>Reply</button><button>Load more comments</button>')+'</main>',activityProfile);
+  const clicked=[];document.querySelectorAll('button').forEach(b=>b.click=()=>clicked.push(b.textContent));
+  assert.equal(await advanceComments(activityProfile,{action:'more',urn:'urn:li:activity:123'}),'expanded');assert.deepEqual(clicked,['Load more comments']);
+  await assert.rejects(async()=>advanceComments(activityProfile.replace('test-root','other'),{action:'more',urn:'urn:li:activity:123'}),/owner changed/);
+});
