@@ -23,3 +23,26 @@ test('equivalent owner/degree filters tolerate JSON ordering and URL normalizati
   assert.equal(sameConnectionOwner(a,base+'?connectionOf='),false);
   assert.equal(sameConnectionOwner(a,base+'?connectionOf=owner&connectionOf=other'),false);
 });
+
+test('visible comments create equal-weight undirected paths and keep source direction',async()=>{
+  const {ingestComments,relationshipTypes,addEdge}=await import('../src/core.js');
+  const root='https://www.linkedin.com/in/author/',other='https://www.linkedin.com/in/commenter/';
+  const s=newState(root,{depth:2}),job={kind:'posts',owner:root,depth:0,url:root+'recent-activity/all/'};
+  const c={commenter:{url:other,name:'Someone outside my LinkedIn connections'},author:root,post:'https://www.linkedin.com/feed/update/urn:li:activity:123/',commentId:'urn:li:comment:(activity:123,456)',observedAt:'2026-09-06T12:00:00Z'};
+  assert.equal(ingestComments(s,job,[c]).added,1);assert.deepEqual(route(s,other),[root,other]);
+  assert.equal(ingestComments(s,job,[c]).observations,0);assert.equal(Object.keys(s.edges).length,1);
+  const edge=Object.values(s.edges)[0];assert.equal(edge.evidence[0].commenter,other);assert.equal(edge.evidence[0].author,root);
+  addEdge(s,root,other,'https://www.linkedin.com/mynetwork/invite-connect/connections/');
+  assert.equal(Object.keys(s.edges).length,1);assert.deepEqual(new Set(relationshipTypes(edge)),new Set(['comment_interaction','visible_connection_list']));
+  const restored=importGraph(exportGraph(s));assert.deepEqual(route(restored,other),[root,other]);assert.equal(Object.values(restored.edges)[0].evidence[0].commentId,c.commentId);
+});
+
+test('comment evidence rejects mismatched endpoints, parent posts and foreign origins',async()=>{
+  const {normalizeEvidence}=await import('../src/core.js');
+  const a='https://www.linkedin.com/in/a/',b='https://www.linkedin.com/in/b/';
+  const e={type:'comment_interaction',commenter:a,author:b,post:'https://www.linkedin.com/feed/update/urn:li:activity:123/',commentId:'urn:li:comment:(activity:123,456)',observedAt:'2026-09-06T12:00:00Z'};
+  assert.ok(normalizeEvidence(e,a,b));assert.ok(normalizeEvidence(e,b,a));
+  assert.equal(normalizeEvidence({...e,author:a},a,b),null);
+  assert.equal(normalizeEvidence({...e,commentId:'urn:li:comment:(activity:999,456)'},a,b),null);
+  assert.equal(normalizeEvidence({...e,post:'https://evil.example/feed/update/urn:li:activity:123/'},a,b),null);
+});

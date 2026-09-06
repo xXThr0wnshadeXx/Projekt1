@@ -6,7 +6,7 @@ export const connections=sqliteTable('connections',{
   owner:text('owner').notNull(),a:text('a').notNull(),b:text('b').notNull(),firstSeen:text('first_seen').notNull(),lastSeen:text('last_seen').notNull()
 },t=>[primaryKey({columns:[t.owner,t.a,t.b]}),index('connections_reverse').on(t.owner,t.b,t.a)]);
 export const evidence=sqliteTable('evidence',{
-  owner:text('owner').notNull(),a:text('a').notNull(),b:text('b').notNull(),source:text('source').notNull(),observedAt:text('observed_at').notNull()
+  owner:text('owner').notNull(),a:text('a').notNull(),b:text('b').notNull(),source:text('source').notNull(),observedAt:text('observed_at').notNull(),detailsJson:text('details_json').notNull().default('{}')
 },t=>[primaryKey({columns:[t.owner,t.a,t.b,t.source]})]);
 export const peopleContributors=sqliteTable('people_contributors',{
   owner:text('owner').notNull(),personId:text('person_id').notNull(),contributorId:text('contributor_id').notNull(),firstSeen:text('first_seen').notNull(),lastSeen:text('last_seen').notNull()

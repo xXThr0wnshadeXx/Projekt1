@@ -1,3 +1,4 @@
+import {profileURL} from './core.js';
 const stopWords=new Set(['a','an','and','at','for','in','of','on','the','to','with']);
 const aliasGroups=[
   ['sjsu','san jose state','san jose state university'],
@@ -40,6 +41,7 @@ function editDistance(a,b){
 }
 function tokenSimilarity(a,b){if(a===b)return 1;if(a.length>=3&&b.length>=3&&(a.startsWith(b)||b.startsWith(a)))return .9-Math.abs(a.length-b.length)*.025;const max=Math.max(a.length,b.length),allowed=max>=10?3:max>=6?2:1,distance=editDistance(a,b);return distance<=allowed?1-distance/max:0;}
 export function scorePerson(person,query){
+  const profile=profileURL(query);if(profile)return {score:profileURL(person?.url||person?.id)===profile?100:0,reason:'Exact profile URL'};
   const q=normalizeSearch(query);if(!q)return {score:1,reason:''};const doc=searchDocument(person),name=normalizeSearch(person?.name),tokens=doc.split(' '),expansions=queryExpansions(q);let score=0,reason='Related profile information';
   for(const term of expansions){const escaped=term.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),whole=new RegExp(`(?:^| )${escaped}(?: |$)`);if(name===term){score=Math.max(score,100);reason='Exact name';}else if(name.startsWith(term)){score=Math.max(score,92);reason='Name starts with this';}else if(whole.test(name)){score=Math.max(score,88);reason='Name match';}else if(name.includes(term)){score=Math.max(score,82);reason='Name contains this';}else if(whole.test(doc)){score=Math.max(score,72);reason='Profile detail match';}}
   const queryTokens=words(q).filter(token=>token.length>=3&&!stopWords.has(token));if(queryTokens.length){let matched=0,total=0,exact=0;const minimum=queryTokens.length===1?.8:.74;for(const queryToken of queryTokens){let best=0;for(const token of tokens)best=Math.max(best,tokenSimilarity(queryToken,token));if(best>=minimum){matched++;total+=best;if(best===1)exact++;}}const coverage=matched/queryTokens.length;if(matched&&(queryTokens.length===1||coverage>=.6)){const fuzzy=Math.round(42+coverage*24+(total/matched)*18);if(fuzzy>score){score=fuzzy;reason=exact===queryTokens.length?'Related keyword match':coverage===1?'Close spelling or term match':'Related profile terms';}}}

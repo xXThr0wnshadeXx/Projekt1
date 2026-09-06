@@ -33,3 +33,25 @@ test('transient failures progressively back off without resetting a server deadl
   assert.equal(first.nextAt,121000);assert.equal(second.nextAt,361000);
   assert.equal(backoffPolicy({nextAt:DAY},120,1000).nextAt,DAY);
 });
+
+test('a fresh run may issue two startup actions, with every later action paced',async()=>{
+  const {beginRun}=await import('../src/collection-policy.js');
+  let p=beginRun({},'run',1000);
+  p=reserveAction(p,120,1000,'run');
+  assert.equal(nextAction(p,120,1001,'run').at,1001);
+  p=reserveAction(p,120,1001,'run');
+  assert.equal(nextAction(p,120,1002,'run').at,121001);
+  assert.throws(()=>reserveAction(p,120,1002,'run'));
+  p=reserveAction(p,120,121001,'run');assert.equal(p.nextAt,241001);
+});
+
+test('startup allowance cannot override another run, rolling budgets or a retry cooldown',async()=>{
+  const {beginRun}=await import('../src/collection-policy.js');
+  let p=reserveAction(beginRun({},'one',1000),120,1000,'one');
+  assert.equal(nextAction(p,120,1001,'different').at,121000);
+  assert.equal(nextAction(beginRun(p,'two',1001),120,1001,'two').at,121000);
+  const saved=JSON.parse(JSON.stringify(p));assert.equal(nextAction(saved,120,1001,'one').at,1001);
+  const backed=backoffPolicy(p,120,1001);assert.equal(nextAction(backed,120,1002,'one').at,121001);
+  const capped={...p,actions:Array.from({length:HOURLY_ACTIONS},()=>1000)};
+  assert.equal(nextAction(capped,120,1001,'one').at,1000+HOUR);
+});

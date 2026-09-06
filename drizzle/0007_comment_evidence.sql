@@ -1,0 +1,1 @@
+ALTER TABLE `evidence` ADD `details_json` text DEFAULT '{}' NOT NULL;

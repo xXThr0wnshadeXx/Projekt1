@@ -1,4 +1,4 @@
-import {profileURL,listURL} from '../src/core.js';
+import {profileURL,normalizeEvidence} from '../src/core.js';
 import {buildKeywords,ftsQuery,rankPeople} from '../src/search.js';
 const MAX_BATCH=100;
 const short=(v,n)=>String(v||'').slice(0,n);
@@ -10,7 +10,7 @@ export function validateBatch(data){
   const edges=inputEdges.map(e=>{
     const a=profileURL(e.source),b=profileURL(e.target);if(!a||!b||a===b)throw Error('Invalid connection.');
     if(!Array.isArray(e.evidence)||!e.evidence.length||e.evidence.length>20)throw Error('Each link needs 1–20 source observations.');
-    const [from,to]=[a,b].sort();const observations=e.evidence.map(v=>{if(!listURL(v.url)||!Number.isFinite(Date.parse(v.observedAt)))throw Error('Invalid connection evidence.');return {source:v.url,at:new Date(v.observedAt).toISOString()};});
+    const [from,to]=[a,b].sort();const observations=e.evidence.map(v=>{const evidence=normalizeEvidence(v,a,b);if(!evidence)throw Error('Invalid connection evidence.');return {source:evidence.url,at:evidence.observedAt,details:JSON.stringify(evidence)};});
     return {a:from,b:to,observations,at:now};
   });
   const cleanImports=imports.map(item=>{if(!/^[a-f0-9]{64}$/.test(item.id))throw Error('Invalid import identifier.');const metadata=JSON.stringify(item.metadata??{});if(metadata.length>200000)throw Error('Import metadata is too large.');return {id:item.id,fileName:short(item.fileName,255),format:short(item.format,100),schemaVersion:short(item.schemaVersion,40),exportedAt:Number.isFinite(Date.parse(item.exportedAt))?new Date(item.exportedAt).toISOString():now,metadata,at:now};});
@@ -31,10 +31,10 @@ export async function ingest(db,owner,data,contributor=owner){
       SELECT ?,json_extract(j.value,'$.a'),json_extract(j.value,'$.b'),json_extract(j.value,'$.at'),json_extract(j.value,'$.at') FROM json_each(?) j
       CROSS JOIN people p ON p.owner=? AND p.id=json_extract(j.value,'$.a') CROSS JOIN people q ON q.owner=? AND q.id=json_extract(j.value,'$.b') WHERE 1
       ON CONFLICT(owner,a,b) DO UPDATE SET last_seen=excluded.last_seen`).bind(owner,edgeJSON,owner,owner),
-    db.prepare(`INSERT INTO evidence(owner,a,b,source,observed_at)
-      SELECT ?,json_extract(j.value,'$.a'),json_extract(j.value,'$.b'),json_extract(j.value,'$.source'),json_extract(j.value,'$.at') FROM json_each(?) j
+    db.prepare(`INSERT INTO evidence(owner,a,b,source,observed_at,details_json)
+      SELECT ?,json_extract(j.value,'$.a'),json_extract(j.value,'$.b'),json_extract(j.value,'$.source'),json_extract(j.value,'$.at'),json_extract(j.value,'$.details') FROM json_each(?) j
       CROSS JOIN connections c ON c.owner=? AND c.a=json_extract(j.value,'$.a') AND c.b=json_extract(j.value,'$.b') WHERE 1
-      ON CONFLICT(owner,a,b,source) DO UPDATE SET observed_at=MAX(evidence.observed_at,excluded.observed_at)`).bind(owner,observations,owner),
+      ON CONFLICT(owner,a,b,source) DO UPDATE SET observed_at=MAX(evidence.observed_at,excluded.observed_at),details_json=excluded.details_json`).bind(owner,observations,owner),
     db.prepare(`INSERT INTO people_contributors(owner,person_id,contributor_id,first_seen,last_seen)
       SELECT ?,json_extract(value,'$.id'),?,json_extract(value,'$.at'),json_extract(value,'$.at') FROM json_each(?) WHERE 1
       ON CONFLICT(owner,person_id,contributor_id) DO UPDATE SET last_seen=excluded.last_seen`).bind(owner,contributor,nodeJSON),
@@ -83,6 +83,14 @@ export async function activity(db,owner){
     WHERE c.owner=? ORDER BY c.last_seen DESC LIMIT 12`).bind(owner).all()).results;
   return {...summary,recentPeople,recentConnections,recentImports:await listImports(db,owner)};
 }
+async function edgeSources(db,owner,pairs){
+  if(!pairs.length)return new Map();
+  const rows=(await db.prepare(`SELECT json_extract(j.value,'$.a') a,json_extract(j.value,'$.b') b,
+    (SELECT json_group_array(json_object('url',source,'observedAt',observed_at,'details',details_json)) FROM
+      (SELECT source,observed_at,details_json FROM evidence WHERE owner=? AND a=json_extract(j.value,'$.a') AND b=json_extract(j.value,'$.b') ORDER BY observed_at DESC LIMIT 20)) observations
+    FROM json_each(?) j`).bind(owner,JSON.stringify(pairs)).all()).results;
+  return new Map(rows.map(row=>[`${row.a}|${row.b}`,JSON.parse(row.observations||'[]').map(e=>({type:'visible_connection_list',...JSON.parse(e.details||'{}'),url:e.url,observedAt:e.observedAt}))]));
+}
 export async function neighborhood(db,owner,root,depth=2,limit=1000){
   root=profileURL(root);if(!root)throw Error('Enter a LinkedIn profile URL.');
   if(!Number.isInteger(depth)||depth<1||depth>2||!Number.isInteger(limit)||limit<10||limit>3000)throw Error('Choose 1–2 layers and 10–3,000 people.');
@@ -109,9 +117,8 @@ export async function neighborhood(db,owner,root,depth=2,limit=1000){
   for(const p of details)Object.assign(nodes.get(p.id),p);
   // Indexed edge evidence lookup, bounded to the displayed links.
   const pairs=[...edges.values()].map(e=>({a:e.source,b:e.target}));
-  const sources=(await db.prepare(`SELECT json_extract(j.value,'$.a') a,json_extract(j.value,'$.b') b,
-    (SELECT json_object('url',e.source,'observedAt',e.observed_at) FROM evidence e WHERE e.owner=? AND e.a=json_extract(j.value,'$.a') AND e.b=json_extract(j.value,'$.b') ORDER BY e.observed_at DESC LIMIT 1) observation FROM json_each(?) j`).bind(owner,JSON.stringify(pairs)).all()).results;
-  for(const e of sources){const edge=edges.get(`${e.a}|${e.b}`);if(edge&&e.observation)edge.evidence.push({...JSON.parse(e.observation),type:'visible_connection_list'});}
+  const sources=await edgeSources(db,owner,pairs);
+  for(const edge of edges.values())edge.evidence=sources.get(`${edge.source}|${edge.target}`)||[];
   return {found:true,root,nodes:[...nodes.values()],edges:[...edges.values()],truncated,depth,limit};
 }
 export async function shortestPath(db,owner,from,to,maxDepth=6,limit=10000){
@@ -133,7 +140,8 @@ export async function shortestPath(db,owner,from,to,maxDepth=6,limit=10000){
     FROM connection_contributors c LEFT JOIN users u ON u.id=c.contributor_id
     WHERE c.owner=? AND EXISTS (SELECT 1 FROM json_each(?) j WHERE c.a=json_extract(j.value,'$.a') AND c.b=json_extract(j.value,'$.b')) ORDER BY c.last_seen DESC`).bind(owner,JSON.stringify(pairs)).all()).results:[];
   const contributors=new Map();for(const row of contributions){const key=`${row.a}|${row.b}`;if(!contributors.has(key))contributors.set(key,[]);const values=contributors.get(key);if(!values.includes(row.contributor)&&values.length<5)values.push(row.contributor);}
-  return {found:true,from,to,hops:Math.max(0,ids.length-1),nodes:ids.map(id=>byId.get(id)||{id,name:id}),edges:pairs.map(pair=>({...pair,contributors:contributors.get(`${pair.a}|${pair.b}`)||[]})),truncated};
+  const sources=await edgeSources(db,owner,pairs);
+  return {found:true,from,to,hops:Math.max(0,ids.length-1),nodes:ids.map(id=>byId.get(id)||{id,name:id}),edges:pairs.map(pair=>({...pair,evidence:sources.get(`${pair.a}|${pair.b}`)||[],contributors:contributors.get(`${pair.a}|${pair.b}`)||[]})),truncated};
 }
 export async function resetContribution(db,owner,contributor){
   contributor=short(contributor,200);if(!contributor)throw Error('Invalid contributor.');

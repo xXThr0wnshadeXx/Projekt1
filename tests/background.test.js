@@ -8,23 +8,23 @@ const profile=(p,url)=>({kind:'profile',url:p.url,person:p,listUrl:url,scope:'co
 const page=(url,people,extra={})=>({kind:'list',url,people,signature:people.map(p=>p.url).join('|'),hasNext:false,...extra});
 let serial=0;
 async function harness(t,initial,saved={}){
-  const data={...structuredClone(saved),...(initial?{orbitNetwork:structuredClone(initial)}:{})},listeners={},alarms=new Map(),tabs=new Map();let now=1000000,nextTab=0,advances=0,snapshots={},onAdvance;const requests=[];
+  const data={...structuredClone(saved),...(initial?{orbitNetwork:structuredClone(initial)}:{})},listeners={},alarms=new Map(),tabs=new Map();let now=1000000,nextTab=0,advances=0,snapshots={},onAdvance,onComments;const requests=[];
   t.mock.method(Date,'now',()=>now);
   t.mock.method(globalThis,'setTimeout',()=>({unref(){}}));t.mock.method(globalThis,'clearTimeout',()=>{});
   const event=name=>({addListener(fn){listeners[name]=fn;}});
-  globalThis.chrome={runtime:{id:'test-extension',getURL:p=>`chrome-extension://test-extension/${p}`,onMessage:event('message'),onMessageExternal:event('external'),onStartup:event('startup'),onInstalled:event('installed')},storage:{local:{async get(k){return structuredClone({[k]:data[k]});},async set(v){Object.assign(data,structuredClone(v));},async remove(k){delete data[k];}}},alarms:{async create(k,v){alarms.set(k,v);},async clear(k){alarms.delete(k);},async get(k){return alarms.get(k);},onAlarm:event('alarm')},tabs:{onUpdated:event('updated'),async create(v){requests.push(now);const tab={id:++nextTab,status:'complete',lastAccessed:now,windowId:1,...v};tabs.set(tab.id,tab);return tab;},async get(id){if(!tabs.has(id))throw Error('No tab');return tabs.get(id);},async update(id,v){if(v.url)requests.push(now);Object.assign(tabs.get(id),v);return tabs.get(id);}},windows:{async update(id,v){return {id,...v};}},scripting:{async executeScript({target,func}){if(func.name==='advanceLinkedIn'){requests.push(now);advances++;onAdvance?.(tabs.get(target.tabId));return [{result:'next'}];}const value=snapshots[tabs.get(target.tabId).url];if(value instanceof Error)throw value;return [{result:structuredClone(value)}];}},action:{onClicked:event('action')},webRequest:{onHeadersReceived:event('headers')}};
+  globalThis.chrome={runtime:{id:'test-extension',getURL:p=>`chrome-extension://test-extension/${p}`,onMessage:event('message'),onMessageExternal:event('external'),onStartup:event('startup'),onInstalled:event('installed')},storage:{local:{async get(k){return structuredClone({[k]:data[k]});},async set(v){Object.assign(data,structuredClone(v));},async remove(k){delete data[k];}}},alarms:{async create(k,v){alarms.set(k,v);},async clear(k){alarms.delete(k);},async get(k){return alarms.get(k);},onAlarm:event('alarm')},tabs:{onUpdated:event('updated'),async create(v){requests.push(now);const tab={id:++nextTab,status:'complete',lastAccessed:now,windowId:1,...v};tabs.set(tab.id,tab);return tab;},async get(id){if(!tabs.has(id))throw Error('No tab');return tabs.get(id);},async update(id,v){if(v.url)requests.push(now);Object.assign(tabs.get(id),v);return tabs.get(id);}},windows:{async update(id,v){return {id,...v};}},scripting:{async executeScript({target,func}){if(func.name==='advanceComments'){requests.push(now);onComments?.(tabs.get(target.tabId));return [{result:'expanded'}];}if(func.name==='advanceLinkedIn'){requests.push(now);advances++;onAdvance?.(tabs.get(target.tabId));return [{result:'next'}];}const value=snapshots[tabs.get(target.tabId).url];if(value instanceof Error)throw value;return [{result:structuredClone(value)}];}},action:{onClicked:event('action')},webRequest:{onHeadersReceived:event('headers')}};
   await import(`../src/background.js?test=${serial++}`);
   const command=msg=>new Promise(resolve=>listeners.message(msg,{id:'test-extension',url:'chrome-extension://test-extension/index.html'},resolve));
   const flush=async()=>{for(let i=0;i<30;i++)await new Promise(r=>setImmediate(r));};
   const tick=async(ms=500)=>{now+=ms;const s=data.orbitNetwork,c=s?.current;if(c&&!c.lastSignature&&!c.paginationRevealedAt&&c.job.kind==='list'&&snapshots[tabs.get(s.tabId)?.url]?.paginationState==='missing')now=Math.max(now,s.nextRequestAt||0);if(c?.navPending||c?.advancePending||c?.retryAt||(c?.paginationWaiting))now=Math.max(now,s.nextRequestAt||0,c.nextActionAt||0,c.retryAt||0);listeners.alarm({name:'orbit-collect'});await flush();};
   const elapse=async ms=>{now+=ms;listeners.alarm({name:'orbit-collect'});await flush();};
-  return {data,listeners,alarms,tabs,requests,command,tick,elapse,flush,set snapshots(v){snapshots=v;},set onAdvance(v){onAdvance=v;},get advances(){return advances;}};
+  return {data,listeners,alarms,tabs,requests,command,tick,elapse,flush,set snapshots(v){snapshots=v;},set onAdvance(v){onAdvance=v;},set onComments(v){onComments=v;},get advances(){return advances;}};
 }
-test('two layers obey two-minute request spacing; restrictions pause collection',async t=>{
+test('first two actions start promptly, later actions obey two-minute spacing; restrictions pause collection',async t=>{
   const h=await harness(t);h.snapshots={[root]:profile(person('root'),list('root')),[list('root')]:page(list('root'),[person('a')]),[a]:profile(person('a'),list('a')),[list('a')]:page(list('a'),[person('b')])};
   assert.equal((await h.command({type:'START',url:root})).ok,true);
   for(let i=0;i<30;i++)await h.tick();
-  const s=h.data.orbitNetwork;assert.equal(s.status,'complete');assert.deepEqual(route(s,b),[root,a,b]);assert.equal(s.pages,2);assert.equal(h.advances,0);for(let i=1;i<h.requests.length;i++)assert.ok(h.requests[i]-h.requests[i-1]>=120000);assert.equal(h.alarms.size,0);
+  const s=h.data.orbitNetwork;assert.equal(s.status,'complete');assert.deepEqual(route(s,b),[root,a,b]);assert.equal(s.pages,2);assert.equal(h.advances,0);for(let i=2;i<h.requests.length;i++)assert.ok(h.requests[i]-h.requests[i-1]>=120000);assert.equal(h.alarms.size,0);
   h.snapshots={[root]:{kind:'blocked',url:root,reason:'LinkedIn verification required'}};
   await h.command({type:'START',url:root});await h.tick();await h.tick();assert.equal(h.data.orbitNetwork.status,'paused');assert.equal(h.alarms.size,0);
   assert.equal((await h.command({type:'RESUME',config:{maxNodes:1000,depth:3,delay:0}})).ok,false);
@@ -137,7 +137,7 @@ test('own list counts actual paced scrolls, never idle polls, and avoids reloads
   const own='https://www.linkedin.com/mynetwork/invite-connect/connections/';
   const h=await harness(t);h.snapshots={[root]:profile(person('root'),own),[own]:page(own,[person('a')],{isOwn:true,expectedCount:10})};
   await h.command({type:'START',url:root,config:{depth:1}});
-  for(let i=0;i<5;i++)await h.tick();
+  for(let i=0;i<4;i++)await h.tick();
   assert.equal(h.advances,0);
   for(let i=0;i<20;i++)await h.elapse(1000);
   assert.equal(h.data.orbitNetwork.status,'running');assert.equal(h.advances,0);
@@ -149,7 +149,7 @@ test('own list counts actual paced scrolls, never idle polls, and avoids reloads
   assert.equal(s.status,'complete');assert.equal(s.branches[root].status,'incomplete');
   assert.equal(h.requests.length,5); // Profile, list, three scrolls; zero reloads.
   assert.equal(s.pages,1);
-  for(let i=1;i<h.requests.length;i++)assert.ok(h.requests[i]-h.requests[i-1]>=120000);
+  for(let i=2;i<h.requests.length;i++)assert.ok(h.requests[i]-h.requests[i-1]>=120000);
 });
 
 test('virtualized own lists complete from the union of unique captured profiles',async t=>{
@@ -224,7 +224,7 @@ test('restrictions are detected on a slow-loading page before any retry navigati
 
 test('an action is never issued if its throttle reservation cannot be saved',async t=>{
   const h=await harness(t),original=chrome.storage.local.set;
-  chrome.storage.local.set=async value=>{if(value.orbitCollectionPolicy)throw Error('Storage unavailable');return original(value);};
+  chrome.storage.local.set=async value=>{if(value.orbitCollectionPolicy?.actions.length)throw Error('Storage unavailable');return original(value);};
   await h.command({type:'START',url:root});
   assert.equal(h.requests.length,0);assert.equal(h.data.orbitNetwork.status,'paused');
   chrome.storage.local.set=original;
@@ -255,4 +255,28 @@ test('a late restriction response persists even after the active job is cancelle
   h.listeners.headers({tabId:1,statusCode:429,type:'xmlhttprequest',responseHeaders:[{name:'Retry-After',value:'7200'}]});await h.flush();
   assert.equal(h.data.orbitCollectionPolicy.nextAt,8200000);
   assert.equal((await h.command({type:'START',url:a})).ok,false);assert.equal(h.requests.length,1);
+});
+
+test('a profile with hidden connections still discovers commenters and expands their paths',async t=>{
+  const url=root+'recent-activity/all/',h=await harness(t);
+  const comments=[{commenter:person('a'),author:root,post:'https://www.linkedin.com/feed/update/urn:li:activity:123/',commentId:'urn:li:comment:(activity:123,456)',observedAt:'2026-09-06T00:00:00Z'}];
+  const snapshots={[root]:{...profile(person('root'),null),activityUrl:url},[url]:{kind:'posts',url,owner:root,cards:[{urn:'urn:li:activity:123',author:root,post:comments[0].post,comments:[],control:'open'}]},[a]:profile(person('a'),list('a')),[list('a')]:page(list('a'),[person('b')])};
+  h.snapshots=snapshots;h.onComments=()=>{snapshots[url].cards[0].comments=comments;snapshots[url].cards[0].control=null;};
+  await h.command({type:'START',url:root});
+  for(let i=0;i<65;i++)await h.elapse(10000);
+  const s=h.data.orbitNetwork;
+  assert.ok(s.nodes[a]);assert.deepEqual(route(s,a),[root,a]);assert.equal(s.branches[root].status,'hidden');
+  assert.equal(s.commentCoverage[root].profiles.length,1);assert.equal(Object.values(s.edges)[0].evidence[0].type,'comment_interaction');
+  for(let i=0;i<30;i++)await h.tick();
+  assert.deepEqual(route(h.data.orbitNetwork,b),[root,a,b]);
+  assert.ok(h.requests[1]-h.requests[0]<120000);
+  for(let i=2;i<h.requests.length;i++)assert.ok(h.requests[i]-h.requests[i-1]>=120000);
+});
+
+test('comment collection pauses on restrictions and never consumes a startup exemption to bypass them',async t=>{
+  const h=await harness(t),url=root+'recent-activity/all/';
+  h.snapshots={[root]:{...profile(person('root'),null),activityUrl:url},[url]:{kind:'blocked',reason:'LinkedIn rate limit',url}};
+  await h.command({type:'START',url:root});for(let i=0;i<10;i++)await h.tick();
+  assert.equal(h.requests.length,2);assert.equal(h.data.orbitNetwork.status,'paused');assert.ok(h.data.orbitCollectionPolicy.blocked);
+  assert.equal((await h.command({type:'RESUME'})).ok,false);assert.equal(h.requests.length,2);
 });
