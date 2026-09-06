@@ -15,7 +15,7 @@ test('facts guards reject missing session, cross-origin, body overrides, oversiz
  assert.equal((await h.post({...command,padding:'x'.repeat(17000)})).status,413);
  assert.equal((await fetch(h.base+'/api/facts/review',{headers:{cookie}})).status,400);assert.equal(calls,0);
 });
-test('facts failures remain sanitized and unavailable discovery names do not return success',async t=>{
+test('facts failures remain sanitized and discovery boundaries do not return successful placeholders',async t=>{
  for(const [error,status] of [[new ServiceError('FORBIDDEN',403),403],[new ServiceError('VERSION_CONFLICT',409),409],[new Error('private ledger detail'),500]]){const h=await setup(t,{confirm:async()=>{throw error;}});const r=await h.post();assert.equal(r.status,status);assert.ok(!(await r.text()).includes('private ledger'));}
- const h=await setup(t);assert.equal((await h.post()).status,502);assert.equal((await fetch(h.base+'/api/discovery/capabilities')).status,404);assert.equal((await fetch(h.base+'/api/discovery')).status,404);
+ const h=await setup(t);assert.equal((await h.post()).status,502);assert.equal((await fetch(h.base+'/api/discovery/capabilities')).status,401);assert.equal((await fetch(h.base+'/api/discovery')).status,404);
 });

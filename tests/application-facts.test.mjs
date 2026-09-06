@@ -47,6 +47,6 @@ test('combined application migrates, confirms facts over HTTP and returns qualif
   g=await get('/api/graph?scopeId='+a.scopeId);r=await post('/api/search',{scopeId:a.scopeId,expectedGraphVersion:g.graphVersion,goalText:'3'});assert.equal(r.status,200);const result=await r.json();assert.equal(result.paths.length,1);assert.ok(result.paths[0].explanation.uncertainties.some(s=>s.includes('not been independently verified')));assert.ok(result.warnings.some(s=>s.includes('Willingness')));
   assert.equal((await fetch(base+'/api/facts/review?scopeId='+a.scopeId)).status,401);
   assert.equal((await fetch(base+'/api/facts/review?scopeId=foreign',{headers})).status,403);
-  const ledger=await admin.query(`SELECT id FROM ${schema}.app_migrations ORDER BY id`);assert.deepEqual(ledger.rows.map(r=>r.id),['001_private_storage','002_contacts_grants','003_fact_reviews']);
+  const ledger=await admin.query(`SELECT id FROM ${schema}.app_migrations ORDER BY id`);assert.deepEqual(ledger.rows.map(r=>r.id),['001_private_storage','002_contacts_grants','003_fact_reviews','005_discovery_receipts']);
  }finally{await app?.close();if(!app)await db?.close();await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);await admin.end();}
 });

@@ -1,3 +1,6 @@
+import type {DiscoveryApplication} from './discovery/composition.js';
+import {validateDiscoveryRequest} from './discovery/contracts.js';
+import {discoveryServiceError} from './discovery/composition.js';
 import type {FactReviewService} from './facts/service.js';
 import {validateConfirmFacts,validateFactReview} from './facts/contracts.js';
 import { createServer, type IncomingMessage, type RequestListener, type ServerResponse } from 'node:http';
@@ -14,7 +17,7 @@ export interface HttpAuthPort extends AuthPort {
   displaySession(userId:string):Promise<SessionView>;
   revokeSession(credential:unknown):Promise<void>;
 }
-export interface HttpDependencies { service:BackendService;auth:HttpAuthPort;browserOrigin:string;oauth?:Pick<GoogleLoginPort,'start'|'callback'|'clearTransactionCookie'>;contacts?:Pick<GoogleContacts,'start'|'callback'|'clearTransactionCookie'>;imports?:Pick<GoogleImportBridge,'start'|'review'|'approve'>;facts?:Pick<FactReviewService,'review'|'confirm'> }
+export interface HttpDependencies { service:BackendService;auth:HttpAuthPort;browserOrigin:string;oauth?:Pick<GoogleLoginPort,'start'|'callback'|'clearTransactionCookie'>;contacts?:Pick<GoogleContacts,'start'|'callback'|'clearTransactionCookie'>;imports?:Pick<GoogleImportBridge,'start'|'review'|'approve'>;facts?:Pick<FactReviewService,'review'|'confirm'>;discovery?:Pick<DiscoveryApplication,'discover'|'capabilities'> }
 const sessionShape = schema.object({actor:schema.object({id:schema.id,displayName:schema.string}),scopes:schema.array(schema.object({id:schema.id,label:schema.string}))});
 const cookieName='projekt1_session';
 const bodyLimit=16*1024;
@@ -92,8 +95,16 @@ export function createApiHandler(deps:HttpDependencies):RequestListener {
         response.setHeader('Set-Cookie',`${cookieName}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${expectedOrigin.startsWith('https:')?'; Secure':''}`);
         response.writeHead(204);response.end();return;
       }
-      // Reserved for the reviewed discovery module: /api/discovery and /api/discovery/capabilities.
-      // No discovery success response is synthesized before that integration.
+      if((method==='GET'&&url.pathname==='/api/discovery/capabilities')||(method==='POST'&&url.pathname==='/api/discovery')) {
+        if(!await deps.auth.resolveSession(token))throw new ServiceError('UNAUTHENTICATED',401);
+        if(!deps.discovery)throw new ServiceError('SOURCE_UNAVAILABLE',502);
+        const cancelled=new AbortController();
+        const abort=()=>{if(!response.writableEnded)cancelled.abort();};response.on('close',abort);
+        try {
+          if(method==='GET')json(response,200,await deps.discovery.capabilities(token));
+          else json(response,200,await deps.discovery.discover(token,validateDiscoveryRequest(await readJson(request)),cancelled.signal));
+        }catch(error){throw discoveryServiceError(error);}finally{response.removeListener('close',abort);}return;
+      }
       if((method==='GET'&&url.pathname==='/api/facts/review')||(method==='POST'&&url.pathname==='/api/facts/confirm')) {
         if(!await deps.auth.resolveSession(token))throw new ServiceError('UNAUTHENTICATED',401);
         const input=method==='GET'?validateFactReview({scopeId:url.searchParams.get('scopeId')}):validateConfirmFacts(await readJson(request));
