@@ -4,7 +4,7 @@ This server-only module executes offline on the **exact** `RetrievedPublicDocume
 
 ## Executable coverage
 
-`explicit-sentences-v1` recognizes complete English sentences, terminated by a period, with two to four capitalized Unicode name tokens on each person endpoint. The supported predicates are:
+`explicit-sentences-v2` retains the `public-source-text-v1` grammar for complete English sentences, terminated by a period, with two to four capitalized Unicode name tokens on each person endpoint. The supported predicates are:
 
 - `is a friend of` → `FRIEND_OF` / `FRIEND`
 - `is a close friend of` → `CLOSE_FRIEND_OF` / `CLOSE_FRIEND`
@@ -18,7 +18,9 @@ Dates on assertions are always `{start:null,end:null}` in this version. Date-bea
 
 Sentence length is at most 500 UTF-16 units. Unsupported clauses, incomplete sentences, pronouns, single-token names, initials, lowercase names, co-mentions, follows, inferred shared-employer links and willingness statements produce no claim. A document containing recognized negation (including ordinary negative contractions with straight or typographic apostrophes), uncertainty, quotations, questions or fictional-context markers is conservatively withheld in full. This guard reads the original text without rewriting it. This abstention may suppress valid statements elsewhere on the same page. These lexical guards are not a general semantic verifier: source lies and linguistic context outside this small grammar still require review. `DIRECT_EXPLICIT` means the complete source sentence matches the explicit grammar, never that the claim is confirmed.
 
-Structured HTML attributes, scripts and JSON-LD are absent from the retrieval normalizer's text. This version does not claim to extract them. A future model port would require its own bounded exact-evidence validation; no unconfigured port is presented as working extraction.
+`public-source-attributed-v2` is a separate, narrow lane. It is available only when the fetcher has a unique HTML `meta[name=author]`, agreeing JSON-LD Article/BlogPosting author and URL/headline, and one non-comment article. Its exact normalized text retains the agreed source-declared author label and article headings, paragraphs, lists, and block quotes so a correction or denial is not discarded. Only direct, unquoted paragraph ranges are eligible relationship text; scripts, nested articles and comments are excluded. The sidecar records author/article/prose ranges and is marked `SOURCE_SUPPLIED_NOT_VERIFIED`.
+
+That lane recognizes only `My friend Full Name ... .` as `AUTHORED_FIRST_PERSON_FRIEND_OF` / `FRIEND`. The author remains an unresolved source occurrence; an alias or name never authenticates, merges with, or replaces an account root. Its author identity citation binds the sidecar author range, its relationship citation binds the complete article sentence, and its object identity citation binds the name within that sentence. A later named retraction, guest/quotation conflict, or plausible first-person friend-term denial about the candidate suppresses the proposal. Unrelated negatives do not. The proposal is still pending, unsearchable, and requires identity and claim review.
 
 ## Public exports (`index.ts`)
 

@@ -5,6 +5,7 @@ import type {PublicClaimProposal, PublicCitation, PublicDocument, ClaimEndpoint}
 import {canonicalJson} from '../../../contracts/canonical.js';
 import {conflict, denied, invalid, type FactScopeRow, type FactSourceRow} from '../facts/transaction.js';
 import type {PublicRelationshipBindings} from './acceptance-contracts.js';
+import {validateDocumentAttribution, validateAuthoredProposal} from '../discovery/attribution.js';
 
 export const PUBLIC_SOURCE_POLICY = 'public-citation-review-v1';
 export const PUBLIC_RELATIONSHIP_PREFIX = 'public_relationship_';
@@ -30,6 +31,7 @@ export async function provePublicRelationship(c: PoolClient, row: FactScopeRow, 
   const p = record.proposal;
   if (p.kind !== 'RELATIONSHIP' || !p.object || !['DIRECT_EXPLICIT', 'CORROBORATED_DIRECT'].includes(p.support) || !p.relationshipKind || p.relationshipKind === 'UNKNOWN') throw invalid();
   const evidence: Evidence[] = [];
+  const retainedTexts = new Map<string, string>();
   for (const citation of record.citations) {
     if (citation.role !== 'RELATIONSHIP' || !p.citationIds.includes(citation.id)) throw invalid();
     const stored = await publicResource<PublicCitation>(c, row, selector.sourceId, 'CITATION', citation.id, 'immutable');
@@ -40,11 +42,27 @@ export async function provePublicRelationship(c: PoolClient, row: FactScopeRow, 
     const retained = await publicResource<{document: PublicDocument; normalizedText: string}>(c, row, selector.sourceId, 'DOCUMENT', document.id, document.revision);
     if (canonicalJson(retained.document) !== canonicalJson(document) || createHash('sha256').update(retained.normalizedText, 'utf8').digest('hex') !== document.contentDigest
       || retained.normalizedText.slice(citation.locator.start, citation.locator.end) !== citation.supportingExcerpt) throw conflict();
+    try {validateDocumentAttribution(document, retained.normalizedText);} catch {throw conflict();}
+    retainedTexts.set(document.id, retained.normalizedText);
     const item = await publicResource<Evidence>(c, row, selector.sourceId, 'EVIDENCE', citation.evidenceId, 'immutable');
     if (item.sourceId !== selector.sourceId || item.claimKind !== 'RELATIONSHIP') throw denied();
     evidence.push(item);
   }
   if (record.citations.length !== p.citationIds.length || !evidence.length) throw invalid();
+  if (p.predicate === 'AUTHORED_FIRST_PERSON_FRIEND_OF') {
+    if (record.citations.length !== 1) throw invalid();
+    const identityEvidenceIds = [...new Set([...p.subject.identityEvidenceIds, ...p.object.identityEvidenceIds])];
+    const identityRows = (await c.query<{id: string; payload: PublicCitation}>(
+      "SELECT id,payload FROM public_fact_resources WHERE scope_id=$1 AND owner_user_id=$2 AND source_id=$3 AND kind='CITATION' AND revision='immutable' AND payload->>'evidenceId'=ANY($4::text[])",
+      [row.id, row.owner_user_id, selector.sourceId, identityEvidenceIds])).rows;
+    if (identityRows.length !== identityEvidenceIds.length || new Set(identityRows.map(r => r.payload.evidenceId)).size !== identityEvidenceIds.length
+      || identityRows.some(r => r.id !== r.payload.id || r.payload.role !== 'IDENTITY')) throw conflict();
+    const relation = record.citations[0]!;
+    const document = record.documents.find(d => d.id === relation.documentId && d.revision === relation.documentRevision);
+    const text = document && retainedTexts.get(document.id);
+    if (!document || text === undefined) throw conflict();
+    try {validateAuthoredProposal(document, text, p, [...record.citations, ...identityRows.map(r => r.payload)]);} catch {throw conflict();}
+  }
   if (p.support === 'CORROBORATED_DIRECT' && new Set(record.documents.map(d => d.independenceGroup)).size < 2) throw invalid();
   const people: string[] = [];
   for (const [index, binding] of [bindings.subject, bindings.object].entries()) {

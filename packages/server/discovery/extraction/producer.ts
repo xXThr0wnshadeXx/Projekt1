@@ -83,7 +83,8 @@ export function createPublicExtractionProducer(options: PublicExtractionProducer
         sourceUrl: doc.sourceUrl, fetchedUrl: doc.fetchedUrl, title: doc.title, publisher: doc.publisher, publishedAt: doc.publishedAt,
         retrievedAt: doc.retrievedAt, contentDigest: doc.contentDigest, digestBasis: doc.digestBasis,
         privatePayloadRef: binding.privatePayloadRef, upstreamRevisionId: doc.upstreamRevisionId,
-        independenceGroup: binding.independenceGroup, originalSourceUrls: []});
+        independenceGroup: binding.independenceGroup, originalSourceUrls: [], normalizationVersion: doc.normalizationVersion,
+        metadataStatus: doc.metadataStatus, attribution: doc.attribution ?? null});
       envelope.normalized.records.push({id: recordId, sourceId: context.sourceId, ownerUserId: context.ownerUserId,
         externalRecordId: doc.id, retrievedAt: doc.retrievedAt, contentDigest: doc.contentDigest, privatePayloadRef: binding.privatePayloadRef});
       const remaining = Math.floor((50 - envelope.proposals.length) / 3);

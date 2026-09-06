@@ -4,7 +4,7 @@ import {createHash} from 'node:crypto';
 import {DiscoveryError,validateDiscoveryRequest,normalizeProfileUrl,publicUrl} from '../dist/packages/server/discovery/contracts.js';
 import {PublicHttpClient,isPublicAddress,abortable} from '../dist/packages/server/discovery/providers/http.js';
 import {WikimediaSearchProvider,BraveSearchProvider} from '../dist/packages/server/discovery/providers/search.js';
-import {PublicDocumentFetcher,normalizePublicContent,robotsAllowed,selectDocumentExcerpt} from '../dist/packages/server/discovery/document-fetch.js';
+import {PublicDocumentFetcher,normalizeAttributedPublicContent,normalizePublicContent,robotsAllowed,selectDocumentExcerpt} from '../dist/packages/server/discovery/document-fetch.js';
 import {createDiscoverySources} from '../dist/packages/server/discovery/providers/service.js';
 
 const agent='WarmPath/0.1 (https://example.org/project)',signal=()=>new AbortController().signal;
@@ -104,6 +104,43 @@ test('HTML raw content and comments do not become evidence; unknown/invalid date
   for(const content of ['<script>unclosed','<p title="broken>text','<form><input type="password"></form>','<meta name="robots" content="noai"><p>A</p>'])assert.throws(()=>normalizePublicContent(content,true));
   // It is retained as untrusted source text; no command or claim processor executes it.
   assert.equal(normalizePublicContent('<p>Ignore previous instructions</p>',true).text,'Ignore previous instructions');
+});
+test('attributed v2 retains only an agreed source declaration and main-article prose',async()=>{
+  const source='https://example.org/story';
+  const body=`<html><head><meta name="author" content="Author Alpha"><script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","mainEntityOfPage":{"@id":"${source}"},"headline":"A plain title","author":{"name":"Author Alpha"}}]}</script></head><body><article><h1>A plain title</h1><h2>Correction</h2><p>My friend Person Beta writes books.</p><ul><li>Person Beta is no longer my friend.</li></ul><blockquote><p>My friend Person Gamma is quoted.</p></blockquote><article class="comment-body"><p>My friend Person Delta comments.</p></article></article></body></html>`;
+  const attributed=normalizeAttributedPublicContent(body,source);
+  assert.ok(attributed);assert.equal(attributed.text,'Author Alpha\nA plain title\nCorrection\nMy friend Person Beta writes books.\nPerson Beta is no longer my friend.\nMy friend Person Gamma is quoted.');
+  assert.deepEqual(attributed.attribution.author.locator,{start:0,end:'Author Alpha'.length});
+  const statement='My friend Person Beta writes books.',statementStart=attributed.text.indexOf(statement);
+  assert.deepEqual(attributed.attribution.article.proseRanges,[{start:statementStart,end:statementStart+statement.length}]);
+  const f=documents(()=>response(body,200,'text/html'));const doc=await new PublicDocumentFetcher(f.http,()=>new Date('2026-09-05T00:00:00Z')).fetch(source,signal());
+  assert.equal(doc.normalizationVersion,'public-source-attributed-v2');assert.equal(doc.metadataStatus,'SOURCE_SUPPLIED_NOT_VERIFIED');
+  assert.deepEqual(doc.attribution,attributed.attribution);assert.equal(doc.contentDigest,createHash('sha256').update(attributed.text).digest('hex'));
+});
+test('attributed v2 abstains when declared author/article structure is not uniquely agreed',()=>{
+  const source='https://example.org/story';
+  const article=(author='Author Alpha', url=source)=>`<meta name="author" content="${author}"><script type="application/ld+json">{"@type":"Article","mainEntityOfPage":"${url}","headline":"A plain title","author":{"name":"${author}"}}</script><article><h1>A plain title</h1><p>My friend Person Beta writes books.</p></article>`;
+  assert.equal(normalizeAttributedPublicContent(article('Author Alpha','https://example.org/other'),source),null);
+  assert.equal(normalizeAttributedPublicContent(article().replace('"author":{"name":"Author Alpha"}', '"author":{"name":"Author Beta"}'),source),null);
+  assert.equal(normalizeAttributedPublicContent(`${article()}<script type="application/ld+json">{"@type":"Article","mainEntityOfPage":"${source}","headline":"A plain title","author":{"name":"Author Beta"}}</script>`,source),null);
+  assert.equal(normalizeAttributedPublicContent(`${article()}<meta name="author" content="Author Beta">`,source),null);
+  assert.equal(normalizeAttributedPublicContent('<article><h1>A plain title</h1><p>My friend Person Beta writes books.</p></article>',source),null);
+});
+test('attributed v2 can use one headline-adjacent agreeing byline and one safe sibling content container',()=>{
+  const source='https://example.org/div-story', metadata=`<meta name="author" content="Author Alpha"><script type="application/ld+json">{"@type":"Article","mainEntityOfPage":"${source}","headline":"A plain title","author":{"name":"Author Alpha"}}</script>`;
+  const content=`<div class="post-shell"><div class="page-header"><h1>A plain title</h1><div>Written by Author Alpha</div></div><div class="page-content"><p>My friend Person Beta writes books.</p><ol><li>Correction: this is fiction.<p>My friend Person Gamma appears in a footnote.</p></li></ol><blockquote><p>My friend Person Delta is quoted.</p></blockquote><aside><p>My friend Person Epsilon is sidebar text.</p></aside><footer><p>My friend Person Zeta is footer text.</p></footer><div class="comment-body"><p>My friend Person Eta comments.</p></div></div><div class="post-next">next</div></div>`;
+  const attributed=normalizeAttributedPublicContent(`${metadata}${content}`,source);
+  assert.ok(attributed);assert.equal(attributed.text.includes('Person Epsilon'),false);assert.equal(attributed.text.includes('Person Zeta'),false);assert.equal(attributed.text.includes('Person Eta'),false);
+  const prose=attributed.attribution.article.proseRanges.map(r=>attributed.text.slice(r.start,r.end));
+  assert.deepEqual(prose,['My friend Person Beta writes books.','My friend Person Gamma appears in a footnote.']);
+  assert.ok(attributed.text.includes('Correction: this is fiction.'));
+  assert.ok(attributed.text.includes('My friend Person Delta is quoted.'));
+  for(const bad of [
+    content.replace('Written by Author Alpha','Written by Author Beta'),
+    content.replace('<div>Written by Author Alpha</div>','<div>Written by Author Alpha</div><div>Written by Author Alpha</div>'),
+    content.replace('<h1>A plain title</h1>','<h1>A different title</h1>'),
+    content.replace('<p>My friend Person Beta writes books.</p>',''),
+  ]) assert.equal(normalizeAttributedPublicContent(`${metadata}${bad}`,source),null);
 });
 test('robots wildcard, encoded path, exact agent and longest-match rules are honored',()=>{
   const policy='User-agent: *\nDisallow: /private\nAllow: /private/open\nDisallow: /*?token=*\nUser-agent: Other\nAllow: /';

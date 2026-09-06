@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {createDiscoveryPlanner, canonicalPublicUrl, canonicalQuery, discoverExploratoryCandidates} from '../dist/packages/server/discovery/planning/index.js';
 import {DiscoveryError} from '../dist/packages/server/discovery/contracts.js';
+import {extractPublicClaimFragments} from '../dist/packages/server/discovery/extraction/index.js';
 
 const hash = text => createHash('sha256').update(text).digest('hex');
 const profile = 'https://www.linkedin.com/in/u1/';
@@ -11,10 +12,16 @@ const request = {scopeId:'s0', expectedGraphVersion:'0', idempotencyKey:'k0',
   target:{organizationName:'o0'}};
 const input = () => ({request:structuredClone(request), authority:{scopeId:'s0', graphVersion:'0', selectedContexts:[]}});
 const hit = url => ({url, title:'public hint', snippet:'not citation evidence', provider:'TAVILY', evidenceStatus:'DISCOVERY_HINT'});
-function document(url, text = `u1 identifies their profile as ${profile}`) {
+function document(url, text = `u1 identifies their profile as ${profile}`, overrides = {}) {
   return {id:hash(url), revision:hash(text), sourceUrl:url, fetchedUrl:url, title:'source', publisher:null,
     publishedAt:null, retrievedAt:'2026-09-05T00:00:00.000Z', contentDigest:hash(text), digestBasis:'NORMALIZED_TEXT_SHA256',
-    normalizedText:text, upstreamRevisionId:null, normalizationVersion:'public-source-text-v1', persistence:'NOT_PERSISTED', metadataStatus:'SOURCE_SUPPLIED_NOT_VERIFIED'};
+    normalizedText:text, upstreamRevisionId:null, normalizationVersion:'public-source-text-v1', persistence:'NOT_PERSISTED', metadataStatus:'SOURCE_SUPPLIED_NOT_VERIFIED',...overrides};
+}
+function attributedDocument(url, prose='My friend Person Beta writes books.') {
+  const author='Author Alpha', text=`${author} ${prose}`, start=author.length+1;
+  return document(url,text,{normalizationVersion:'public-source-attributed-v2',attribution:{version:'source-declared-author-v1',
+    author:{locator:{start:0,end:author.length},declarationKinds:['HTML_META_NAME_AUTHOR','JSONLD_ARTICLE_AUTHOR_NAME']},
+    article:{locator:{start,end:text.length},proseRanges:[{start,end:text.length}]}}});
 }
 function extracted(doc) {
   const citation = {id:`c-${doc.id}`, evidenceId:`e-${doc.id}`, documentId:doc.id, documentRevision:doc.revision, role:'IDENTITY',
@@ -212,6 +219,22 @@ test('source-local unresolved occurrences trigger literal mention + target + cit
   assert.deepEqual(out.queries[2].candidate.citationIds,['c0','cr']);
   assert.ok(out.extractions[0].output.proposals.every(p=>p.subject.personId===null&&p.includeInSearch===false&&p.reviewState==='PENDING'));
   for(const key of ['paths','events','graph','people','relationships'])assert.equal(key in out,false);
+});
+
+test('authored first-person candidates bind the declared author sidecar and ordinary identity citations',()=>{
+  const doc=attributedDocument('https://example.org/authored');
+  const fragments=extractPublicClaimFragments(doc), candidates=discoverExploratoryCandidates(doc,fragments);
+  assert.deepEqual(candidates.map(c=>c.mention),['Author Alpha','Person Beta']);
+  assert.ok(candidates.every(c=>c.status==='EXPLORATORY_ONLY'&&c.profileUrl===null&&c.identityState==='UNRESOLVED'));
+  const authorCitation=fragments.citations.find(c=>c.role==='IDENTITY'&&c.supportingExcerpt==='Author Alpha');
+  authorCitation.locator.start=1;
+  assert.deepEqual(discoverExploratoryCandidates(doc,fragments),[]);
+  for(const mutate of [
+    x=>x.citations.find(c=>c.supportingExcerpt==='Author Alpha').documentId='other-document',
+    x=>x.citations.find(c=>c.supportingExcerpt==='Person Beta').documentRevision='other-revision',
+    x=>x.citations.find(c=>c.role==='RELATIONSHIP').documentId='other-document',
+    x=>x.citations.find(c=>c.supportingExcerpt==='Person Beta').supportingExcerpt='Person Gamma',
+  ]) {const fresh=extractPublicClaimFragments(doc);mutate(fresh);assert.deepEqual(discoverExploratoryCandidates(doc,fresh),[]);}
 });
 
 test('contextual expansion rejects ambiguity, unattached identity quotes, common-name-only and shared employer assertions',()=>{

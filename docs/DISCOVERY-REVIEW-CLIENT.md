@@ -60,3 +60,7 @@ The response provides current/base graph versions, review ID, duplicate flag, pe
 Production policy wiring is still a separate gate: without an explicit server policy, searchable acceptance returns a service-unavailable error with no writes; acceptance without search remains available. Do not interpret an HTTP endpoint or identity decision as proof that a route exists.
 
 Frontend verification can use the existing Node runner and injected fetch-compatible responses for request/retry/stale-state behavior. Anonymous fixtures remain in tests. Production UI must receive actual server responses and must not seed people, citations or paths. A browser check is still required against the integrated server.
+
+## Explicit public-source feasibility start
+
+`SearchRequest.startPersonId` is optional. Omit it for the signed-in owner's normal start. When supplied, the backend first authorizes the original owner scope, then requires a confirmed, source-evidenced person in that scope. It changes only the execution snapshot's start and never changes the owner's stored identity/root. Label this mode “Source-feasibility test — not your personal network.” Render the actual SEARCH_STARTED root and returned evidence. This option does not resolve a person target by itself or prove that the owner knows the selected person.

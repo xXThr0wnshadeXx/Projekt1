@@ -52,13 +52,23 @@ export class BackendService {
   const request=validateSearchRequest(input),scope=await this.scope(credential,request.scopeId),snapshot=await this.snapshot(scope);
   if(request.expectedGraphVersion!==snapshot.graphVersion)throw new ServiceError('VERSION_CONFLICT',409);
   if(!this.ports.goals || !this.ports.engine)throw new ServiceError('SOURCE_UNAVAILABLE',502);
+  const execution=structuredClone(snapshot);
+  if(request.startPersonId!==undefined) {
+   const selected=execution.people.find(person=>person.id===request.startPersonId);
+   const confirmed=selected && execution.identities.some(identity=>identity.personId===selected.id && identity.assignmentState==='CONFIRMED' &&
+    scope.sourceIds.has(identity.sourceId) && identity.evidenceIds.some(evidenceId=>execution.evidence.some(evidence=>
+     evidence.id===evidenceId && evidence.sourceId===identity.sourceId && scope.sourceIds.has(evidence.sourceId))));
+   if(!confirmed)throw new ServiceError('FORBIDDEN',403);
+   execution.rootPersonId=selected.id;
+   try {validateGraphSnapshot(execution,{...scope,rootPersonId:selected.id});}catch{throw new ServiceError('INTERNAL',500);}
+  }
   const options:SearchOptions={k:Math.min(request.k??3,5),maxHops:Math.min(request.maxHops??5,6),maxExpansions:10000,maxFrontier:25000,maxTraceEvents:3000,deadlineMs:1000};
   try {
-   const resolved=await this.ports.goals.resolve(request.goalText,structuredClone(snapshot));
-   const goal=validateGoal(resolved.goal,snapshot),targets=resolved.targets.map(t=>validateTarget(t,snapshot));
+   const resolved=await this.ports.goals.resolve(request.goalText,structuredClone(execution));
+   const goal=validateGoal(resolved.goal,execution),targets=resolved.targets.map(t=>validateTarget(t,execution));
    if(new Set(targets.map(t=>t.personId)).size!==targets.length)throw new ServiceError('INTERNAL',500);
    const expectedGoal=canonicalJson(goal),expectedTargets=canonicalJson(targets);
-   const result=validateSearchResult(this.ports.engine.findBestPaths(structuredClone(snapshot),structuredClone(goal),structuredClone(targets),options),snapshot);
+   const result=validateSearchResult(this.ports.engine.findBestPaths(structuredClone(execution),structuredClone(goal),structuredClone(targets),options),execution);
    // Targets preserve resolver order exactly; engines rank paths, not the target input list.
    if(canonicalJson(result.goal)!==expectedGoal || canonicalJson(result.targets)!==expectedTargets)throw new ServiceError('INTERNAL',500);
    if(result.paths.length>options.k || result.paths.some(p=>p.edgeIds.length>options.maxHops) || result.events.length>options.maxTraceEvents)throw new ServiceError('INTERNAL',500);

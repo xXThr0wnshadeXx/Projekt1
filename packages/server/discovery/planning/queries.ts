@@ -1,5 +1,6 @@
 import {DiscoveryError, normalizeProfileUrl, publicUrl, validateDiscoveryRequest, type PublicClaimProposal} from '../contracts.js';
 import {selectDocumentExcerpt, type RetrievedPublicDocument} from '../document-fetch.js';
+import {validateAuthoredProposal} from '../attribution.js';
 import type {ExploratoryCandidate, PlannedQuery, PlanningExtraction, PlanningInput} from './types.js';
 
 /** Remove fragments/default ports and normalize supported social identifiers. Never drop
@@ -114,12 +115,16 @@ function assertionCandidates(document: RetrievedPublicDocument, extraction: Plan
       typeof e.mention !== 'string' || !e.mention.trim() || e.mention.length > 200 || /[\u0000-\u001f\u007f]/.test(e.mention)) ||
       proposal.subject.mention === proposal.object.mention ||
       proposal.subject.sourceIdentity.externalId === proposal.object.sourceIdentity.externalId) continue;
+    const authored = proposal.predicate === 'AUTHORED_FIRST_PERSON_FRIEND_OF';
+    if (authored) {
+      try {validateAuthoredProposal(document, document.normalizedText, proposal, citations);} catch {continue;}
+    }
     const relationshipCite = citations.find(c => c.role === 'RELATIONSHIP' && proposal.citationIds.includes(c.id) &&
-      endpoints.every(e => c.supportingExcerpt.includes(e.mention)));
+      (authored ? c.supportingExcerpt.includes(proposal.object!.mention) : endpoints.every(e => c.supportingExcerpt.includes(e.mention))));
     if (!relationshipCite) continue;
     const identityCites = endpoints.map(e => citations.find(c => c.role === 'IDENTITY' &&
       e.identityEvidenceIds.includes(c.evidenceId) && c.supportingExcerpt === e.mention &&
-      c.locator.start >= relationshipCite.locator.start && c.locator.end <= relationshipCite.locator.end));
+      (authored && e === proposal.subject ? true : c.locator.start >= relationshipCite.locator.start && c.locator.end <= relationshipCite.locator.end)));
     if (identityCites.some(c => !c)) continue;
     for (const [index, endpoint] of endpoints.entries()) candidates.push({
       profileUrl:null, mention:endpoint.mention, sourceIdentity:{...endpoint.sourceIdentity},

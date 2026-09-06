@@ -1,6 +1,7 @@
 import {createHash} from 'node:crypto';
 import type {ClaimEndpoint, DateValue, PublicSourceEnvelope} from '../discovery/contracts.js';
 import {publicUrl} from '../discovery/contracts.js';
+import {validateDocumentAttribution, validateAuthoredProposal} from '../discovery/attribution.js';
 import * as s from '../../../contracts/schema.js';
 import {normalizeImportShape} from '../../../contracts/validation.js';
 import {canonicalJson} from '../../../contracts/canonical.js';
@@ -28,10 +29,16 @@ const dateValue: s.Check = (v, p) => {
 const endpoint = s.object({sourceIdentity: s.object({platform: text(100), externalId: text(500)}), mention: text(200),
   identityState: s.literal('OWNER_ASSERTED_ANCHOR', 'UNRESOLVED'), personId: s.literal(null),
   resolutionRevision: s.id, resolutionDecisionId: s.literal(null), identityEvidenceIds: s.array(s.id, 1, 20)});
+const attributionRange = s.object({start: s.integer, end: s.integer});
+const attribution = s.object({version: s.literal('source-declared-author-v1'),
+  author: s.object({locator: attributionRange, declarationKinds: s.array(s.literal('HTML_META_NAME_AUTHOR', 'JSONLD_ARTICLE_AUTHOR_NAME'), 2, 2)}),
+  article: s.object({locator: attributionRange, proseRanges: s.array(attributionRange, 1, 256)})});
 const document = s.object({id: s.id, revision: s.id, sourceId: s.id, kind: s.literal('PUBLIC_PROFILE', 'PUBLIC_ARTICLE', 'WIKIMEDIA_PAGE', 'WIKIDATA_ENTITY'),
   sourceUrl: url, fetchedUrl: url, title: text(500), publisher: nullableText, publishedAt: s.nullable(dateValue), retrievedAt: s.date,
   contentDigest: s.id, digestBasis: s.literal('NORMALIZED_TEXT_SHA256'), privatePayloadRef: s.id, upstreamRevisionId: s.nullable(s.id),
-  independenceGroup: s.id, originalSourceUrls: s.array(url, 0, 20)});
+  independenceGroup: s.id, originalSourceUrls: s.array(url, 0, 20),
+  normalizationVersion: s.optional(s.literal('public-source-text-v1', 'public-source-attributed-v2')),
+  metadataStatus: s.optional(s.literal('SOURCE_SUPPLIED_NOT_VERIFIED')), attribution: s.optional(s.nullable(attribution))});
 const citation = s.object({id: s.id, evidenceId: s.id, documentId: s.id, documentRevision: s.id,
   role: s.literal('IDENTITY', 'RELATIONSHIP', 'AFFILIATION'), supportingExcerpt: text(2000),
   locator: s.object({start: s.integer, end: s.integer, section: nullableText}), statementId: s.nullable(s.id)});
@@ -71,6 +78,7 @@ export function validatePublicStage(value: unknown): StagePublicFactsRequest {
     const t = request.texts.find(t => t.documentId === d.id && t.documentRevision === d.revision);
     require(t && Buffer.byteLength(t.normalizedText) <= 1024 * 1024, 'exact document revision text');
     require(createHash('sha256').update(t!.normalizedText, 'utf8').digest('hex') === d.contentDigest, 'document text digest');
+    try {validateDocumentAttribution(d, t!.normalizedText);} catch {s.fail('$', 'valid source author attribution');}
     const record = n.records.find(r => r.privatePayloadRef === d.privatePayloadRef);
     require(record && record.contentDigest === d.contentDigest && record.sourceId === d.sourceId && record.retrievedAt === d.retrievedAt, 'document source-record binding');
   }
@@ -105,6 +113,13 @@ export function validatePublicStage(value: unknown): StagePublicFactsRequest {
       require(e.citations.some(c => ep.identityEvidenceIds.includes(c.evidenceId) && c.supportingExcerpt.includes(ep.mention)), 'source-quoted identity mention');
       const key = endpointId(n.context.scopeId, n.context.sourceId, ep), content = canonicalJson(ep);
       require(!endpoints.has(key) || endpoints.get(key) === content, 'consistent endpoint mention'); endpoints.set(key, content);
+    }
+    if (p.predicate === 'AUTHORED_FIRST_PERSON_FRIEND_OF') {
+      require(p.citationIds.length === 1, 'one exact authored relationship statement');
+      const relation = e.citations.find(c => c.id === p.citationIds[0])!;
+      const doc = e.documents.find(d => d.id === relation.documentId && d.revision === relation.documentRevision)!;
+      const retained = request.texts.find(t => t.documentId === doc.id && t.documentRevision === doc.revision)!;
+      try {validateAuthoredProposal(doc, retained.normalizedText, p, e.citations);} catch {s.fail('$', 'bound source-author relationship');}
     }
   }
   return request;

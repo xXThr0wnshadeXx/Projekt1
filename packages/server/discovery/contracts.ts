@@ -1,5 +1,6 @@
 import type {NormalizedImportEnvelope, RelationshipKind} from '../../../contracts/index.js';
 import * as s from '../../../contracts/schema.js';
+import type {SourceAttribution} from './attribution.js';
 
 export interface DiscoveryRequest {
   scopeId: string; expectedGraphVersion: string; idempotencyKey: string;
@@ -38,6 +39,10 @@ export interface PublicDocument {
   sourceUrl: string; fetchedUrl: string; title: string; publisher: string|null;
   publishedAt: DateValue|null; retrievedAt: string; contentDigest: string; digestBasis: 'NORMALIZED_TEXT_SHA256';
   privatePayloadRef: string; upstreamRevisionId: string|null; independenceGroup: string; originalSourceUrls: string[];
+  /** Optional for staged legacy v1 observations. Attributed v2 requires the complete trio. */
+  normalizationVersion?: 'public-source-text-v1'|'public-source-attributed-v2';
+  metadataStatus?: 'SOURCE_SUPPLIED_NOT_VERIFIED';
+  attribution?: SourceAttribution|null;
 }
 export interface PublicCitation {
   id: string; evidenceId: string; documentId: string; documentRevision: string;

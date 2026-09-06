@@ -79,7 +79,7 @@ export interface OpportunityPath {
 }
 export interface SearchRequest {
   scopeId: Id; expectedGraphVersion: Version; goalText: string;
-  k?: number; maxHops?: number;
+  k?: number; maxHops?: number; startPersonId?: Id;
 }
 export type SearchStop = 'TOP_K_PROVEN' | 'EXHAUSTED_WITHIN_HOP_LIMIT' | 'BUDGET_REACHED' | 'NO_TARGETS';
 export interface SearchStats {

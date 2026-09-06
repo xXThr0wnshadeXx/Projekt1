@@ -17,6 +17,7 @@ import {FactReviewService} from '../dist/packages/server/facts/service.js';
 import {withFactScope,saveFactSnapshot} from '../dist/packages/server/facts/transaction.js';
 import {refreshPublicCitationProjection} from '../dist/packages/server/public-facts/projection.js';
 import {publicStage,publicTime,textHash} from './public-facts-fixture.mjs';
+import {attributedStage} from './public-attribution-fixture.mjs';
 const url=process.env.STORAGE_TEST_DATABASE_URL;
 if(url){const u=new URL(url);assert.equal(u.hostname,'127.0.0.1');assert.equal(u.port,'55439');assert.equal(u.pathname,'/postgres');assert.equal(u.username,'projekt1_test');}
 const migration=name=>fileURLToPath(new URL(`../migrations/${name}`,import.meta.url));
@@ -58,15 +59,24 @@ describe('public relationship review: current proof, explicit policy and atomic 
  const count=async(a,t)=>(await pool.query(`SELECT count(*) FROM ${t} WHERE owner_user_id=$1`,[a.user.userId])).rows[0].count;
  async function prepared(inputMutate=x=>x){
   const a=await owner(),input=inputMutate(directStage(a)),batch=await facts.stage(a.token,input);
-  for(const mention of ['1','2']){
+  const mentions=[input.envelope.proposals[0].subject.mention,input.envelope.proposals[0].object.mention];
+  for(const [index,mention] of mentions.entries()){
    const r=await review(a,batch),ep=r.endpoints.find(e=>e.endpoint.mention===mention);
    await facts.resolve(a.token,{scopeId:a.scopeId,expectedGraphVersion:r.graphVersion,idempotencyKey:randomUUID(),confirm:true,endpointId:ep.endpointId,expectedEndpointRevision:ep.endpointRevision,expectedResolutionDecisionId:ep.latestResolutionDecisionId,
-    disposition:mention==='1'?'LINK_EXISTING':'NEW_PERSON',...(mention==='1'?{personId:a.scope.rootPersonId}:{})});
+    disposition:index===0?'LINK_EXISTING':'NEW_PERSON',...(index===0?{personId:a.scope.rootPersonId}:{})});
   }
   const r=await review(a,batch),binding=mention=>{const e=r.endpoints.find(e=>e.endpoint.mention===mention);return {endpointId:e.endpointId,endpointRevision:e.endpointRevision,resolutionDecisionId:e.latestResolutionDecisionId};};
-  const decision={sourceId:a.sourceId,proposalId:'p1',proposalRevision:'v1',decision:'ACCEPT',includeInSearch:true,bindings:{subject:binding('1'),object:binding('2')},relativeStrength:0.5};
+  const decision={sourceId:a.sourceId,proposalId:'p1',proposalRevision:'v1',decision:'ACCEPT',includeInSearch:true,bindings:{subject:binding(mentions[0]),object:binding(mentions[1])},relativeStrength:0.5};
   const request={scopeId:a.scopeId,expectedGraphVersion:r.graphVersion,idempotencyKey:randomUUID(),confirm:true,decisions:[decision]};return {a,batch,request};
  }
+ it('source-authored acceptance binds author identity citation and invalidates traversal when it changes',async()=>{
+  const {a,request}=await prepared(attributedStage);
+  await claims.review(a.token,request);const before=await graph(a);assert.equal(before.searchEdges.length,1);
+  await pool.query("UPDATE public_fact_resources SET payload=jsonb_set(payload,'{locator,start}','1'::jsonb) WHERE scope_id=$1 AND owner_user_id=$2 AND source_id=$3 AND kind='CITATION' AND id='c0_v1'",[a.scopeId,a.user.userId,a.sourceId]);
+  const after=await graph(a);assert.equal(after.searchEdges.length,0);
+  assert.equal(BigInt(after.graphVersion),BigInt(before.graphVersion)+1n);
+  assert.equal((await graph(a)).graphVersion,after.graphVersion);
+ });
  it('accepts exact directed proof using explicit policy and original evidence; concurrent receipt commits once',async()=>{
   const {a,batch,request}=await prepared(),before=await graph(a);
   const results=await Promise.all(Array.from({length:4},()=>claims.review(a.token,request))),out=results.find(r=>!r.duplicate),g=await graph(a);

@@ -25,6 +25,7 @@
   },
   "dependencies": {
     "google-auth-library": "11.0.2",
+    "parse5": "8.0.1",
     "pg": "8.23.0",
     "react": "19.2.8",
     "react-dom": "19.2.8"

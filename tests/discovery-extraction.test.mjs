@@ -14,6 +14,19 @@ function document(text, overrides = {}) {
     upstreamRevisionId: null, normalizationVersion: 'public-source-text-v1', persistence: 'NOT_PERSISTED',
     metadataStatus: 'SOURCE_SUPPLIED_NOT_VERIFIED', ...overrides};
 }
+function attributedDocument(prose, overrides = {}) {
+  const author='Author Alpha', text=`${author} ${prose}`, start=author.length+1;
+  return document(text,{normalizationVersion:'public-source-attributed-v2',attribution:{version:'source-declared-author-v1',
+    author:{locator:{start:0,end:author.length},declarationKinds:['HTML_META_NAME_AUTHOR','JSONLD_ARTICLE_AUTHOR_NAME']},
+    article:{locator:{start,end:text.length},proseRanges:[{start,end:text.length}]}},...overrides});
+}
+function attributedArticleDocument(before, prose, after = '') {
+  const author='Author Alpha', article=[before,prose,after].filter(Boolean).join(' '), text=`${author} ${article}`;
+  const start=text.indexOf(prose), end=start+prose.length;
+  return document(text,{normalizationVersion:'public-source-attributed-v2',attribution:{version:'source-declared-author-v1',
+    author:{locator:{start:0,end:author.length},declarationKinds:['HTML_META_NAME_AUTHOR','JSONLD_ARTICLE_AUTHOR_NAME']},
+    article:{locator:{start:author.length+1,end:text.length},proseRanges:[{start,end}]}}});
+}
 const request = {scopeId: 'scope0', expectedGraphVersion: '0', idempotencyKey: 'operation0'};
 function authority(docs) {
   return {context: {sourceId: 'source0', ownerUserId: 'owner0', scopeId: 'scope0', batchId: 'batch0', sourcePolicyVersion: 'public-citation-review-v1', sharingDecisionId: null},
@@ -80,6 +93,36 @@ test('ordinary negative contractions with either apostrophe suppress the whole a
   const positive = document('Person O’Neil is a friend of Person Beta.');
   assert.equal(extractPublicDocument(positive).assertions.length, 1);
   assert.equal(extractPublicDocument(positive).mentions[0].excerpt.supportingExcerpt, 'Person O’Neil');
+});
+test('source-declared author v2 produces only a review-only authored first-person relationship',()=>{
+  const doc=attributedDocument('My friend Person Beta writes books.');
+  const extracted=extractPublicDocument(doc);
+  assert.equal(extracted.assertions.length,1);assert.equal(extracted.assertions[0].predicate,'AUTHORED_FIRST_PERSON_FRIEND_OF');
+  assert.equal(extracted.assertions[0].relationshipKind,'FRIEND');assert.equal(extracted.mentions[0].name,'Author Alpha');
+  assert.equal(extracted.mentions[1].name,'Person Beta');
+  const fragments=extractPublicClaimFragments(doc),relationship=fragments.proposals.find(p=>p.kind==='RELATIONSHIP');
+  assert.equal(relationship.predicate,'AUTHORED_FIRST_PERSON_FRIEND_OF');assert.equal(relationship.includeInSearch,false);
+  assert.equal(relationship.subject.identityState,'UNRESOLVED');assert.equal(relationship.subject.personId,null);
+  assert.equal(relationship.object.identityState,'UNRESOLVED');assert.equal(relationship.object.personId,null);
+});
+test('authored v2 rejects same-relationship denials, quotations and malformed sidecars without rejecting unrelated negatives',()=>{
+  assert.equal(extractPublicDocument(attributedDocument('My friend Person Beta writes books. I do not like rain.')).assertions.length,1);
+  for(const prose of [
+    'My friend Person Beta writes books. Person Beta is no longer my friend.',
+    'My friend Person Beta writes books. I am not friends with them.',
+    'My friend Person Beta writes books. A guest wrote, "My friend Person Beta writes books."',
+    '"My friend Person Beta writes books."',
+  ]) assert.equal(extractPublicDocument(attributedDocument(prose)).assertions.length,0,prose);
+  for(const before of [
+    'Correction.', 'Guest wrote.', 'I might not be friends with them.', "He isn’t my friend.", "Person Beta isn't my friend.",
+  ]) assert.equal(extractPublicDocument(attributedArticleDocument(before,'My friend Person Beta writes books.')).assertions.length,0,before);
+  const valid=attributedDocument('My friend Person Beta writes books.');
+  for(const broken of [
+    {...valid,normalizationVersion:'public-source-text-v1'},
+    {...valid,attribution:null},
+    {...valid,metadataStatus:undefined},
+    {...valid,attribution:{...valid.attribution,author:{...valid.attribution.author,locator:{start:1,end:2}}}},
+  ]) assert.throws(()=>extractPublicDocument(broken),e=>e.code==='INVALID_INPUT');
 });
 
 test('affiliations remain context and unknown dates are not replaced with publication or fetch time', async () => {

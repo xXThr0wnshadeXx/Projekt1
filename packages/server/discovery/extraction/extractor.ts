@@ -2,9 +2,10 @@ import {createHash} from 'node:crypto';
 import type {RelationshipKind} from '../../../../contracts/index.js';
 import {DiscoveryError, publicUrl, type DateValue} from '../contracts.js';
 import {selectDocumentExcerpt, type DocumentExcerpt, type RetrievedPublicDocument} from '../document-fetch.js';
+import {authoredFriendObject, hasAuthoredRelationshipConflict, validateDocumentAttribution} from '../attribution.js';
 import * as s from '../../../../contracts/schema.js';
 
-export const EXTRACTION_VERSION = 'explicit-sentences-v1';
+export const EXTRACTION_VERSION = 'explicit-sentences-v2';
 export const hash = (value: unknown): string => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 export interface ExtractedMention {id: string; name: string; excerpt: DocumentExcerpt}
 export interface ExtractedAssertion {
@@ -24,9 +25,10 @@ export function validateRetrievedDocument(doc: RetrievedPublicDocument): void {
     s.id(doc.id, '$'); s.id(doc.revision, '$'); s.date(doc.retrievedAt, '$');
     publicUrl(doc.sourceUrl); publicUrl(doc.fetchedUrl);
     if (typeof doc.normalizedText !== 'string' || !doc.normalizedText.trim() || Buffer.byteLength(doc.normalizedText) > 1024 * 1024) throw new Error();
-    if (doc.digestBasis !== 'NORMALIZED_TEXT_SHA256' || doc.normalizationVersion !== 'public-source-text-v1' ||
+    if (doc.digestBasis !== 'NORMALIZED_TEXT_SHA256' || !['public-source-text-v1','public-source-attributed-v2'].includes(doc.normalizationVersion) ||
       doc.metadataStatus !== 'SOURCE_SUPPLIED_NOT_VERIFIED' || doc.persistence !== 'NOT_PERSISTED' ||
       createHash('sha256').update(doc.normalizedText).digest('hex') !== doc.contentDigest) throw new Error();
+    validateDocumentAttribution(doc, doc.normalizedText);
     if (typeof doc.title !== 'string' || !doc.title.trim() || doc.title.length > 500 ||
       (doc.publisher !== null && (typeof doc.publisher !== 'string' || doc.publisher.length > 2000))) throw new Error();
     if (doc.upstreamRevisionId !== null) s.id(doc.upstreamRevisionId, '$');
@@ -71,7 +73,8 @@ export function extractPublicDocument(document: RetrievedPublicDocument, maxAsse
   validateRetrievedDocument(document);
   if (!Number.isSafeInteger(maxAssertions) || maxAssertions < 1 || maxAssertions > 16) throw new DiscoveryError('INVALID_INPUT');
   const out: DocumentExtraction = {version: EXTRACTION_VERSION, documentId: document.id, documentRevision: document.revision, mentions: [], assertions: [], issues: []};
-  if (qualified.test(document.normalizedText) || negativeContraction.test(document.normalizedText)) {out.issues.push('AMBIGUOUS_CONTEXT'); return out;}
+  const standardAllowed = !qualified.test(document.normalizedText) && !negativeContraction.test(document.normalizedText);
+  if (!standardAllowed) out.issues.push('AMBIGUOUS_CONTEXT');
   const addMention = (value: string, start: number): string => {
     const excerpt = selectDocumentExcerpt(document, start, start + value.length);
     const id = `mention_${hash([document.id, document.revision, start, value])}`;
@@ -79,7 +82,7 @@ export function extractPublicDocument(document: RetrievedPublicDocument, maxAsse
   };
   // A match always consumes the whole sentence, including its punctuation. Clauses and quotations
   // cannot be accepted by selecting a convenient substring from a longer sentence.
-  for (const part of document.normalizedText.matchAll(/[^.!?]+[.!?]|[^.!?]+$/gu)) {
+  if (standardAllowed && document.normalizationVersion === 'public-source-text-v1') for (const part of document.normalizedText.matchAll(/[^.!?]+[.!?]|[^.!?]+$/gu)) {
     const sentence = part[0].trim(), start = part.index! + part[0].indexOf(sentence);
     if (sentence.length > 500) {if (!out.issues.includes('UNSUPPORTED_TEXT')) out.issues.push('UNSUPPORTED_TEXT'); continue;}
     const rule = relations.find(item => item.pattern.test(sentence));
@@ -98,5 +101,25 @@ export function extractPublicDocument(document: RetrievedPublicDocument, maxAsse
       predicate, relationshipKind: rule?.kind ?? null, excerpt: selectDocumentExcerpt(document, start, start + sentence.length),
       assertedPeriod: {start: null, end: null}, current: rule ? null : match[2] === 'works at' ? true : null});
   }
+  if (document.normalizationVersion === 'public-source-attributed-v2' && document.attribution && out.assertions.length < maxAssertions) {
+    const {author, article} = document.attribution;
+    const narrator = document.normalizedText.slice(author.locator.start, author.locator.end);
+    for (const prose of article.proseRanges) {
+      const source = document.normalizedText.slice(prose.start, prose.end);
+      for (const part of source.matchAll(/[^.!?]+[.!?]|[^.!?]+$/gu)) {
+        const sentence = part[0].trim(); if (!sentence || sentence.length > 500) continue;
+        const start = prose.start + part.index! + part[0].indexOf(sentence), object = authoredFriendObject(sentence);
+        if (!object || narrator === object || hasAuthoredRelationshipConflict(document, document.normalizedText, narrator, object, {start,end:start + sentence.length})) continue;
+        if (out.assertions.length >= maxAssertions) {out.issues.push('ASSERTION_LIMIT'); break;}
+        const subjectMentionId = addMention(narrator, author.locator.start);
+        const objectStart = start + sentence.indexOf(object), objectMentionId = addMention(object, objectStart);
+        out.assertions.push({id: `assertion_${hash([document.id, start, sentence, 'AUTHORED_FIRST_PERSON_FRIEND_OF'])}`,
+          kind:'RELATIONSHIP', subjectMentionId, objectMentionId, organization:null, predicate:'AUTHORED_FIRST_PERSON_FRIEND_OF', relationshipKind:'FRIEND',
+          excerpt:selectDocumentExcerpt(document,start,start + sentence.length), assertedPeriod:{start:null,end:null}, current:null});
+      }
+      if (out.assertions.length >= maxAssertions) break;
+    }
+  }
+  if (!out.assertions.length && !out.issues.length) out.issues.push('UNSUPPORTED_TEXT');
   return out;
 }
