@@ -25,7 +25,7 @@ test('two layers obey two-minute request spacing; restrictions pause collection'
   for(let i=0;i<30;i++)await h.tick();
   const s=h.data.orbitNetwork;assert.equal(s.status,'complete');assert.deepEqual(route(s,b),[root,a,b]);assert.equal(s.pages,2);assert.equal(h.advances,0);for(let i=1;i<h.requests.length;i++)assert.ok(h.requests[i]-h.requests[i-1]>=120000);assert.equal(h.alarms.size,0);
   h.snapshots={[root]:{kind:'blocked',url:root,reason:'LinkedIn verification required'}};
-  await h.command({type:'START',url:root});await h.tick();assert.equal(h.data.orbitNetwork.status,'paused');assert.equal(h.alarms.size,0);
+  await h.command({type:'START',url:root});await h.tick();await h.tick();assert.equal(h.data.orbitNetwork.status,'paused');assert.equal(h.alarms.size,0);
   assert.equal((await h.command({type:'RESUME',config:{maxNodes:1000,depth:3,delay:0}})).ok,false);
   assert.equal(h.listeners.external({type:'GET_STATE'},{url:'https://evil.example/'},()=>{}),false);
   assert.equal(h.listeners.message({type:'CLEAR'},{id:'test-extension',url:'https://www.linkedin.com/'},()=>{}),false);
@@ -109,4 +109,14 @@ test('replaying a captured page after a stalled Next does not recount it',async 
   const h=await harness(t),url=list('root');h.snapshots={[root]:profile(person('root'),url),[url]:page(url,[person('a')],{hasNext:true})};
   await h.command({type:'START',url:root,config:{depth:1}});for(let i=0;i<40;i++)await h.tick(2000);
   assert.equal(h.data.orbitNetwork.pages,1);assert.equal(h.advances,3);assert.equal(h.data.orbitNetwork.status,'complete');assert.equal(h.data.orbitNetwork.branches[root].status,'incomplete');
+});
+test('maps keep independent checkpoints, cancellation stops work, and switching preserves pacing',async t=>{
+ const h=await harness(t);await h.command({type:'START',url:root});const first=h.data.orbitNetwork.id,next=h.data.orbitNetwork.nextRequestAt;
+ assert.equal((await h.command({type:'NEW_MAP'})).ok,true);assert.equal(h.data.orbitNetwork,undefined);assert.equal(h.data.orbitMaps[first].status,'paused');assert.equal(h.alarms.size,0);
+ await h.command({type:'START',url:a});const second=h.data.orbitNetwork.id;assert.notEqual(first,second);assert.ok(h.data.orbitNetwork.nextRequestAt>=next);
+ await h.command({type:'CANCEL'});assert.equal(h.data.orbitNetwork.status,'cancelled');assert.ok(h.data.orbitNetwork.nodes[a]);assert.equal(h.data.orbitNetwork.queue.length,0);assert.equal(h.alarms.size,0);
+ const calls=h.requests.length;await h.tick();assert.equal(h.requests.length,calls);
+ await h.command({type:'SWITCH_MAP',id:first});assert.equal(h.data.orbitNetwork.id,first);assert.equal(h.data.orbitNetwork.status,'paused');assert.equal(h.data.orbitMaps[second].status,'cancelled');
+ assert.equal((await h.command({type:'LIST_MAPS'})).maps.length,2);
+ assert.equal((await h.command({type:'SWITCH_MAP',id:'missing'})).ok,false);assert.equal(h.data.orbitNetwork.id,first);
 });

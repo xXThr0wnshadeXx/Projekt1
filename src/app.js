@@ -12,7 +12,7 @@ const graph=new NetworkGraph($('network-canvas'),id=>selectPerson(id));
 graph.onReveal=(person,visible,total)=>{lastReveal={person,visible,total,at:Date.now()};renderLive();};
 const set=(id,text)=>$(id).textContent=text;
 const show=(id,visible)=>$(id).hidden=!visible;
-const statuses={running:'Collecting',paused:'Paused',limit:'Person limit reached',complete:'Queue finished',imported:'Saved map'};
+const statuses={running:'Collecting',paused:'Paused',limit:'Person limit reached',cancelled:'Build cancelled',complete:'Queue finished',imported:'Saved map'};
 const branchNames={queued:'Queued',collecting:'Collecting',hidden:'List not visible',incomplete:'Incomplete',exhausted:'End of visible results',mutuals_only:'Mutual connections only'};
 function toast(message){set('toast',message);show('toast',true);clearTimeout(toastTimer);toastTimer=setTimeout(()=>show('toast',false),8000);}
 function config(){return options({maxNodes:$('max-nodes').value,depth:$('depth').value,delay:$('delay').value});}
@@ -44,7 +44,7 @@ function renderLive(){
   set('live-rate',seconds>=5?`${Math.round(added/seconds*60)} people/min`:'Measuring speed…');
 }
 function render(){
-  renderLive();
+  renderLive();show('cancel-build',['running','paused','limit'].includes(state?.status));
   const nodes=Object.values(state?.nodes||{}),edges=Object.values(state?.edges||{}),branches=Object.values(state?.branches||{});set('people-count',state?nodes.length.toLocaleString():'—');set('edge-count',state?edges.length.toLocaleString():'—');set('branch-count',state?branches.filter(b=>b.pages>0).length.toLocaleString():'—');set('page-count',state?(state.pages||0).toLocaleString():'—');set('network-title',state?`${state.nodes[state.root]?.name||'Starting profile'}’s network`:'Your connection map');set('run-badge',statuses[state?.status]||'Not started');$('run-badge').className=`badge ${state?.status||''}`;set('status-label',statuses[state?.status]||'Ready to explore');$('status-dot').className=state?.status||'';set('status-reason',state?.reason||'Collected discoveries save to the shared team library while this page is open.');show('empty-graph',!state);show('collector-controls',hasCollector()&&Boolean(state)&&state.status!=='imported');show('pause',state?.status==='running');show('resume',['paused','limit'].includes(state?.status));show('show-tab',Boolean(state?.tabId));show('clear-button',!libraryMode&&Boolean(state)&&state.status!=='running');$('start').disabled=libraryMode||Boolean(state)&&['running','paused','limit'].includes(state.status);$('profile-url').disabled=Boolean(state)&&['running','paused','limit'].includes(state.status);set('updated-label',state?`${state.cloudView?'Shared team library':'Collection checkpoint'} · ${new Date(state.updatedAt).toLocaleString()}`:'Shared team library');set('visible-label',state?`${nodes.filter(p=>p.depth>1).length.toLocaleString()} people beyond the first layer`:'Up to 10,000 people per map');graph.setData(state);refreshFilterOptions();graph.search($('search').value);if(view==='directory')renderPeople();if(view==='coverage')renderCoverage();renderInspector();
 }
 function switchView(name){view=name;for(const key of ['graph','directory','coverage']){show(`view-${key}`,key===name);$(`tab-${key}`).setAttribute('aria-selected',String(key===name));}if(name==='directory')renderPeople();if(name==='coverage')renderCoverage();if(name==='graph')graph.resize();}
@@ -57,7 +57,7 @@ async function refresh(){
     else next=JSON.parse(localStorage.getItem(KEY)||'null');
     if(state&&next&&state.id===next.id&&state.updatedAt===next.updatedAt&&state.revision===next.revision)return;
     if(state?.id!==next?.id)lastReveal=null;
-    collectionState=next;library.queue(next);if(libraryMode)return;state=next;if(selected&&!state?.nodes[selected])selected=null;render();
+    collectionState=next;refreshMaps().catch(()=>{});library.queue(next);if(libraryMode)return;state=next;if(selected&&!state?.nodes[selected])selected=null;render();
   }finally{refreshing=false;}
 }
 $('setup-form').onsubmit=async e=>{e.preventDefault();try{if(!profileURL($('profile-url').value))throw Error('Paste a LinkedIn person profile URL beginning with https://www.linkedin.com/in/.');const settings=config();if(!hasCollector())throw Error('Install the Chrome companion below, then click Connect companion to collect from LinkedIn.');await send({type:'START',url:$('profile-url').value,config:settings});await refresh();}catch(error){toast(error.message);}};
@@ -68,9 +68,9 @@ $('clear-button').onclick=async()=>{if(!confirm('Clear this browser’s collecti
 for(const name of ['graph','directory','coverage'])$(`tab-${name}`).onclick=()=>switchView(name);
 $('search').oninput=()=>{graph.search($('search').value);if(view==='directory')renderPeople();};$('fit').onclick=()=>graph.fit();$('zoom-in').onclick=()=>graph.zoom(1.08);$('zoom-out').onclick=()=>graph.zoom(1/1.08);
 if(EXTENSION){set('connection-mode','CHROME COLLECTOR CONNECTED');chrome.storage.onChanged.addListener((changes,area)=>{if(area==='local'&&changes[KEY])refresh().catch(e=>toast(e.message));});}else{set('connection-mode','COMPANION NOT CONNECTED');show('install-note',true);}
-await refresh();if(state){$('profile-url').value=state.root;$('max-nodes').value=state.config.maxNodes;$('depth').value=state.config.depth;$('delay').value=Math.max(120,state.config.delay||120);}
+await refresh();await refreshMaps().catch(()=>{});if(state){$('profile-url').value=state.root;$('max-nodes').value=state.config.maxNodes;$('depth').value=state.config.depth;$('delay').value=Math.max(120,state.config.delay||120);}
 
-async function connectCompanion(quiet=false){try{if(!globalThis.chrome?.runtime?.sendMessage)throw Error('Install the companion in Chrome, then reload this page and connect.');const ping=await send({type:'PING'});companionVersion=ping.version;remoteRevision=null;bridgeConnected=true;show('update-note',companionVersion!=='2.0.0');set('connection-mode','CHROME COMPANION CONNECTED');show('install-note',false);await refresh();if(state){$('profile-url').value=state.root;$('max-nodes').value=state.config.maxNodes;$('depth').value=state.config.depth;$('delay').value=Math.max(120,state.config.delay||120);}if(!quiet)toast('Connected. You can now build a network from this page.');}catch(e){if(!quiet)toast(e.message);}}
+async function connectCompanion(quiet=false){try{if(!globalThis.chrome?.runtime?.sendMessage)throw Error('Install the companion in Chrome, then reload this page and connect.');const ping=await send({type:'PING'});companionVersion=ping.version;remoteRevision=null;bridgeConnected=true;show('update-note',companionVersion!=='2.1.0');set('connection-mode','CHROME COMPANION CONNECTED');show('install-note',false);await refresh();await refreshMaps().catch(()=>{});if(state){$('profile-url').value=state.root;$('max-nodes').value=state.config.maxNodes;$('depth').value=state.config.depth;$('delay').value=Math.max(120,state.config.delay||120);}if(!quiet)toast('Connected. You can now build a network from this page.');}catch(e){if(!quiet)toast(e.message);}}
 $('connect-companion').onclick=()=>connectCompanion();
 if(!EXTENSION)connectCompanion(true);
 setInterval(()=>{if((EXTENSION||bridgeConnected)&&document.visibilityState==='visible')refresh().catch(()=>{bridgeConnected=false;set('connection-mode','COMPANION DISCONNECTED');show('install-note',true);render();});},500);
@@ -96,3 +96,22 @@ function applyFilters(){graph.setFilters(activeFilters(),$('group-by').value);re
 $('filter-toggle').onclick=()=>{const open=$('map-filters').hidden;show('map-filters',open);$('filter-toggle').setAttribute('aria-expanded',String(open));};
 for(const id of ['filter-location','filter-field','group-by'])$(id).onchange=applyFilters;
 $('reset-filters').onclick=()=>{$('filter-location').value='';$('filter-field').value='';$('group-by').value='none';applyFilters();};
+
+async function refreshMaps(){
+  if(!hasCollector()){$('new-map').disabled=true;return;}
+  const response=await send({type:'LIST_MAPS'}),select=$('map-switcher');$('new-map').disabled=false;
+  select.replaceChildren(Object.assign(el('option','New map'),{value:''}));
+  for(const m of response.maps)select.append(Object.assign(el('option',`${m.name} · ${m.count} people · ${statuses[m.status]||m.status}`),{value:m.id}));
+  select.value=collectionState?.id||'';
+}
+async function changeMap(type,id){try{
+ await send({type,id});libraryMode=false;state=null;selected=null;remoteRevision=null;
+ $('inspector-content').replaceChildren(el('h3','Every person has a path.'),el('p','Select someone in your map to explore their connections.'));
+ $('profile-url').value='';$('filter-location').value='';$('filter-field').value='';$('group-by').value='none';graph.setFilters({},'none');
+ await refresh();if(state){$('profile-url').value=state.root;$('max-nodes').value=state.config.maxNodes;$('depth').value=state.config.depth;$('delay').value=state.config.delay;}
+ await refreshMaps();
+}catch(e){toast(e.message);}}
+$('new-map').onclick=()=>changeMap('NEW_MAP');
+$('map-switcher').onchange=e=>changeMap(e.target.value?'SWITCH_MAP':'NEW_MAP',e.target.value);
+$('cancel-build').onclick=async()=>{try{await send({type:'CANCEL'});await refresh();await refreshMaps();toast('Build cancelled. Your discovered people are kept.');}catch(e){toast(e.message);}};
+$('filter-lines').onchange=e=>{graph.showAllConnections=e.target.checked;graph.draw();};
