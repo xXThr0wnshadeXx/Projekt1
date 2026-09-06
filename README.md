@@ -8,8 +8,8 @@ New contributors and new Codex chats should read [PROJECT_HANDOFF.md](PROJECT_HA
 
 - **Canonical application:** [orbit-shreev2703-graph-test.shreev2703.chatgpt.site](https://orbit-shreev2703-graph-test.shreev2703.chatgpt.site/)
 - **Repository:** [xXThr0wnshadeXx/Projekt1](https://github.com/xXThr0wnshadeXx/Projekt1)
-- **Companion download:** [download the current ZIP](https://orbit-shreev2703-graph-test.shreev2703.chatgpt.site/downloads/orbit-network-mapper.zip?v=2.6.4)
-- **Current application and companion version:** `2.6.4`
+- **Companion download:** [download the current ZIP](https://orbit-shreev2703-graph-test.shreev2703.chatgpt.site/downloads/orbit-network-mapper.zip?v=2.7.0)
+- **Current application and companion version:** `2.7.0`
 
 This is the single supported hosted application and database. Do not use the retired Turso setup or the older `doublejav.chatgpt.site` deployment.
 
@@ -56,9 +56,11 @@ The extension is a background collection companion; the permanent knowledge grap
 
 Orbit maintains one continuously growing network for each signed-in account. Resuming an unfinished collection keeps its exact page, queue, and checkpoint; duplicate starts leave an active collection alone. A finished map becomes **Check for new connections**. Orbit never clears its saved coverage or requeues the whole known network: after 24 hours it checks the 24 stalest eligible branches, prioritizes the starting account, and rotates through the remainder on later runs. Newly discovered people still expand outward to the chosen degree. Reopening the Site starts a due daily batch, while reopening an unfinished run resumes exactly where it stopped. Every changed person and relationship is periodically upserted into the shared team graph. **Reset my account network** is deliberately kept in Settings and removes only that account’s contribution—overlapping records supported by teammates remain.
 
-### Shared connected maps and optional comment relationships (2.6.4)
+### Shared connected maps and reusable teammate coverage (2.7.0)
 
 The account map automatically loads saved D1 paths connected to its starting profile, including paths contributed by teammates, up to six observed steps away. It refreshes while the Site is open. Unrelated database records are never added merely because they exist. A distance filter can limit the visible map to the 1st through 6th degree.
+
+Profile, connection-list, and optional comment coverage now sync to D1 with contributor attribution. A fresh completed profile check can be reused for seven days; a fresh completed connection list or comment pass can be reused for 24 hours. Nicolas can therefore continue from Shreev's completed branches and vice versa without requesting the same LinkedIn pages again. Incomplete, hidden, mutual-only, filter-changed, or stale work remains visible evidence but never suppresses another collector. Orbit still prefers each account owner's own direct list. Teammate-only people are exploration hints until the current contributor actually observes them, so they are not falsely attributed or uploaded as that contributor's discovery.
 
 Connection lists are the default collection mode. Comment collection is optional in Map settings so it cannot hold up normal network expansion. When enabled, a commenter and the actual author of a visible post get one **undirected, equal-weight relationship**, whether or not they are LinkedIn connections. Repeated comments and connection-list observations merge into the same pair while keeping separate evidence. Commenters on the same post are not automatically connected to each other.
 
@@ -79,7 +81,7 @@ Existing exports with `commentObservations`, combined comment evidence, or `kind
 - Scrolling uses overlapping viewports and combines unique people across virtualized snapshots. Modern and legacy result cards can coexist. A person cap saves only accepted rows and resumes the remainder without inflating page counts. An uncertain end remains **Incomplete** in Coverage.
 - Incomplete direct lists no longer block exploring the people already found. Resume keeps the active page and pending queue, including older coverage pauses. Browser restarts preserve the last paginated URL.
 - **Explore next layer** moves on to saved people's connections immediately, keeping the current direct-list checkpoint for later. It skips branches already attempted and does not re-create people. Increase coverage to 3rd degree in Map settings to explore another layer. Known people can still receive updated profile fields and new relationship evidence.
-- Collection scheduling uses the companion's local URL index and branch checkpoints. D1 merges the discovered people and relationships; a person existing in D1 alone is not proof their connection list was fully explored. Update an unpacked companion by replacing its existing files and clicking **Reload**, never by uninstalling it: uninstalling removes its local collection checkpoint.
+- Collection scheduling uses the companion's local URL index, local branch checkpoints, and reusable D1 coverage. A person existing in D1 alone is not proof their connection list was fully explored; only a fresh, completed, unfiltered coverage record can skip it. Update an unpacked companion by replacing its existing files and clicking **Reload**, never by uninstalling it: uninstalling removes its local collection checkpoint.
 - An open Site now keeps its collection lease through background-tab throttling and overnight computer sleep. A normal Site close still pauses immediately and reopening resumes the same checkpoint.
 - Completed maps keep per-branch freshness timestamps. Daily refreshes inspect at most 24 stale branches at a time, retain all prior people, relationship evidence, comment coverage, and pagination history, and use idempotent URL/edge keys so a refresh cannot duplicate graph records.
 
@@ -104,6 +106,7 @@ Migrations live in [`drizzle/`](drizzle/) and are packaged with each deployment.
 - `connections` — stable undirected endpoints and first/last observation times;
 - `evidence` — the visible connection-list source supporting a relationship;
 - `people_contributors`, `connection_contributors`, and `evidence_contributors` — which signed-in accounts support each shared record and source observation;
+- `collection_coverage` — per-person profile/list/comment checkpoints, contributor, freshness, completeness, and server-derived reuse eligibility;
 - `api_rate_limits` — atomic per-contributor request counters used when enforcement is enabled;
 - `imports` and `import_records` — imported file metadata and lossless preserved source records;
 - `users`, `identities`, and `sessions` — server-backed account, onboarding, and hashed-session state.
