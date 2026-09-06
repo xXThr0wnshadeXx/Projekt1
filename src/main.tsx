@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent 
 import { createRoot } from 'react-dom/client';
 import { createAuthGateway, type AuthSession } from './auth';
 import { GraphViewport } from './components/GraphViewport';
-import { GraphApiError, loadGraph, searchGraph } from './api/graphClient';
+import { GraphApiError, loadDiscoveryCapabilities, loadGraph, searchGraph, startDiscovery, type DiscoveryCapabilities, type DiscoveryReceipt, type DiscoveryRequest } from './api/graphClient';
 import type { GraphSnapshot, OpportunityPath, SearchEvent, SearchResult } from '../contracts/index';
 import './styles.css';
 
@@ -67,7 +67,16 @@ function App() {
   const [selectedPaths, setSelectedPaths] = useState<OpportunityPath[]>([]);
   const [activePersonIds, setActivePersonIds] = useState<string[]>([]);
   const [intentStatus, setIntentStatus] = useState('');
+  const [discoveryCapabilities, setDiscoveryCapabilities] = useState<DiscoveryCapabilities | null>(null);
+  const [capabilitiesError, setCapabilitiesError] = useState('');
+  const [discoveryReceipt, setDiscoveryReceipt] = useState<DiscoveryReceipt | null>(null);
+  const [discoveryError, setDiscoveryError] = useState('');
+  const [discoveryPending, setDiscoveryPending] = useState(false);
   const replayTimer = useRef<number | null>(null);
+  const discoveryController = useRef<AbortController | null>(null);
+  const capabilitiesController = useRef<AbortController | null>(null);
+  const discoverySequence = useRef(0);
+  const retryRequest = useRef<DiscoveryRequest | null>(null);
 
   useEffect(() => {
     void auth.currentSession()
@@ -83,6 +92,10 @@ function App() {
     setSearchResult(null);
     setGraphError('');
     setIntentStatus('');
+    setDiscoveryReceipt(null);
+    setDiscoveryError('');
+    retryRequest.current = null;
+    discoveryController.current?.abort();
   }, [session]);
   useEffect(() => {
     if (!session || !scopeId) return;
@@ -96,7 +109,25 @@ function App() {
     }).finally(() => { if (!cancelled) setGraphLoading(false); });
     return () => { cancelled = true; };
   }, [session, scopeId]);
-  useEffect(() => () => { if (replayTimer.current !== null) window.clearTimeout(replayTimer.current); }, []);
+  useEffect(() => {
+    capabilitiesController.current?.abort();
+    setDiscoveryCapabilities(null);
+    setCapabilitiesError('');
+    if (!session || !scopeId) return;
+    const controller = new AbortController();
+    capabilitiesController.current = controller;
+    void loadDiscoveryCapabilities(controller.signal).then((capabilities) => {
+      if (!controller.signal.aborted) setDiscoveryCapabilities(capabilities);
+    }).catch((error: unknown) => {
+      if (!controller.signal.aborted) setCapabilitiesError(discoveryErrorMessage(error));
+    });
+    return () => controller.abort();
+  }, [session, scopeId]);
+  useEffect(() => () => {
+    if (replayTimer.current !== null) window.clearTimeout(replayTimer.current);
+    discoveryController.current?.abort();
+    capabilitiesController.current?.abort();
+  }, []);
   const initials = useMemo(() => session?.actor.displayName.split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase(), [session]);
 
   async function signOut() {
@@ -161,10 +192,43 @@ function App() {
       setAuthError(error instanceof Error ? error.message : 'We could not create your workspace.');
     } finally { setBusy(false); }
   }
-  function saveIntent(intent: DiscoveryIntent) {
+  function invalidateDiscovery() {
+    discoverySequence.current += 1;
+    discoveryController.current?.abort();
+    discoveryController.current = null;
+    setDiscoveryPending(false);
+    setDiscoveryReceipt(null);
+    setDiscoveryError('');
+    setIntentStatus('');
+    retryRequest.current = null;
+  }
+  async function saveIntent(intent: DiscoveryIntent, retry?: DiscoveryRequest) {
     if (!session) { setShowAuth(true); return; }
-    // Discovery persistence will be server-owned once Ben freezes its request contract.
-    setIntentStatus(`Your ${intent.company || intent.field || 'connection'} goal is ready to send to the secure discovery service.`);
+    if (!scopeId || !snapshot) { setDiscoveryError('Your authorized graph is still loading. Please try again in a moment.'); return; }
+    const request = retry ?? createDiscoveryRequest(intent, scopeId, snapshot.graphVersion);
+    const sequence = ++discoverySequence.current;
+    const controller = new AbortController();
+    discoveryController.current?.abort();
+    discoveryController.current = controller;
+    setDiscoveryPending(true);
+    setDiscoveryReceipt(null);
+    setDiscoveryError('');
+    setIntentStatus('');
+    try {
+      const receipt = await startDiscovery(request, controller.signal);
+      if (controller.signal.aborted || sequence !== discoverySequence.current) return;
+      if (receipt.scopeId !== scopeId || receipt.baseGraphVersion !== snapshot.graphVersion) {
+        throw new Error('The discovery result is stale for your current workspace. Please try again.');
+      }
+      retryRequest.current = null;
+      setDiscoveryReceipt(receipt);
+    } catch (error) {
+      if (controller.signal.aborted || sequence !== discoverySequence.current) return;
+      retryRequest.current = request;
+      setDiscoveryError(discoveryErrorMessage(error));
+    } finally {
+      if (sequence === discoverySequence.current) setDiscoveryPending(false);
+    }
   }
 
   return <main>
@@ -192,7 +256,7 @@ function App() {
       <div className="scroll-reveal scroll-reveal--right"><GraphViewport snapshot={snapshot} loading={graphLoading} error={graphError} selectedPaths={selectedPaths} activePersonIds={activePersonIds} /></div>
     </section>
 
-    <DiscoveryIntentForm signedIn={Boolean(session)} resetKey={`${session?.actor.id ?? 'signed-out'}:${scopeId}`} onSignIn={() => setShowAuth(true)} onSave={saveIntent} onClear={() => setIntentStatus('')} status={intentStatus} />
+    <DiscoveryIntentForm signedIn={Boolean(session)} resetKey={`${session?.actor.id ?? 'signed-out'}:${scopeId}`} onSignIn={() => setShowAuth(true)} onSave={saveIntent} onRetry={() => { if (retryRequest.current) void saveIntent({ company: '', recruiter: '', location: '', field: '', linkedinUrl: '', instagramUrl: '' }, retryRequest.current); }} onEdit={invalidateDiscovery} onClear={invalidateDiscovery} status={intentStatus} pending={discoveryPending} capabilities={discoveryCapabilities} capabilitiesError={capabilitiesError} receipt={discoveryReceipt} error={discoveryError} />
 
     <section className="search-panel scroll-reveal scroll-reveal--rise" aria-labelledby="search-title">
       <div><p className="eyebrow"><i /> ROUTE SEARCH</p><h2 id="search-title">Explore a supported path.</h2><p>Once discovery has returned an authorized graph, the server resolves your goal and selects routes. WarmPath only displays returned facts and paths.</p></div>
@@ -234,7 +298,7 @@ function App() {
   </main>;
 }
 
-function DiscoveryIntentForm({ signedIn, resetKey, onSignIn, onSave, onClear, status }: { signedIn: boolean; resetKey: string; onSignIn: () => void; onSave: (intent: DiscoveryIntent) => void; onClear: () => void; status: string }) {
+function DiscoveryIntentForm({ signedIn, resetKey, onSignIn, onSave, onRetry, onEdit, onClear, status, pending, capabilities, capabilitiesError, receipt, error }: { signedIn: boolean; resetKey: string; onSignIn: () => void; onSave: (intent: DiscoveryIntent) => Promise<void>; onRetry: () => void; onEdit: () => void; onClear: () => void; status: string; pending: boolean; capabilities: DiscoveryCapabilities | null; capabilitiesError: string; receipt: DiscoveryReceipt | null; error: string }) {
   const emptyIntent = (): DiscoveryIntent => ({ company: '', recruiter: '', location: '', field: '', linkedinUrl: '', instagramUrl: '' });
   const [intent, setIntent] = useState<DiscoveryIntent>(emptyIntent);
   const [errors, setErrors] = useState<string[]>([]);
@@ -242,14 +306,14 @@ function DiscoveryIntentForm({ signedIn, resetKey, onSignIn, onSave, onClear, st
   const change = (field: keyof DiscoveryIntent) => (event: ChangeEvent<HTMLInputElement>) => {
     setIntent((current) => ({ ...current, [field]: event.target.value }));
     setErrors([]);
-    onClear();
+    onEdit();
   };
   function clear() { setIntent(emptyIntent()); setErrors([]); onClear(); }
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const nextErrors = validateDiscoveryIntent(intent);
     if (nextErrors.length > 0) { setErrors(nextErrors); return; }
-    onSave(intent);
+    void onSave(intent);
   }
   return <section className="intent-panel scroll-reveal scroll-reveal--rise" aria-labelledby="intent-title">
     <div className="intent-heading"><p className="eyebrow"><i /> START A CONNECTION QUEST</p><h2 id="intent-title">What do you want to do?</h2><p>Tell us who or what you want to get closer to. We will only look for evidence the secure service is authorized to use.</p></div>
@@ -259,13 +323,44 @@ function DiscoveryIntentForm({ signedIn, resetKey, onSignIn, onSave, onClear, st
       <label>Location<input value={intent.location} onChange={change('location')} placeholder="e.g. San Jose, CA" /></label>
       <label>Field or role<input value={intent.field} onChange={change('field')} placeholder="e.g. product design internship" /></label>
       <fieldset className="profile-links"><legend>Optional public profile links</legend><label>LinkedIn profile<input value={intent.linkedinUrl} onChange={change('linkedinUrl')} type="url" placeholder="https://linkedin.com/in/..." /></label><label>Instagram profile<input value={intent.instagramUrl} onChange={change('instagramUrl')} type="url" placeholder="https://instagram.com/..." /></label></fieldset>
-      {signedIn ? <button className="primary intent-submit">Save this connection goal <span>→</span></button> : <button type="button" className="primary intent-submit" onClick={onSignIn}>Sign in to start <span>→</span></button>}
+      {signedIn ? <button className="primary intent-submit" disabled={pending}>{pending ? 'Searching public sources…' : 'Find supported routes'} <span>→</span></button> : <button type="button" className="primary intent-submit" onClick={onSignIn}>Sign in to start <span>→</span></button>}
       <button type="button" className="text-button intent-clear" onClick={clear}>Clear this goal</button>
       <p className="intent-privacy">Profile links are optional while drafting. Running discovery will require both profile links and a company or person target. Location and role are not sent as discovery filters yet. We do not scrape private networks or keep this draft in your browser.</p>
       {errors.length > 0 && <div className="intent-errors" role="alert"><strong>Before discovery can start:</strong><ul>{errors.map((error) => <li key={error}>{error}</li>)}</ul></div>}
+      {capabilities && <p className="intent-capabilities" role="status">Coverage: {capabilities.coverage === 'GENERAL_PUBLIC_WEB' ? 'general public web' : 'limited public sources'} · General web: {capabilities.generalWeb.replaceAll('_', ' ').toLowerCase()}.</p>}
+      {capabilitiesError && <p className="intent-unavailable" role="status">Discovery availability is not confirmed: {capabilitiesError}</p>}
+      {error && <div className="intent-errors" role="alert"><strong>Discovery did not start.</strong><p>{error}</p><button type="button" className="secondary small-secondary" onClick={onRetry}>Retry the same request <span>→</span></button></div>}
+      {receipt && <DiscoveryReceiptSummary receipt={receipt} />}
       {status && <p className="intent-status" role="status">{status}</p>}
     </form>
   </section>;
+}
+
+function DiscoveryReceiptSummary({ receipt }: { receipt: DiscoveryReceipt }) {
+  const title = receipt.status === 'REVIEW_REQUIRED' ? 'Potential connections need review.' : receipt.status === 'INSUFFICIENT_PUBLIC_EVIDENCE' ? 'No verified route yet.' : 'A source is unavailable.';
+  return <section className={`discovery-receipt discovery-${receipt.status.toLowerCase()}`} aria-live="polite"><h3>{title}</h3><p>{receipt.status === 'REVIEW_REQUIRED' ? 'The service found evidence proposals. They are not confirmed connections until reviewed.' : receipt.status === 'INSUFFICIENT_PUBLIC_EVIDENCE' ? 'WarmPath exhausted this bounded search without inventing a connection.' : 'WarmPath could not reach enough allowed public sources for this search.'}</p><p>{receipt.proposalRefs.length} proposal{receipt.proposalRefs.length === 1 ? '' : 's'} · {receipt.unresolvedIdentityCount} identity question{receipt.unresolvedIdentityCount === 1 ? '' : 's'} · {receipt.budget.queriesUsed} queries · {receipt.budget.pagesRead} pages{receipt.budget.exhausted ? ' · search budget reached' : ''}</p>{receipt.warnings.length > 0 && <ul>{receipt.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}</section>;
+}
+
+function createDiscoveryRequest(intent: DiscoveryIntent, scopeId: string, expectedGraphVersion: string): DiscoveryRequest {
+  return {
+    scopeId,
+    expectedGraphVersion,
+    idempotencyKey: globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    anchors: { linkedinUrl: intent.linkedinUrl.trim(), instagramUrl: intent.instagramUrl.trim() },
+    target: { ...(intent.recruiter.trim() ? { personName: intent.recruiter.trim() } : {}), ...(intent.company.trim() ? { organizationName: intent.company.trim() } : {}) }
+  };
+}
+
+function discoveryErrorMessage(error: unknown): string {
+  if (error instanceof GraphApiError) {
+    if (error.code === 'UNAUTHENTICATED') return 'Please sign in again before starting discovery.';
+    if (error.code === 'VERSION_CONFLICT') return 'Your workspace changed. Reload the graph and try again.';
+    if (error.code === 'RATE_LIMITED') return 'The source is busy. Wait a moment, then retry this same request.';
+    if (error.code === 'SOURCE_UNAVAILABLE' || error.status === 404 || error.status === 503) return 'The discovery service is not available in this preview yet.';
+    return error.message;
+  }
+  if (error instanceof TypeError) return 'You appear to be offline or the discovery service cannot be reached.';
+  return error instanceof Error ? error.message : 'Discovery could not start.';
 }
 
 function validateDiscoveryIntent(intent: DiscoveryIntent): string[] {
