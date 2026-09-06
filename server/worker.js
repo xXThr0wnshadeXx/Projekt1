@@ -1,7 +1,17 @@
 import assets from '../.build/assets.js';
 import {handleAPI} from './api.js';
+import {createTursoDatabase} from './turso.js';
 export default {async fetch(request,env){
-  const response=await handleAPI(request,env);if(response)return response;
+  const databaseEnv = {
+    ...env,
+    ...(env.TURSO_DATABASE_URL && env.TURSO_AUTH_TOKEN
+      ? {DB:createTursoDatabase({url:env.TURSO_DATABASE_URL,authToken:env.TURSO_AUTH_TOKEN})}
+      : {}),
+    // Opt-in demo mode: authenticated users contribute to one named graph.
+    // Leaving this unset preserves owner-isolated libraries.
+    SHARED_OWNER: env.ORBIT_SHARED_WORKSPACE_ID || undefined,
+  };
+  const response=await handleAPI(request,databaseEnv);if(response)return response;
   const url=new URL(request.url);
   if(['/setup.html','/map.html'].includes(url.pathname)&&!request.headers.get('oai-authenticated-user-id'))return Response.redirect(url.origin+'/signin-with-chatgpt?return_to='+encodeURIComponent(url.pathname),302);
   if(!['GET','HEAD'].includes(request.method))return new Response('Method not allowed',{status:405});

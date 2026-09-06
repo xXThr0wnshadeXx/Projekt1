@@ -44,6 +44,21 @@ No `.env` file, LinkedIn API key, or database password is required for these loc
 - **Collector:** load the repository as an unpacked extension, then use the extension's own page. The local HTTP preview cannot connect to the companion because the external-message allowlist contains only the hosted Orbit origin.
 - **Database or API:** start with the SQLite-backed and API unit tests. End-to-end testing requires a separately configured development Site or authorized access to the hosted application. Do not treat the production library as a test database.
 
+#### Optional Turso development database
+
+The repository includes a portable Turso connection for local database/API work. Configure `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` as private Worker secrets to use Turso as the hosted library database; if they are absent, the existing D1 binding remains the fallback. To run a shared authenticated demo graph, also set `ORBIT_SHARED_WORKSPACE_ID` to a stable workspace ID. This opt-in mode centralizes contributions while retaining the sign-in requirement; leaving it unset preserves per-user isolation.
+
+```sh
+copy .env.example .env
+# Edit .env and replace the TURSO_AUTH_TOKEN placeholder. Never commit it.
+npm run turso:health
+npm run turso:setup
+```
+
+The example sets `TURSO_DATABASE_URL` to the project’s `connection-graph` database URL. Create a token in Turso, set both values only in your local environment or deployment secret store, then run `npm run turso:setup` once. The setup command applies [`db/turso-schema.sql`](db/turso-schema.sql); the health command only runs `SELECT 1` and neither command prints credentials.
+
+Shared deployments enforce database-backed limits per authenticated contributor: 20 ingestion requests and 120 read requests per minute by default. Override them with the positive integer secrets `ORBIT_WRITE_LIMIT_PER_MINUTE` and `ORBIT_READ_LIMIT_PER_MINUTE`. A rejected request returns HTTP 429 with `Retry-After` and rate-limit headers.
+
 ## Install and update the Chrome companion
 
 For development, open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select this repository's root folder—the folder containing `manifest.json`. Click the Orbit extension action to open its own interface. Changes to the background worker or manifest require clicking **Reload** on the extension card; refresh any open Orbit interface afterward.
