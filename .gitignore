@@ -6,3 +6,6 @@ dist/
 out/
 
 .build/
+.env
+.env.*
+!.env.example

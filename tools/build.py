@@ -1,11 +1,12 @@
 from pathlib import Path
-from shutil import copy2, rmtree
+from shutil import copy2, rmtree, which
 import subprocess
 import json
+import sys
 
 root=Path(__file__).resolve().parents[1]
 subprocess.run(['node','--check',str(root/'src/app.js')],check=True)
-subprocess.run(['python3',str(root/'tools/package.py')],check=True)
+subprocess.run([sys.executable,str(root/'tools/package.py')],check=True)
 out=root/'out'
 if out.exists():rmtree(out)
 (out/'src').mkdir(parents=True)
@@ -22,7 +23,9 @@ assets={}
 for file in out.rglob('*'):
     if file.is_file():
         binary=file.suffix=='.zip'
-        assets['/'+file.relative_to(out).as_posix()]={'body':base64.b64encode(file.read_bytes()).decode() if binary else file.read_text(),'binary':binary,'type':mimetypes.guess_type(file.name)[0] or 'application/octet-stream'}
+        assets['/'+file.relative_to(out).as_posix()]={'body':base64.b64encode(file.read_bytes()).decode() if binary else file.read_text(encoding='utf-8'),'binary':binary,'type':mimetypes.guess_type(file.name)[0] or 'application/octet-stream'}
 (root/'.build').mkdir(exist_ok=True)
-(root/'.build/assets.js').write_text('export default '+json.dumps(assets)+';')
-subprocess.run(['npx','vite','build'],cwd=root,check=True)
+(root/'.build/assets.js').write_text('export default '+json.dumps(assets)+';',encoding='utf-8')
+npx=which('npx.cmd') or which('npx')
+if not npx:raise RuntimeError('npx is required to build Orbit.')
+subprocess.run([npx,'vite','build'],cwd=root,check=True)
