@@ -1,9 +1,0 @@
-Generated with the built-in image_gen tool for the Orbit landing page.
-Asset: assets/orbit-rocket.png
-
-Use case: stylized-concept
-Asset type: transparent PNG rocket illustration for Orbit landing page.
-Primary request: Single elegant playful editorial game rocket icon, upright nose up, cream body, yellow nose and purple fins, pale blue circular window, crisp flat illustration with subtle print texture, bold clean silhouette, dark outline.
-Composition/framing: Rocket centered and occupies most of canvas with slight margin.
-Scene/backdrop: No background, genuinely transparent alpha.
-Constraints: No text. NO flame or exhaust (animated separately). One rocket only.

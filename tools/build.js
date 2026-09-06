@@ -22,10 +22,9 @@ mkdirSync(join(out, "downloads"), { recursive: true });
 for (const name of ["index.html", "setup.html", "map.html", "styles.css"]) {
   copyFileSync(join(root, name), join(out, name));
 }
-for (const name of ["app.js", "core.js", "graph.js", "companion.js", "import.js", "library.js", "onboarding.js", "workspace.js", "filters.js", "search.js", "landing-motion.js", "landing-flight.js"]) {
+for (const name of ["app.js", "core.js", "graph.js", "companion.js", "import.js", "library.js", "onboarding.js", "workspace.js", "filters.js", "search.js", "landing-motion.js", "landing-solar.js"]) {
   copyFileSync(join(root, "src", name), join(out, "src", name));
 }
-cpSync(join(root,"assets"),join(out,"assets"),{recursive:true});
 cpSync(join(root,"fonts"),join(out,"fonts"),{recursive:true});
 copyFileSync(extensionZip, join(out, "downloads", "orbit-network-mapper.zip"));
 

@@ -98,8 +98,7 @@ export function packageExtension() {
     .sort()
     .map((name) => join("src", name));
   const fontFiles = readdirSync(join(root,"fonts")).map(name=>join("fonts",name));
-  const assetFiles = readdirSync(join(root,"assets")).map(name=>join("assets",name));
-  const files = [...topLevel, ...sourceFiles, ...fontFiles, ...assetFiles].map((name) => ({
+  const files = [...topLevel, ...sourceFiles, ...fontFiles].map((name) => ({
     path: join(root, name),
     name: `orbit-network-mapper/${name.replaceAll("\\", "/")}`,
   }));
