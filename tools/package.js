@@ -97,7 +97,8 @@ export function packageExtension() {
     .filter((name) => name.endsWith(".js"))
     .sort()
     .map((name) => join("src", name));
-  const files = [...topLevel, ...sourceFiles].map((name) => ({
+  const fontFiles = readdirSync(join(root,"fonts")).map(name=>join("fonts",name));
+  const files = [...topLevel, ...sourceFiles, ...fontFiles].map((name) => ({
     path: join(root, name),
     name: `orbit-network-mapper/${name.replaceAll("\\", "/")}`,
   }));
