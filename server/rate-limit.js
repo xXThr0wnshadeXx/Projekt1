@@ -1,6 +1,6 @@
 const positiveInt=(value,fallback)=>{const parsed=Number(value);return Number.isInteger(parsed)&&parsed>0?parsed:fallback;};
 
-/** Atomic fixed-window limiter stored in SQLite/libSQL, so all Worker instances share it. */
+/** Atomic fixed-window limiter stored in SQLite/D1, so all Worker instances share it. */
 export async function consumeRateLimit(db,key,limit,windowMs=60000,now=Date.now()){
   const resetAt=now+windowMs;
   const row=await db.prepare(`INSERT INTO api_rate_limits(key,count,reset_at) VALUES (?,1,?)
@@ -17,4 +17,3 @@ export function rateLimitConfig(env,kind){
     ? positiveInt(env.ORBIT_WRITE_LIMIT_PER_MINUTE,20)
     : positiveInt(env.ORBIT_READ_LIMIT_PER_MINUTE,120);
 }
-

@@ -13,7 +13,7 @@ export async function handleAPI(request,env){
     if(!env.DB)return json({error:'The database is not available.'},503);
     if(request.method==='POST'&&request.headers.get('origin')!==url.origin)return json({error:'Invalid request origin.'},403);
     try{
-      const limited=async kind=>{const limit=rateLimitConfig(env,kind),rate=await consumeRateLimit(env.DB,`${actor}:${kind}`,limit);return rate.allowed?null:json({error:'Rate limit exceeded. Please retry shortly.'},429,{'Retry-After':String(Math.max(1,Math.ceil((rate.resetAt-Date.now())/1000))),'X-RateLimit-Limit':String(rate.limit),'X-RateLimit-Remaining':'0'});};
+      const limited=async kind=>{if(env.ORBIT_RATE_LIMIT_ENABLED!=='true')return null;const limit=rateLimitConfig(env,kind),rate=await consumeRateLimit(env.DB,`${actor}:${kind}`,limit);return rate.allowed?null:json({error:'Rate limit exceeded. Please retry shortly.'},429,{'Retry-After':String(Math.max(1,Math.ceil((rate.resetAt-Date.now())/1000))),'X-RateLimit-Limit':String(rate.limit),'X-RateLimit-Remaining':'0'});};
       if(url.pathname==='/api/library/stats'&&request.method==='GET'){const stop=await limited('read');return stop||json(await stats(env.DB,owner));}
       if(url.pathname==='/api/library/search'&&request.method==='GET'){const stop=await limited('read');return stop||json({people:await search(env.DB,owner,url.searchParams.get('q')||'')});}
       if(url.pathname==='/api/library/graph'&&request.method==='GET'){const stop=await limited('read');return stop||json(await neighborhood(env.DB,owner,url.searchParams.get('url'),Number(url.searchParams.get('depth')||2),Number(url.searchParams.get('limit')||1000)));}

@@ -44,10 +44,11 @@ Canonical Orbit Site
 Sites D1 binding: DB
   - shared workspace: demo-knowledge-graph
   - people, relationships, and evidence
-  - per-contributor rate limits
+  - authenticated, validated writes
+  - optional per-contributor rate limits
 ```
 
-The extension is local; the permanent knowledge graph is not. All authenticated contributors use the hard-coded shared workspace `demo-knowledge-graph`. Their identities remain separate for authentication and rate limiting.
+The extension is local; the permanent knowledge graph is not. All authenticated contributors use the hard-coded shared workspace `demo-knowledge-graph`.
 
 ## Multiple local maps
 
@@ -75,11 +76,24 @@ Migrations live in [`drizzle/`](drizzle/) and are packaged with each deployment.
 - `people` — canonical profile URL, name, search name, headline, location, and timestamps;
 - `connections` — stable undirected endpoints and first/last observation times;
 - `evidence` — the visible connection-list source supporting a relationship;
-- `api_rate_limits` — atomic per-contributor request counters.
+- `api_rate_limits` — atomic per-contributor request counters used when enforcement is enabled.
 
 Ingestion uses idempotent upserts. Overlapping collections add evidence and relationships without duplicating people. Empty incoming fields do not replace existing nonempty profile information.
 
-The hosted limits are 20 ingestion requests and 120 read requests per authenticated contributor per minute. A rejected request returns HTTP 429 with `Retry-After` and rate-limit headers.
+### Import a teammate's existing collection
+
+A teammate does **not** need Sites editor access or direct D1 credentials to add data. They need to:
+
+1. Open the [canonical Orbit Site](https://orbit-shreev2703-graph-test.shreev2703.chatgpt.site/map.html) and sign in with ChatGPT.
+2. Open **Map settings → Team library**.
+3. Choose **Choose JSON and import**, then select an Orbit-compatible JSON file containing `nodes` and `edges` arrays.
+4. Keep that browser tab open until **Import complete** appears.
+
+People must use canonical LinkedIn profile URLs. Every edge must name its `source` and `target` profile URLs and include at least one evidence object with a visible LinkedIn connection-list `url` and a valid `observedAt` timestamp. Orbit uploads people first, then connections in atomic batches.
+
+Duplicate protection is enforced in D1, not just in the browser. A person is unique by canonical LinkedIn URL; a connection is unique by its alphabetically ordered endpoint pair; evidence is unique by connection and source URL. Re-imports update newer details and observations, while genuinely new people, connections, and evidence are added.
+
+Application rate limiting is currently disabled for team development. The implementation and database table remain present. Set the hosted environment variable `ORBIT_RATE_LIMIT_ENABLED=true` for final testing or production; the defaults are then 20 ingestion requests and 120 read requests per authenticated contributor per minute, configurable with `ORBIT_WRITE_LIMIT_PER_MINUTE` and `ORBIT_READ_LIMIT_PER_MINUTE`.
 
 ## Collection rules
 
@@ -128,7 +142,7 @@ Authenticated routes are under `/api/library/`:
 ```text
 .openai/hosting.json   Sites project and D1 binding
 drizzle/               D1 migrations and metadata
-server/                Worker, API, database, and rate limiting
+server/                Worker, API, database, and optional rate limiting
 src/                   UI, graph, collection, and companion code
 tests/                 API, database, collector, graph, and UI tests
 tools/                 Cross-platform build, package, and preview tools

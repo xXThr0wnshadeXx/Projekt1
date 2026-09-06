@@ -19,6 +19,16 @@ test('the durable library merges collections, preserves evidence, and isolates a
   const graph=await neighborhood(db,'one',person('root').id);assert.equal(graph.nodes.length,3);assert.equal(graph.edges.length,2);assert.equal(graph.nodes.find(p=>p.id===person('b').id).depth,2);assert.ok(graph.edges.every(e=>e.evidence.length));
   assert.equal((await neighborhood(db,'two',person('root').id)).found,false);
 });
+test('repeated and reversed imports update details without duplicating people or links',async()=>{
+  const {db,raw}=database();
+  await ingest(db,'shared',{nodes:[person('root'),person('a')],edges:[edge('root','a')]});
+  await ingest(db,'shared',{nodes:[{...person('a'),name:'Updated A',location:'Seattle'},person('root')],edges:[{...edge('root','a'),source:person('a').id,target:person('root').id}]});
+  assert.equal((await stats(db,'shared')).people,2);assert.equal((await stats(db,'shared')).connections,1);
+  assert.equal(raw.prepare('SELECT name FROM people WHERE owner=? AND id=?').get('shared',person('a').id).name,'Updated A');
+  assert.equal(raw.prepare('SELECT COUNT(*) count FROM evidence WHERE owner=?').get('shared').count,1);
+  await ingest(db,'shared',{nodes:[],edges:[{source:person('root').id,target:person('a').id,evidence:[{url:'https://www.linkedin.com/search/results/people/?connectionOf=second-source',observedAt:'2026-09-06T01:00:00Z'}]}]});
+  assert.equal((await stats(db,'shared')).connections,1);assert.equal(raw.prepare('SELECT COUNT(*) count FROM evidence WHERE owner=?').get('shared').count,2);
+});
 test('invalid and orphaned links never become a silently saved graph',async()=>{
   const {db}=database();await assert.rejects(ingest(db,'one',{nodes:[person('a')],edges:[edge('a','b')]}),/save its people first/);assert.equal((await stats(db,'one')).people,0);
   await assert.rejects(ingest(db,'one',{nodes:[person('a')],edges:[{...edge('a','b'),evidence:[]}]}),/source observations/);
