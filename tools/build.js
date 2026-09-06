@@ -22,9 +22,10 @@ mkdirSync(join(out, "downloads"), { recursive: true });
 for (const name of ["index.html", "setup.html", "map.html", "styles.css"]) {
   copyFileSync(join(root, name), join(out, name));
 }
-for (const name of ["app.js", "core.js", "graph.js", "companion.js", "import.js", "library.js", "onboarding.js", "workspace.js", "filters.js", "search.js", "landing-motion.js"]) {
+for (const name of ["app.js", "core.js", "graph.js", "companion.js", "import.js", "library.js", "onboarding.js", "workspace.js", "filters.js", "search.js", "landing-motion.js", "landing-flight.js"]) {
   copyFileSync(join(root, "src", name), join(out, "src", name));
 }
+cpSync(join(root,"assets"),join(out,"assets"),{recursive:true});
 cpSync(join(root,"fonts"),join(out,"fonts"),{recursive:true});
 copyFileSync(extensionZip, join(out, "downloads", "orbit-network-mapper.zip"));
 
@@ -33,7 +34,7 @@ if (hosting.d1 !== "DB") throw new Error('.openai/hosting.json must bind D1 as "
 console.log("Static app and Chrome companion built in out/.");
 
 const mimeTypes = new Map([
-  [".css", "text/css"], [".html", "text/html"], [".js", "text/javascript"], [".json", "application/json"], [".zip", "application/zip"], [".ttf", "font/ttf"],
+  [".css", "text/css"], [".html", "text/html"], [".js", "text/javascript"], [".json", "application/json"], [".zip", "application/zip"], [".ttf", "font/ttf"], [".png", "image/png"],
 ]);
 const assets = {};
 const pending = [out];
@@ -44,7 +45,7 @@ while (pending.length) {
     if (entry.isDirectory()) pending.push(path);
     else {
       const extension = extname(entry.name).toLowerCase();
-      const binary = [".zip", ".ttf"].includes(extension);
+      const binary = [".zip", ".ttf", ".png"].includes(extension);
       assets[`/${relative(out, path).replaceAll("\\", "/")}`] = {
         body: binary ? readFileSync(path).toString("base64") : readFileSync(path, "utf8"),
         binary,

@@ -4,7 +4,24 @@
 <header class="topbar"><a class="brand" href="index.html"><span class="brand-mark">o</span> orbit</a><nav class="top-actions" aria-label="Main navigation"><a id="login-link" class="button quiet" href="#login">Log in</a><a id="signup-link" class="button primary" href="#signup">Sign up</a><a id="workspace-link" class="button primary" href="map.html" hidden>Open my map ↗</a></nav></header>
 <main class="landing">
 <section class="hero"><div class="hero-copy"><p class="eyebrow">YOUR NETWORK, IN PERSPECTIVE</p><h1>There’s a person<br>between you<br>and what’s next.</h1><p class="hero-intro">See how your professional world connects. Explore the people you know, follow meaningful paths, and uncover connections you might have missed.</p><a class="button primary" href="#get-started">Find your connections <span aria-hidden="true">↗</span></a><p class="hero-footnote">Your starting point. Your pace. One shared team library.</p></div><div class="hero-art" aria-hidden="true"><div class="art-orbit orbit-one"></div><div class="art-orbit orbit-two"></div><div class="art-orbit orbit-three"></div><div class="art-person art-you">You<span>Your next chapter starts here</span></div><div class="art-person art-a">A familiar face</div><div class="art-person art-b">A shared interest</div><div class="art-person art-c">A new perspective</div><span class="art-dot dot-one"></span><span class="art-dot dot-two"></span><span class="art-dot dot-three"></span></div></section>
-<section id="how-it-works" class="how-section"><div><p class="eyebrow">A LITTLE CONTEXT GOES A LONG WAY</p><h2>From a profile to a bigger picture.</h2></div><div class="steps"><article><span class="step-number">01</span><h3>Join the team graph.</h3><p>Sign in to contribute to the same shared library as your teammates.</p></article><article><span class="step-number">02</span><h3>Add your LinkedIn.</h3><p>Choose a starting profile and connect the Orbit Chrome companion.</p></article><article><span class="step-number">03</span><h3>Follow the people.</h3><p>Build your map, explore a path, and return to what your team has discovered.</p></article></div></section>
+<section id="how-it-works" class="launch-journey" aria-labelledby="launch-heading">
+ <div class="launch-stage">
+  <div class="launch-heading"><p class="eyebrow">A NEW PERSPECTIVE STARTS HERE</p><h2 id="launch-heading">From your world.<br>Into orbit.</h2></div>
+  <div class="launch-scene" role="img" aria-label="A rocket prepares for launch, fires its engine, climbs into space, and follows an orbit as you scroll. Scroll upward to reverse the journey.">
+   <div class="launch-stars" aria-hidden="true"><span>✦</span><span>·</span><span>✧</span><span>·</span><span>✦</span><span>·</span><span>✧</span><span>·</span></div>
+   <div class="flight-orbit" aria-hidden="true"></div><div class="orbit-destination" aria-hidden="true">orbit<span>A bigger picture.</span></div>
+   <div class="launch-ground" aria-hidden="true"><span>YOUR STARTING POINT</span></div>
+   <div class="flight-rocket" aria-hidden="true"><img src="assets/orbit-rocket.png" alt="" width="1024" height="1536"><span class="rocket-exhaust">🔥</span></div>
+  </div>
+  <div class="launch-captions">
+   <p data-flight-caption="0"><strong>Ready when you are.</strong><span>Every journey starts with you.</span></p>
+   <p data-flight-caption="1" hidden><strong>A little momentum.</strong><span>Your world starts opening up.</span></p>
+   <p data-flight-caption="2" hidden><strong>A new perspective.</strong><span>See beyond the people you already know.</span></p>
+   <p data-flight-caption="3" hidden><strong>Welcome to orbit.</strong><span>Discover how it all connects.</span></p>
+  </div>
+  <p class="launch-scroll-note">Scroll to explore <span aria-hidden="true">↓</span></p>
+ </div>
+</section>
 <section id="get-started" class="signup-section"><div><p class="eyebrow">START WITH YOU</p><h2>A new view of your network.</h2><p>Set up your account, add your LinkedIn profile, and build your first map.</p></div><div class="signup-card"><h3 id="account-heading" tabindex="-1">Create your Orbit account</h3><p id="account-description">One place for the people and paths you discover.</p><div id="google-signin" class="google-signin" aria-live="polite"></div><p id="auth-status" class="auth-note" role="status">Checking sign-in options…</p><a id="existing-signin" class="button full" href="/signin-with-chatgpt?return_to=%2Fsetup.html" hidden>Continue with ChatGPT ↗</a><a id="account-workspace" class="button primary full" href="map.html" hidden>Open my workspace ↗</a><button id="account-logout" class="quiet full" type="button" hidden>Log out</button><a id="local-preview" class="preview-link" href="setup.html" hidden>Preview setup on this device ↗</a><p id="preview-note" class="auth-note" hidden>Local preview only. No account is created.</p></div></section>
 </main><footer class="welcome-footer"><a class="brand" href="index.html">orbit</a><p>Built from visible connections. Explored with intention.</p></footer><script type="module" src="src/onboarding.js"></script>
-<script type="module" src="src/landing-motion.js"></script></body></html>
+<script type="module" src="src/landing-motion.js"></script><script type="module" src="src/landing-flight.js"></script></body></html>

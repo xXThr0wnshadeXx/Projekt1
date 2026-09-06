@@ -3,8 +3,6 @@ const preference = matchMedia('(prefers-reduced-motion: reduce)');
 const groups = [
   ['.hero-copy > *', 'left', 65],
   ['.art-person', 'tile', 100],
-  ['.how-section > div:first-child', 'left', 0],
-  ['.steps article', 'up', 110],
   ['.signup-section > div:first-child', 'left', 0],
   ['.signup-card', 'glimmer', 0],
   ['.welcome-footer > *', 'up', 70],
