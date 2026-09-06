@@ -70,3 +70,11 @@ test('wheel zoom eases around the pointer, settles, and respects reduced motion'
  assert.equal(h.g.zoomTarget,null);assert.equal(h.g.scale,target);
  h.g.reducedMotion=true;h.g.queueZoom(1.08,x,y);assert.equal(h.g.zoomTarget,null);assert.ok(h.g.scale>target);
 });
+test('continuous wheel input does not restart easing and has a useful zoom range',t=>{
+ const h=graph(t);h.g.setData(newState(root));h.g.scrollZoom=true;
+ const initial=h.g.scale,event={deltaY:100,deltaMode:0,offsetX:300,offsetY:240,preventDefault(){}};
+ h.handlers.wheel(event);const start=h.g.zoomTime;
+ assert.ok(h.g.zoomTarget.scale/initial>.8&&h.g.zoomTarget.scale/initial<.85);
+ h.handlers.wheel(event);assert.equal(h.g.zoomTime,start);
+ h.paint(start+16);assert.ok(h.g.scale<initial);
+});
