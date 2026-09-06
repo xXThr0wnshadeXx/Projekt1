@@ -144,7 +144,28 @@ test('document denies login/list endpoints, HTTP downgrade, redirect loops, comp
 });
 test('document revision changes when source metadata changes even with identical text',async()=>{
   let date='2020-01-02';const f=documents(()=>response(`<meta property="article:published_time" content="${date}"><p>unchanged</p>`,200,'text/html'));
-  const fetcher=new PublicDocumentFetcher(f.http),a=await fetcher.fetch('https://example.org/story',signal());date='2021-01-02';const b=await fetcher.fetch('https://example.org/story',signal());assert.equal(a.contentDigest,b.contentDigest);assert.notEqual(a.revision,b.revision);
+  const fetcher=new PublicDocumentFetcher(f.http,()=>new Date('2026-09-05T00:00:00Z')),a=await fetcher.fetch('https://example.org/story',signal());date='2021-01-02';const b=await fetcher.fetch('https://example.org/story',signal());assert.equal(a.contentDigest,b.contentDigest);assert.equal(a.retrievedAt,b.retrievedAt);assert.notEqual(a.revision,b.revision);
+});
+test('unchanged content retrieved later has a new observation revision and excerpt selector',async()=>{
+  let time='2026-09-05T00:00:00.000Z',clockReads=0;
+  const f=documents(()=>response(html,200,'text/html'));
+  const fetcher=new PublicDocumentFetcher(f.http,()=>{clockReads++;return new Date(time);});
+  const earlier=await fetcher.fetch('https://example.org/story',signal());
+  time='2026-09-05T00:00:01.000Z';const later=await fetcher.fetch('https://example.org/story',signal());
+  assert.equal(clockReads,2);assert.equal(earlier.id,later.id);assert.equal(earlier.contentDigest,later.contentDigest);
+  assert.equal(earlier.normalizedText,later.normalizedText);assert.deepEqual(earlier.publishedAt,later.publishedAt);
+  assert.equal(earlier.retrievedAt,'2026-09-05T00:00:00.000Z');assert.equal(later.retrievedAt,time);assert.notEqual(earlier.revision,later.revision);
+  const a=selectDocumentExcerpt(earlier,0,17),b=selectDocumentExcerpt(later,0,17);
+  assert.equal(a.supportingExcerpt,b.supportingExcerpt);assert.equal(a.contentDigest,b.contentDigest);assert.notEqual(a.documentRevision,b.documentRevision);
+});
+test('identical retrieval observation is deterministic and retained retries preserve its selector',async()=>{
+  const f=documents(()=>response(html,200,'text/html')),clock=()=>new Date('2026-09-05T00:00:00.123Z');
+  const first=await new PublicDocumentFetcher(f.http,clock).fetch('https://example.org/story',signal());
+  const identical=await new PublicDocumentFetcher(f.http,clock).fetch('https://example.org/story',signal());
+  assert.deepEqual(first,identical);
+  const retained=JSON.parse(JSON.stringify(first)),requestCount=f.calls.length;
+  assert.deepEqual(selectDocumentExcerpt(retained,0,17),selectDocumentExcerpt(first,0,17));
+  assert.equal(retained.retrievedAt,first.retrievedAt);assert.equal(retained.revision,first.revision);assert.equal(f.calls.length,requestCount);
 });
 function serviceFixture(overrides={}) {
   const queries=[],pages=[];

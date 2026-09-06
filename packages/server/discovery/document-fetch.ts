@@ -3,6 +3,7 @@ import {DiscoveryError,publicUrl,normalizeProfileUrl,type DateValue} from './con
 import {PublicHttpClient,responseText} from './providers/http.js';
 
 export interface RetrievedPublicDocument {
+  /** Revision identifies an immutable retrieval observation, including retrievedAt; digest identifies text. */
   id: string; revision: string; sourceUrl: string; fetchedUrl: string; title: string;
   publisher: string|null; publishedAt: DateValue|null; retrievedAt: string;
   contentDigest: string; digestBasis: 'NORMALIZED_TEXT_SHA256';
@@ -151,11 +152,12 @@ export class PublicDocumentFetcher {
       if(!['text/html','text/plain'].includes(type))throw new DiscoveryError('UNSUPPORTED_CONTENT');
       const normalized=normalizePublicContent(responseText(response),type==='text/html');
       if(!normalized.text)throw new DiscoveryError('UNSUPPORTED_CONTENT');
-      const contentDigest=digest(normalized.text),id=`doc_${digest(source.href)}`;
-      // Revision includes source-supplied metadata; changed dates/title cannot retain an old revision.
-      const revision=digest(JSON.stringify([current.href,contentDigest,normalized.title,normalized.publisher,normalized.publishedAt]));
+      const contentDigest=digest(normalized.text),id=`doc_${digest(source.href)}`,retrievedAt=this.now().toISOString();
+      // An immutable observation binds its actual retrieval time as well as content and source metadata.
+      // Reusing an observation preserves this revision; a later retrieval requires fresh review selectors.
+      const revision=digest(JSON.stringify([current.href,contentDigest,normalized.title,normalized.publisher,normalized.publishedAt,retrievedAt]));
       return {id,revision,sourceUrl:source.href,fetchedUrl:current.href,title:normalized.title||current.hostname,
-        publisher:normalized.publisher,publishedAt:normalized.publishedAt,retrievedAt:this.now().toISOString(),
+        publisher:normalized.publisher,publishedAt:normalized.publishedAt,retrievedAt,
         contentDigest,digestBasis:'NORMALIZED_TEXT_SHA256',normalizedText:normalized.text,upstreamRevisionId:null,
         normalizationVersion:'public-source-text-v1',persistence:'NOT_PERSISTED',metadataStatus:'SOURCE_SUPPLIED_NOT_VERIFIED'};
     }
