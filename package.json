@@ -1,11 +1,11 @@
 {
   "name": "linkedin-network-mapper",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "private": true,
   "type": "module",
   "scripts": {
     "test": "node --test tests/*.test.js",
-    "check": "node --check src/onboarding.js && node --check src/workspace.js && node --check src/core.js && node --check src/import.js && node --check src/collector.js && node --check src/background.js && node --check src/app.js && node --check src/graph.js && node --check src/library.js && node --check server/database.js && node --check server/rate-limit.js && node --check server/worker.js && node --check tools/build.js && node --check tools/package.js && node --check tools/preview.js",
+    "check": "node --check src/onboarding.js && node --check src/workspace.js && node --check src/core.js && node --check src/import.js && node --check src/collector.js && node --check src/background.js && node --check src/app.js && node --check src/graph.js && node --check src/library.js && node --check server/auth.js && node --check server/database.js && node --check server/rate-limit.js && node --check server/worker.js && node --check tools/build.js && node --check tools/package.js && node --check tools/preview.js",
     "preview": "node tools/preview.js",
     "package": "node tools/package.js",
     "build": "node tools/build.js"
@@ -16,5 +16,8 @@
     "drizzle-orm": "^0.45.2",
     "linkedom": "^0.18.12",
     "vite": "^8.2.2"
+  },
+  "dependencies": {
+    "jose": "^6.2.12"
   }
 }

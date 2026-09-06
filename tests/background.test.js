@@ -30,6 +30,7 @@ test('two layers obey two-minute request spacing; restrictions pause collection'
   assert.equal(h.listeners.external({type:'GET_STATE'},{url:'https://evil.example/'},()=>{}),false);
   assert.equal(h.listeners.message({type:'CLEAR'},{id:'test-extension',url:'https://www.linkedin.com/'},()=>{}),false);
   const result=await h.command({type:'GET_STATE'});assert.ok(result.state);assert.equal((await h.command({type:'GET_STATE',revision:result.revision})).unchanged,true);
+  h.listeners.action();await h.flush();assert.equal([...h.tabs.values()].at(-1).url,'https://orbit-shreev2703-graph-test.shreev2703.chatgpt.site/map.html?source=companion');
 });
 test('one paced tab follows lists and respects the shared cap on resume',async t=>{
   const h=await harness(t),first=['a','b','c'].map(person),snapshots={[root]:profile(person('root'),list('root')),[list('root')]:page(list('root'),first)};

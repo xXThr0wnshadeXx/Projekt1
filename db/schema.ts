@@ -17,3 +17,12 @@ export const imports=sqliteTable('imports',{
 export const importRecords=sqliteTable('import_records',{
   owner:text('owner').notNull(),importId:text('import_id').notNull(),section:text('section').notNull(),recordIndex:integer('record_index').notNull(),dataJson:text('data_json').notNull()
 },t=>[primaryKey({columns:[t.owner,t.importId,t.section,t.recordIndex]}),index('import_records_section').on(t.owner,t.section)]);
+export const users=sqliteTable('users',{
+  id:text('id').primaryKey(),email:text('email'),displayName:text('display_name'),linkedinProfileUrl:text('linkedin_profile_url'),createdAt:integer('created_at').notNull(),updatedAt:integer('updated_at').notNull()
+});
+export const identities=sqliteTable('identities',{
+  provider:text('provider').notNull(),subject:text('subject').notNull(),userId:text('user_id').notNull(),email:text('email'),displayName:text('display_name'),createdAt:integer('created_at').notNull(),lastSeen:integer('last_seen').notNull()
+},t=>[primaryKey({columns:[t.provider,t.subject]}),index('identities_user').on(t.userId)]);
+export const sessions=sqliteTable('sessions',{
+  tokenHash:text('token_hash').primaryKey(),userId:text('user_id').notNull(),expiresAt:integer('expires_at').notNull(),createdAt:integer('created_at').notNull()
+},t=>[index('sessions_user').on(t.userId),index('sessions_expiry').on(t.expiresAt)]);

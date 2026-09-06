@@ -45,6 +45,11 @@ export async function ingest(db,owner,data){
 export async function stats(db,owner){
   const r=await db.prepare('SELECT (SELECT COUNT(*) FROM people WHERE owner=?) people,(SELECT COUNT(*) FROM connections WHERE owner=?) connections,(SELECT COUNT(*) FROM imports WHERE owner=?) imports,(SELECT MAX(last_seen) FROM people WHERE owner=?) lastSaved').bind(owner,owner,owner,owner).first();return r;
 }
+export async function listImports(db,owner){
+  return (await db.prepare(`SELECT i.id,i.file_name fileName,i.format,i.schema_version schemaVersion,i.exported_at exportedAt,i.last_seen lastSeen,COUNT(r.record_index) records
+    FROM imports i LEFT JOIN import_records r ON r.owner=i.owner AND r.import_id=i.id WHERE i.owner=?
+    GROUP BY i.owner,i.id ORDER BY i.last_seen DESC LIMIT 25`).bind(owner).all()).results;
+}
 export async function search(db,owner,query){
   const url=profileURL(query);if(url)return (await db.prepare('SELECT id,name,headline,last_seen FROM people WHERE owner=? AND id=?').bind(owner,url).all()).results;
   const q=short(query.trim().toLowerCase(),100);if(!q)return [];
