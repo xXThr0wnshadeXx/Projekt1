@@ -42,3 +42,30 @@ test('profiles retain visible professional sections without controls or headings
   const s=page('<main><h1>Ada Lovelace</h1><div class="text-body-medium">Engineer at Analytical Engines</div><div class="text-body-small inline t-black--light break-words">London</div><section><h2>About</h2><p>Computing pioneer</p><button>See more</button></section><section><h2>Experience</h2><p>Engine designer</p></section><section><h2>Education</h2><p>Private study</p></section><section><h2>Skills</h2><p>Mathematics</p></section></main>','https://www.linkedin.com/in/ada/');
   assert.deepEqual([s.person.location,s.person.about,s.person.experience,s.person.education,s.person.skills],['London','Computing pioneer','Engine designer','Private study','Mathematics']);
 });
+
+test('mixed modern and legacy result layouts retain both people',()=>{
+  const s=page('<main><a href="/in/modern/"><p>Modern Person • 2nd</p><p>Engineer</p></a><li class="reusable-search__result-container"><span class="entity-result__title-text"><a href="/in/legacy/"><span aria-hidden="true">Legacy Person</span></a></span></li><button aria-label="Next" disabled>Next</button></main>',list);
+  assert.deepEqual(s.people.map(p=>p.name),['Modern Person','Legacy Person']);
+});
+
+test('a no-results phrase inside a profile card never ends a nonempty list',()=>{
+  const s=page('<main><a href="/in/a/"><p>A • 2nd</p><p>Author of No Results Found</p></a><button aria-label="Next">Next</button></main>',list);
+  assert.equal(s.empty,false);assert.equal(s.hasNext,true);
+});
+
+test('load-more performs one action without also scrolling',async()=>{
+  const own='https://www.linkedin.com/mynetwork/invite-connect/connections/';
+  page('<main><a href="/in/a/"><p>A</p></a><button>Load more</button></main>',own);
+  let clicks=0;document.querySelector('button').click=()=>clicks++;
+  globalThis.getComputedStyle=()=>{throw Error('Must not also scroll');};
+  await advanceLinkedIn(own,true);assert.equal(clicks,1);
+});
+
+test('virtualized scrolling uses overlapping windows rather than skipping to the bottom',async()=>{
+  const own='https://www.linkedin.com/mynetwork/invite-connect/connections/';
+  page('<main><div class="scroller"><a href="/in/a/"><p>A</p></a></div></main>',own);
+  const container=document.querySelector('.scroller');let target;
+  Object.defineProperties(container,{scrollHeight:{value:5000},clientHeight:{value:500},scrollTop:{value:1000}});
+  container.scrollTo=options=>{target=options.top;};globalThis.getComputedStyle=()=>({overflowY:'auto'});
+  await advanceLinkedIn(own,true);assert.equal(target,1400);
+});

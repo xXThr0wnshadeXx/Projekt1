@@ -46,9 +46,9 @@ function renderLive(){
   if(!runSample||runSample.id!==state.id)runSample={id:state.id,at:Date.now(),count};
   const lanes=(state.workers||[{current:state.current}]).filter(w=>w.current),names=lanes.map(w=>state.nodes[w.current.job.owner]?.name||'profile');
   const rootBranch=state.branches?.[state.root],directReady=['exhausted'].includes(rootBranch?.status),phase=directReady?'Phase 2 · connecting teammates and extended paths':'Phase 1 · verifying every visible direct connection';
-  const waiting=lanes.some(w=>w.current.navPending||w.current.advancePending),waitSeconds=Math.max(0,Math.ceil((Math.max(state.nextRequestAt||0,...lanes.map(w=>w.current.nextActionAt||0))-Date.now())/1000));
+  const waiting=lanes.some(w=>w.current.navPending||w.current.advancePending||w.current.retryAt),waitSeconds=Math.max(0,Math.ceil((Math.max(state.nextRequestAt||0,...lanes.map(w=>Math.max(w.current.nextActionAt||0,w.current.retryAt||0)))-Date.now())/1000));
   const retrying=lanes.find(w=>w.current.retryAt),recent=lastReveal&&Date.now()-lastReveal.at<2500;
-  set('live-title',waiting&&waitSeconds?`Next LinkedIn request in ${waitSeconds}s`:retrying?`Retrying ${state.nodes[retrying.current.job.owner]?.name||'a page'} · other tabs continue`:recent?`Added ${lastReveal.person.name}`:names.length?`Exploring ${names[0]}’s connections${names.length>1?` + ${names.length-1} more`:''}`:'Preparing the next connection list');
+  set('live-title',waiting&&waitSeconds?`${state.pacing?.reason||'Pacing collection'} · next action in ${waitSeconds}s`:retrying?`Retrying ${state.nodes[retrying.current.job.owner]?.name||'a page'} · waiting before retry`:recent?`Added ${lastReveal.person.name}`:names.length?`Exploring ${names[0]}’s connections${names.length>1?` + ${names.length-1} more`:''}`:'Preparing the next connection list');
   const batch=state.lastBatch;
   const summary=batch?`Last page: ${batch.added} new people · ${batch.links??0} new links · ${batch.existing??0} already mapped`:`${count.toLocaleString()} people recorded`;
   set('live-detail',`${phase} · ${summary} · ${state.queue.length} profiles/lists queued`);
