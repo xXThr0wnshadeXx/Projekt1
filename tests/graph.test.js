@@ -4,12 +4,12 @@ import {NetworkGraph,networkTargets} from '../src/graph.js';
 import {newState,addPerson,addEdge} from '../src/core.js';
 const root='https://www.linkedin.com/in/root/',source='https://www.linkedin.com/search/results/people/?connectionOf=root';
 function graph(t){
-  let callback,scheduled=0;const arcs=[],handlers={};
+  let callback,scheduled=0;const arcs=[],fills=[],handlers={};
   t.mock.method(globalThis,'requestAnimationFrame',fn=>{callback=fn;return ++scheduled;});
   globalThis.ResizeObserver=class {observe(){}};globalThis.window={devicePixelRatio:1};
-  const context=new Proxy({arc(x,y,r){arcs.push({x,y,r});}},{get:(o,k)=>o[k]||(()=>{})});
+  const context=new Proxy({arc(x,y,r){arcs.push({x,y,r});},fill(){fills.push(context.fillStyle);}},{get:(o,k)=>o[k]||(()=>{})});
   const canvas={getContext:()=>context,addEventListener(name,fn){handlers[name]=fn;},parentElement:{getBoundingClientRect:()=>({width:1000,height:700})}};
-  const g=new NetworkGraph(canvas,()=>{});g.resize();return {g,arcs,handlers,paint(now){const fn=callback;callback=null;fn?.(now);},get scheduled(){return scheduled;}};
+  const g=new NetworkGraph(canvas,()=>{});g.resize();return {g,arcs,fills,handlers,paint(now){const fn=callback;callback=null;fn?.(now);},get scheduled(){return scheduled;}};
 }
 // Node has no animation frame API; these tests exercise timing/layout without a browser.
 globalThis.requestAnimationFrame=()=>0;
@@ -82,4 +82,16 @@ test('adaptive branch targets make room for growing second-degree clusters',()=>
  const points=[{id:'root',depth:0},{id:'a',depth:1},{id:'b',depth:1},...Array.from({length:30},(_,i)=>({id:`child-${i}`,depth:2}))],edges=[{source:'root',target:'a'},{source:'root',target:'b'},...Array.from({length:30},(_,i)=>({source:'a',target:`child-${i}`}))];
  const targets=networkTargets(points,edges,'root');assert.equal(targets.size,points.length);for(const point of targets.values())assert.ok(Number.isFinite(point.x)&&Number.isFinite(point.y));assert.ok(Math.hypot(targets.get('a').x,targets.get('a').y)<Math.hypot(targets.get('b').x,targets.get('b').y)||Math.hypot(targets.get('a').x,targets.get('a').y)>0);
  const seen=[];for(const p of points){const at=targets.get(p.id);for(const other of seen)assert.ok(Math.hypot(at.x-other.x,at.y-other.y)>0);seen.push(at);}
+});
+
+test('selection greys unrelated dots, updates for new edges, and clears back to depth colors',t=>{
+ const h=graph(t),s=newState(root);h.g.reducedMotion=true;
+ const a=addPerson(s,{url:'https://www.linkedin.com/in/a/'},1),b=addPerson(s,{url:'https://www.linkedin.com/in/b/'},2),c=addPerson(s,{url:'https://www.linkedin.com/in/c/'},1);
+ addEdge(s,root,a,source);addEdge(s,a,b,source);addEdge(s,root,c,source);
+ h.g.setData(s);h.g.focus(b,[root,a,b]);h.fills.length=0;h.paint(performance.now()+2000);
+ assert.deepEqual([...h.g.neighbors].sort(),[a,b].sort());
+ assert.deepEqual(h.fills,['#747474','#a8bf83','#747474','#b5a0cb'],'even distant path nodes are grey unless directly connected');
+ addEdge(s,c,b,source);h.g.setData(s);assert.ok(h.g.neighbors.has(c));
+ h.g.focus(null);h.fills.length=0;h.paint(performance.now()+3000);
+ assert.deepEqual(h.fills,['#ead779','#a8bf83','#a8bf83','#b5a0cb']);
 });
