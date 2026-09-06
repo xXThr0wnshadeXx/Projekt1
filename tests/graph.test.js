@@ -59,3 +59,14 @@ test('group movement survives refreshes, settles and resets without losing peopl
  h.g.setFilters({},'none');for(const p of h.g.points){assert.equal(p.x,p.homeX);assert.equal(p.y,p.homeY);}
  h.g.setData({...s,id:'different'});for(const p of h.g.points)assert.ok(Number.isFinite(p.x));
 });
+test('wheel zoom eases around the pointer, settles, and respects reduced motion',t=>{
+ const h=graph(t);h.g.setData(newState(root));h.g.scrollZoom=true;
+ const initial=h.g.scale,x=200,y=160,world=(x-h.g.w/2-h.g.offset.x)/initial;
+ h.handlers.wheel({deltaY:60,deltaMode:0,offsetX:x,offsetY:y,preventDefault(){}});
+ assert.equal(h.g.scale,initial);const target=h.g.zoomTarget.scale,start=h.g.zoomTime;
+ h.paint(start+16);assert.ok(h.g.scale<initial&&h.g.scale>target);
+ assert.ok(Math.abs((x-h.g.w/2-h.g.offset.x)/h.g.scale-world)<1e-9);
+ for(let i=2;i<100;i++)h.paint(start+i*16);
+ assert.equal(h.g.zoomTarget,null);assert.equal(h.g.scale,target);
+ h.g.reducedMotion=true;h.g.queueZoom(1.08,x,y);assert.equal(h.g.zoomTarget,null);assert.ok(h.g.scale>target);
+});

@@ -62,9 +62,13 @@ Version 2.1 supports several resumable maps in one Chrome profile:
 
 These map checkpoints are device-local. The hosted D1 library combines saved discoveries from every authenticated contributor.
 
+### Workspace and settings
+
+The **Map workspace** tab contains the graph, people, and filters. Use **Map settings** for saved maps, starting profiles, collection options, and build controls. Starting a build returns to the workspace automatically. Optional scroll zoom eases toward the pointer; reduced-motion mode applies changes immediately.
+
 ## Shared database
 
-Sites supplies a D1 database through the `DB` binding in [`.openai/hosting.json`](.openai/hosting.json). No Turso URL, token, `.env` file, LinkedIn API key, or local SQLite server is required.
+Sites supplies D1 through the `DB` binding in [`.openai/hosting.json`](.openai/hosting.json). No Turso URL, token, `.env` file, LinkedIn API key, or local SQLite server is required.
 
 Migrations live in [`drizzle/`](drizzle/) and are packaged with each deployment. The live schema contains:
 
@@ -147,7 +151,7 @@ After companion changes, also run `npm run package`, copy `dist/orbit-network-ma
 
 ## Capacity and limitations
 
-The UI renders bounded graph views and supports up to 10,000 people per local map. The D1 library has no application-level 10,000-person lifetime cap, but a multi-million-person dataset has not been load-tested. Add capacity tests, monitoring, backups, and restore procedures before treating D1 as the sole copy of an important corpus.
+The UI supports up to 10,000 people per local map. The D1 library has no application-level 10,000-person lifetime cap, but a multi-million-person dataset has not been load-tested. Add capacity tests, monitoring, backups, and restore procedures before treating D1 as the sole copy of an important corpus.
 
 There is no unattended cloud crawler, verification bypass, hidden-data inference, full-database export, or record-deletion interface. LinkedIn may prohibit automated collection; contributors are responsible for following applicable terms and laws.
 
