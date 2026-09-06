@@ -181,3 +181,8 @@ h1,h2,h3,.brand,.hero h1,.signup-card h3,.metrics strong,.panel-heading h2{font-
 @media(max-width:730px){.solar-heading{left:0;top:24px}.solar-heading h2{font-size:38px}.solar-heading .eyebrow{font-size:11px}.solar-scene{inset:158px -12px 88px}.solar-enabled{height:260svh}}
 @media(max-height:600px){.solar-heading{top:12px}.solar-heading h2{font-size:30px}.solar-heading .eyebrow{margin:0;font-size:10px}.solar-scene{inset:100px 0 70px}.solar-caption{bottom:30px}.solar-caption p{font-size:14px}.solar-scroll-note{bottom:6px}}
 @media(prefers-reduced-motion:reduce){.solar-enabled{height:auto}.solar-enabled .solar-stage{position:relative;height:740px;max-height:none}.solar-scroll-note{display:none}}
+
+/* Shared totals are intentionally separate from device-local collector progress. */
+.metrics{margin-bottom:10px}
+.metrics-source{margin:0 32px 24px;font-size:12px;line-height:1.4;color:#a8bf83;font-weight:700;letter-spacing:.04em}
+@media(max-width:730px){.metrics-source{margin:0 24px 20px}}

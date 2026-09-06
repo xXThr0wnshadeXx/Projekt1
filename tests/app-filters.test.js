@@ -16,7 +16,7 @@ test('typed filters coalesce, polls keep applied results, and directory reuses g
  const context=new Proxy({},{get:()=>()=>{}}),canvas=$('network-canvas');canvas.getContext=()=>context;canvas.parentElement.getBoundingClientRect=()=>({width:1000,height:700});$('inspector').close=()=>{};
  const timers=new Map();let timerId=0;
  t.mock.method(globalThis,'setTimeout',(fn,ms)=>{timers.set(++timerId,{fn,ms});return timerId;});t.mock.method(globalThis,'clearTimeout',id=>timers.delete(id));t.mock.method(globalThis,'setInterval',()=>0);
- const flush=()=>{for(const [id,{fn,ms}] of [...timers])if(ms===120){timers.delete(id);fn();}};
+ const flush=()=>{for(const [id,{fn,ms}] of [...timers])if(ms===120||ms===220){timers.delete(id);fn();}};
  const filterCalls=t.mock.method(NetworkGraph.prototype,'evaluateFilter'),searchCalls=t.mock.method(NetworkGraph.prototype,'evaluateSearch');
  await import('../src/app.js');
  const initialCalls=filterCalls.mock.callCount(),suggestion=$('location-options').firstElementChild;

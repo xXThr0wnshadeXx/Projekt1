@@ -69,7 +69,18 @@ export async function ingest(db,owner,data,contributor=owner){
   return {saved:true};
 }
 export async function stats(db,owner){
-  const r=await db.prepare('SELECT (SELECT COUNT(*) FROM people WHERE owner=?) people,(SELECT COUNT(*) FROM connections WHERE owner=?) connections,(SELECT COUNT(*) FROM imports WHERE owner=?) imports,(SELECT COUNT(*) FROM collection_coverage WHERE owner=? AND reusable=1) reusableCoverage,(SELECT MAX(last_seen) FROM people WHERE owner=?) lastSaved').bind(owner,owner,owner,owner,owner).first();return r;
+  const r=await db.prepare(`SELECT
+    (SELECT COUNT(*) FROM people WHERE owner=?) people,
+    (SELECT COUNT(*) FROM connections WHERE owner=?) connections,
+    (SELECT COUNT(*) FROM imports WHERE owner=?) imports,
+    (SELECT COUNT(*) FROM collection_coverage WHERE owner=? AND reusable=1) reusableCoverage,
+    (SELECT COUNT(DISTINCT person_id) FROM collection_coverage WHERE owner=? AND reusable=1) coveredPeople,
+    (SELECT COUNT(DISTINCT contributor_id) FROM people_contributors WHERE owner=?) contributors,
+    (SELECT MAX(value) FROM (
+      SELECT MAX(last_seen) value FROM people WHERE owner=?
+      UNION ALL SELECT MAX(last_seen) FROM connections WHERE owner=?
+      UNION ALL SELECT MAX(checked_at) FROM collection_coverage WHERE owner=?
+    )) lastSaved`).bind(owner,owner,owner,owner,owner,owner,owner,owner,owner).first();return r;
 }
 export async function listImports(db,owner){
   return (await db.prepare(`SELECT i.id,i.file_name fileName,i.format,i.schema_version schemaVersion,i.exported_at exportedAt,i.last_seen lastSeen,COUNT(r.record_index) records

@@ -42,7 +42,11 @@ async function restriction(s,w,reason,until=0){
 }
 async function acknowledgeRestriction(s){
   const p=await readPolicy(s);if(!p.blocked)return;
-  if(Date.now()<p.nextAt)throw Error(`${p.blocked.reason} Collection can be resumed after ${new Date(p.nextAt).toLocaleString()}.`);
+  if(Date.now()<p.nextAt){
+    const reason=`${p.blocked.reason} Collection can be resumed after ${new Date(p.nextAt).toLocaleString()}.`;
+    if(s){s.pauseKind='restriction';await pause(s,reason);}
+    throw Error(reason);
+  }
   // Only an explicit Resume/Start clears the latch; pagehide/heartbeat cannot.
   await savePolicy({...p,blocked:null,failures:0});
 }

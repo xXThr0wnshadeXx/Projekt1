@@ -13,7 +13,7 @@ test('the durable library merges collections, preserves evidence, and isolates a
   const {db}=database();await ingest(db,'one',{nodes:['root','a'].map(person),edges:[edge('root','a')]});
   await ingest(db,'one',{nodes:['a','b'].map(person),edges:[edge('a','b')]});
   await ingest(db,'one',{nodes:['root','a'].map(person),edges:[edge('root','a')]});
-  assert.equal((await stats(db,'one')).people,3);assert.equal((await stats(db,'one')).connections,2);
+  const summary=await stats(db,'one');assert.equal(summary.people,3);assert.equal(summary.connections,2);assert.equal(summary.coveredPeople,0);assert.equal(summary.contributors,1);assert.ok(summary.lastSaved);
   assert.equal((await search(db,'one','a'))[0].id,person('a').id);assert.equal((await search(db,'one',person('b').id)).length,1);
   assert.equal((await stats(db,'two')).people,0);assert.equal((await search(db,'two','a')).length,0);
   const graph=await neighborhood(db,'one',person('root').id);assert.equal(graph.nodes.length,3);assert.equal(graph.edges.length,2);assert.equal(graph.nodes.find(p=>p.id===person('b').id).depth,2);assert.ok(graph.edges.every(e=>e.evidence.length));

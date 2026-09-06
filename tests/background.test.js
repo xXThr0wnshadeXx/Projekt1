@@ -316,7 +316,7 @@ test('a late restriction response persists even after the active job is cancelle
   await h.command({type:'CANCEL'});
   h.listeners.headers({tabId:1,statusCode:429,type:'xmlhttprequest',responseHeaders:[{name:'Retry-After',value:'7200'}]});await h.flush();
   assert.equal(h.data.orbitCollectionPolicy.nextAt,8200000);
-  assert.equal((await h.command({type:'START',url:a})).ok,false);assert.equal(h.requests.length,1);
+  assert.equal((await h.command({type:'START',url:root})).ok,false);assert.equal(h.data.orbitNetwork.status,'paused');assert.equal(h.data.orbitNetwork.pauseKind,'restriction');assert.match(h.data.orbitNetwork.reason,/resumed after/);assert.equal(h.requests.length,1);
 });
 
 test('connection-list collection is the default and leaves comment work optional',async t=>{

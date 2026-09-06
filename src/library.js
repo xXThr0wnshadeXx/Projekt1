@@ -23,7 +23,7 @@ export function mergeAccountGraphs(local,shared,maxDepth=6){
   return {...local,id:`account:${local.root}`,graphRevision:`${local.graphRevision??local.revision??local.updatedAt}:${shared.graphRevision??shared.updatedAt}:${maxDepth}:${Object.keys(connectedEdges).length}`,nodes:connected,edges:connectedEdges,branches:{...(shared.branches||{}),...(local.branches||{})},profileChecks:{...(shared.profileChecks||{}),...(local.profileChecks||{})},commentCoverage:{...(shared.commentCoverage||{}),...(local.commentCoverage||{})},coverage:[...coverage.values()],cloudView:false,sharedView:true,updatedAt:[local.updatedAt,shared.updatedAt].filter(Boolean).sort().at(-1)};
 }
 // The hosted page uses its Sites session; no LinkedIn credentials leave Chrome.
-export function createLibrary({getCollection,showGraph,showCollection}){
+export function createLibrary({getCollection,showGraph,showCollection,showStats=()=>{}}){
   const $=id=>document.getElementById(id),enabled=location.protocol==='https:'||location.hostname==='127.0.0.1';
   let pending=null,prepared=null,saving=false,importing=false,timer=null,searchTimer=null,searchSerial=0;
   const accountRevisions=new Map();
@@ -31,7 +31,7 @@ export function createLibrary({getCollection,showGraph,showCollection}){
   async function api(path,body){const r=await fetch('/api/library/'+path,{method:body?'POST':'GET',headers:body?{'Content-Type':'application/json'}:undefined,body:body?JSON.stringify(body):undefined});const data=await r.json();if(r.status===401){$('library-signin').hidden=false;$('library-signin').href='/?return_to=%2Fmap.html#login';$('library-signin').textContent='Sign in to continue ↗';$('library-counts').textContent='Sign in to view the shared team library';}else if(r.ok)$('library-signin').hidden=true;if(!r.ok){const error=Error(data.error||'Library request failed.');error.status=r.status;error.retryAfter=Number(r.headers.get('Retry-After'))||0;throw error;}return data;}
   const status=text=>{$('library-status').textContent=text;};
   const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-  async function refreshStats(){const s=await api('stats');$('library-counts').textContent=`${Number(s.people).toLocaleString()} people · ${Number(s.connections).toLocaleString()} links saved${Number(s.reusableCoverage)?` · ${Number(s.reusableCoverage).toLocaleString()} reusable checks`:''}${Number(s.imports)?` · ${Number(s.imports).toLocaleString()} imports`:''}`;}
+  async function refreshStats(){const s=await api('stats');$('library-counts').textContent=`${Number(s.people).toLocaleString()} people · ${Number(s.connections).toLocaleString()} links saved${Number(s.reusableCoverage)?` · ${Number(s.reusableCoverage).toLocaleString()} reusable checks`:''}${Number(s.imports)?` · ${Number(s.imports).toLocaleString()} imports`:''}`;showStats(s);return s;}
   async function ingestBatch(body,progress){
     for(;;){
       try{return await api('ingest',body);}
@@ -105,5 +105,5 @@ export function createLibrary({getCollection,showGraph,showCollection}){
   if(enabled)refreshStats().then(()=>status('Database-first sync ready · collection pacing does not pause D1 reads')).catch(error=>{if(error.status===401)status('Sign in to contribute to the shared team library.');else{$('library-counts').textContent='Library unavailable';status('Open the hosted Orbit site to use the shared team library.');}});
   else status('Use the hosted Orbit site for permanent storage.');
   setInterval(()=>{if(pending&&!saving&&!importing)sync();},30000);
-  return {queue,loadAccount:(url,depth=6)=>lookup(url,true,depth,true),resetCaches(){pending=null;savedNodes.clear();savedEdges.clear();savedCoverage.clear();accountRevisions.clear();}};
+  return {queue,refreshStats,loadAccount:(url,depth=6)=>lookup(url,true,depth,true),resetCaches(){pending=null;savedNodes.clear();savedEdges.clear();savedCoverage.clear();accountRevisions.clear();}};
 }
