@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test tests/*.test.js",
-    "check": "node --check src/onboarding.js && node --check src/workspace.js && node --check src/core.js && node --check src/search.js && node --check src/import.js && node --check src/collection-policy.js && node --check src/collector.js && node --check src/background.js && node --check src/app.js && node --check src/graph.js && node --check src/library.js && node --check server/auth.js && node --check server/database.js && node --check server/rate-limit.js && node --check server/worker.js && node --check tools/build.js && node --check tools/package.js && node --check tools/preview.js",
+    "check": "node --check src/landing-flight.js && node --check src/landing-motion.js && node --check src/onboarding.js && node --check src/workspace.js && node --check src/core.js && node --check src/search.js && node --check src/import.js && node --check src/collection-policy.js && node --check src/collector.js && node --check src/background.js && node --check src/app.js && node --check src/graph.js && node --check src/library.js && node --check server/auth.js && node --check server/database.js && node --check server/rate-limit.js && node --check server/worker.js && node --check tools/build.js && node --check tools/package.js && node --check tools/preview.js",
     "preview": "node tools/preview.js",
     "package": "node tools/package.js",
     "build": "node tools/build.js"

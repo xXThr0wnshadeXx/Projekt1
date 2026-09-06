@@ -116,3 +116,28 @@ test('filter changes mark removed nodes for a dust transition and fit the surviv
  const h=graph(t),s=newState(root);const a=addPerson(s,{url:'https://www.linkedin.com/in/boston/',location:'Boston'},1),b=addPerson(s,{url:'https://www.linkedin.com/in/paris/',location:'Paris'},1);addEdge(s,root,a,source);addEdge(s,root,b,source);h.g.setData(s);h.g.setFilters({location:'boston'});
  assert.ok(Number.isFinite(h.g.positions.get(b).snapAt));assert.equal(h.g.isVisible(h.g.positions.get(a)),true);assert.equal(h.g.isVisible(h.g.positions.get(b)),false);assert.ok(h.g.scale>0);
 });
+
+test('unfiltered name search retains the starter and real intermediate route only',t=>{
+ const h=graph(t),s=newState(root);h.g.reducedMotion=true;
+ const bridge=addPerson(s,{url:'https://www.linkedin.com/in/bridge/',name:'Morgan Rivera'},1);
+ const hit=addPerson(s,{url:'https://www.linkedin.com/in/target/',name:'Zelda Quinn',headline:'Astronomy',location:'Boston'},2);
+ const other=addPerson(s,{url:'https://www.linkedin.com/in/unrelated/',name:'Oscar Reed'},1);
+ addEdge(s,root,bridge,source);addEdge(s,bridge,hit,source);addEdge(s,root,other,source);
+ h.g.setData(s);h.g.search('Zelda Quinn');
+ assert.deepEqual(h.g.searchContext,new Set([root,hit,bridge]));
+ assert.equal(h.g.isSearchHit(h.g.positions.get(root)),false);
+ for(const id of [root,bridge,hit]){
+  const p=h.g.positions.get(id);assert.equal(h.g.isSearchVisible(p),true);
+  assert.equal(h.g.pickPoint(p.x,p.y)?.id,id);
+  assert.ok(Math.abs(p.x*h.g.scale)<h.g.w/2);
+ }
+ assert.equal(h.g.isSearchVisible(h.g.positions.get(other)),false);
+ for(const filter of [{location:'Boston'},{field:'Technology'},{keywords:['Astronomy']},{first:false},{second:false},{extended:false}]){
+  h.g.setFilters(filter);assert.equal(h.g.searchContext.size,0);
+ }
+ h.g.setFilters({first:true,second:true,extended:true});assert.ok(h.g.searchContext.has(root));
+ h.g.search('Astronomy');assert.equal(h.g.searchContext.size,0);
+ h.g.search('Zelda Quinn');assert.ok(h.g.searchContext.has(root));
+ h.g.search('');assert.equal(h.g.searchContext.size,0);
+ h.g.search('Zelda Quinn');h.g.setData(null);assert.equal(h.g.searchContext.size,0);
+});

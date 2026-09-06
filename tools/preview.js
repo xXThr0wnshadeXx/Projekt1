@@ -9,7 +9,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const downloadPath = "/downloads/orbit-network-mapper.zip";
 const requestedPort = Number(process.argv[process.argv.indexOf("--port") + 1]) || 8770;
 const mimeTypes = new Map([
-  [".css", "text/css"], [".html", "text/html"], [".js", "text/javascript"], [".json", "application/json"], [".zip", "application/zip"], [".ttf", "font/ttf"],
+  [".css", "text/css"], [".html", "text/html"], [".js", "text/javascript"], [".json", "application/json"], [".zip", "application/zip"], [".ttf", "font/ttf"], [".png", "image/png"],
 ]);
 
 packageExtension();
