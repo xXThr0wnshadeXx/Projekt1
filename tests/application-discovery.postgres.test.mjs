@@ -85,6 +85,14 @@ test('authenticated discovery review maps only completed durable stages to curre
  assert.equal((await fetch(h.base+`/api/discovery/review?scopeId=${h.request.scopeId}&discoveryId=${result.discoveryId}`,{headers:{cookie:`projekt1_session=${otherToken}`}})).status,403);assert.ok(otherScope);
  await h.pool.query("UPDATE app_sessions SET expires_at=floor(extract(epoch FROM clock_timestamp())*1000)::bigint-1 WHERE token_hash=$1",[h.actor.sessionHash]);assert.equal((await fetch(h.base+`/api/discovery/review?scopeId=${h.request.scopeId}&discoveryId=${result.discoveryId}`,{headers:h.headers})).status,401);
 });
+test('authenticated malformed discovery review IDs return 400 before lookup',{skip:!url},async t=>{
+ const h=await setup(t),before=(await h.pool.query('SELECT count(*)::int n FROM discovery_receipts')).rows[0].n;
+ for(const query of [`scopeId=${h.request.scopeId}`,`scopeId=bad%20scope&discoveryId=x`,`scopeId=${h.request.scopeId}&discoveryId=bad%20id`]){
+  const response=await fetch(h.base+`/api/discovery/review?${query}`,{headers:h.headers});assert.equal(response.status,400);assert.equal((await response.json()).error.code,'INVALID_INPUT');
+ }
+ assert.equal((await h.pool.query('SELECT count(*)::int n FROM discovery_receipts')).rows[0].n,before);
+ assert.equal((await fetch(h.base+`/api/discovery/review?scopeId=${h.request.scopeId}`,{})).status,401);
+});
 test('completed no-provider discovery review returns no batches without provider work',{skip:!url},async t=>{
  let calls=0;const h=await setup(t,{search:async()=>{calls++;return[];}}),r=await h.post(),result=await r.json();assert.equal(r.status,200);assert.equal(result.status,'INSUFFICIENT_PUBLIC_EVIDENCE');
  const before=calls,review=await fetch(h.base+`/api/discovery/review?scopeId=${h.request.scopeId}&discoveryId=${result.discoveryId}`,{headers:h.headers});assert.equal(review.status,200);assert.deepEqual(await review.json(),{scopeId:h.request.scopeId,discoveryId:result.discoveryId,graphVersion:'0',batches:[]});assert.equal(calls,before);

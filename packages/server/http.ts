@@ -106,8 +106,10 @@ export function createApiHandler(deps:HttpDependencies):RequestListener {
       if(method==='GET'&&url.pathname==='/api/discovery/review') {
         if(!await deps.auth.resolveSession(token))throw new ServiceError('UNAUTHENTICATED',401);
         if(!deps.discovery?.lookup)throw new ServiceError('SOURCE_UNAVAILABLE',502);
-        const input=validateDiscoveryReview({scopeId:url.searchParams.get('scopeId'),discoveryId:url.searchParams.get('discoveryId')});
-        json(response,200,await deps.discovery.lookup(token,input));return;
+        try {
+          const input=validateDiscoveryReview({scopeId:url.searchParams.get('scopeId'),discoveryId:url.searchParams.get('discoveryId')});
+          json(response,200,await deps.discovery.lookup(token,input));return;
+        } catch(error) {throw discoveryServiceError(error);}
       }
       if((method==='GET'&&url.pathname==='/api/discovery/capabilities')||(method==='POST'&&url.pathname==='/api/discovery')) {
         if(!await deps.auth.resolveSession(token))throw new ServiceError('UNAUTHENTICATED',401);
