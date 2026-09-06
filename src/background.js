@@ -1,4 +1,4 @@
-import {newState,options,profileURL,listURL,activityURL,sameList,sameConnectionOwner,addPerson,ingestPage,ingestComments,log} from './core.js';
+import {newState,options,profileURL,listURL,activityURL,postURL,sameList,sameConnectionOwner,addPerson,ingestPage,ingestComments,log} from './core.js';
 import {inspectLinkedIn,advanceLinkedIn,advanceComments} from './collector.js';
 import {SITE_ORIGIN,COMPANION_VERSION} from './companion.js';
 import {normalizePolicy,nextAction,reserveAction,backoffPolicy,blockPolicy,retryAfter,beginRun} from './collection-policy.js';
@@ -79,17 +79,30 @@ async function schedule(s){
   else {clearTimeout(timer);timer=null;await chrome.alarms.clear(ALARM);}
 }
 const pause=async(s,reason,w)=>{s.attentionTabId=w?.tabId||null;s.status='paused';log(s,reason);try{await save(s);}finally{await schedule(s);}};
-function finishBranch(s,w,status,reason){const b=w.current.job.kind==='posts'?s.commentCoverage?.[w.current.job.owner]:s.branches[w.current.job.owner];if(b){b.status=status;b.reason=reason;b.checkedAt=new Date().toISOString();}log(s,reason);w.current=null;}
+function finishBranch(s,w,status,reason){const b=w.current.job.detailsOnly?((s.profileChecks||={})[w.current.job.owner]||={}):w.current.job.kind==='posts'?s.commentCoverage?.[w.current.job.owner]:s.branches[w.current.job.owner];if(b){b.status=status;b.reason=reason;b.checkedAt=new Date().toISOString();}log(s,reason);w.current=null;}
 function limit(s){s.status='limit';log(s,'Person limit reached. Increase the limit and resume to expand further.');}
 function queueUnexplored(s,minDepth=0){
-  s.queue=s.queue.filter(job=>job.kind!=='profile'||job.refresh||!['exhausted','hidden','mutuals_only','incomplete'].includes(s.branches[job.owner]?.status));
-  const busy=new Set([...s.queue,...(s.deferredJobs||[]),...workers(s).map(w=>w.current?.job).filter(Boolean)].filter(job=>job.kind==='profile').map(job=>job.owner));
-  let added=0;
+   s.queue=s.queue.filter(job=>job.kind!=='profile'||job.refresh||job.detailsOnly||!['exhausted','hidden','mutuals_only','incomplete'].includes(s.branches[job.owner]?.status));
+   const jobs=[...s.queue,...(s.deferredJobs||[]),...workers(s).map(w=>w.current?.job).filter(Boolean)],busyProfiles=new Set(jobs.filter(job=>job.kind==='profile').map(job=>job.owner)),busyAny=new Set(jobs.map(job=>job.owner));
+   let added=0,repairs=0;
   for(const person of Object.values(s.nodes).sort((a,b)=>a.depth-b.depth||a.id.localeCompare(b.id))){
-    // A known person is not necessarily an explored branch. Only schedule
-    // never-attempted branches; partial/hidden branches keep their coverage.
-    if(person.depth<minDepth||person.depth>=s.config.depth||s.branches[person.id]||busy.has(person.id))continue;
-    s.queue.push({kind:'profile',owner:person.id,depth:person.depth});busy.add(person.id);added++;
+    if(person.depth<minDepth||person.depth>=s.config.depth)continue;
+     if(!s.branches[person.id]&&!busyProfiles.has(person.id)){
+       s.queue.push({kind:'profile',owner:person.id,depth:person.depth});busyProfiles.add(person.id);busyAny.add(person.id);added++;continue;
+    }
+    // Connection-list completion says nothing about profile fields or post coverage.
+    // Repair a bounded batch once; preserve completed lists and active/deferred jobs.
+     if(repairs>=24||busyAny.has(person.id))continue;
+    const checked=s.profileChecks?.[person.id];
+    if(!person.location&&!checked){
+       s.queue.push({kind:'profile',owner:person.id,depth:person.depth,detailsOnly:true});busyProfiles.add(person.id);busyAny.add(person.id);repairs++;added++;continue;
+    }
+    const comments=s.commentCoverage?.[person.id];
+    if(!comments||!comments.discoveryVersion&&['hidden','incomplete'].includes(comments.status)||comments.status==='queued'){
+      const before=s.queue.length;
+      queueComments(s,{owner:person.id,depth:person.depth},{activityUrl:activityURL(person.id+'recent-activity/all/',person.id)});
+       if(s.queue.length>before){busyAny.add(person.id);repairs++;added++;}
+    }
   }
   return added;
 }
@@ -137,11 +150,12 @@ async function navigate(s,w,job,replayURL=job.replayURL){
 function queueComments(s,job,snap){
   if(!s.config.comments)return;
   s.commentCoverage||={};
-  if(s.commentCoverage[job.owner]&&!(s.commentCoverage[job.owner].status==='hidden'&&!s.commentCoverage[job.owner].url)&&!job.refresh)return;
-  if(s.queue.some(item=>item.kind==='posts'&&item.owner===job.owner)||workers(s).some(w=>w.current?.job.kind==='posts'&&w.current.job.owner===job.owner))return;
-  const url=activityURL(snap.activityUrl,job.owner);
   const previous=s.commentCoverage[job.owner]||{};
-  s.commentCoverage[job.owner]={...previous,status:url?'queued':'hidden',posts:previous.posts||[],comments:previous.comments||0,profiles:previous.profiles||[],url,reason:url?'Queued visible post comments.':'No visible post activity link.'};
+  const repair=!previous.discoveryVersion&&['hidden','incomplete'].includes(previous.status);
+  if(previous.status&&!job.refresh&&!repair&&previous.status!=='queued')return;
+  if([...s.queue,...(s.deferredJobs||[])].some(item=>item.kind==='posts'&&item.owner===job.owner)||workers(s).some(w=>w.current?.job.kind==='posts'&&w.current.job.owner===job.owner))return;
+  const url=activityURL(snap.activityUrl,job.owner);
+  s.commentCoverage[job.owner]={...previous,discoveryVersion:1,status:url?'queued':'hidden',posts:previous.posts||[],comments:previous.comments||0,profiles:previous.profiles||[],url,reason:url?'Queued visible post comments.':'No visible post activity link.'};
   if(url)s.queue.push({kind:'posts',owner:job.owner,depth:job.depth,url,refresh:Boolean(job.refresh)});
   else s.commentCoverage[job.owner].checkedAt=new Date().toISOString();
 }
@@ -153,7 +167,9 @@ async function collectComments(s,w,snap){
   const signature=JSON.stringify(cards.map(card=>[card.urn,card.control,card.comments.map(c=>c.commentId).sort()]));
   if(c.candidate!==signature){c.candidate=signature;c.stableSince=now;return;}
   if(now-c.stableSince<SETTLE)return;
-  const before=Object.keys(s.edges).length;
+  const before=Object.keys(s.edges).length,seenPosts=new Set(coverage.posts||[]);
+  const postCount=seenPosts.size;for(const card of cards){const post=postURL(card.post);if(post)seenPosts.add(post);}
+  coverage.posts=[...seenPosts];if(seenPosts.size>postCount)await save(s);
   const result=c.capturedSignature===signature?{added:0,observations:0}:ingestComments(s,job,cards.flatMap(card=>card.comments));
   if(Object.keys(s.nodes).length<s.config.maxNodes)c.capturedSignature=signature;
   if(result.observations){c.stalls=0;s.lastBatch={added:result.added,links:Object.keys(s.edges).length-before,existing:0,rows:result.observations,owner:job.owner,at:new Date().toISOString()};log(s,`${s.nodes[job.owner].name}: ${result.added} new people · ${result.observations} comment observations`);await save(s);}
@@ -207,7 +223,7 @@ async function recover(s,w,reason){
   await save(s);
 }
 async function step(s,w,assign=true){
-  if(!w.current){if(!assign)return;s.queue.sort((a,b)=>(a.depth??0)-(b.depth??0));const job=s.queue.shift();if(job)await navigate(s,w,job);return;}
+  if(!w.current){if(!assign)return;s.queue.sort((a,b)=>(a.depth??0)-(b.depth??0)||({posts:0,profile:1,list:2}[a.kind]??3)-({posts:0,profile:1,list:2}[b.kind]??3));const job=s.queue.shift();if(job)await navigate(s,w,job);return;}
   if(w.current.navPending){if(Date.now()>=(s.nextRequestAt||0))await navigate(s,w,w.current.job,w.current.resumeURL);return;}
   if(w.current.retryAt){if(Date.now()>=w.current.retryAt)await navigate(s,w,w.current.job,w.current.resumeURL);return;}
   const c=w.current,job=c.job,tab=await chrome.tabs.get(w.tabId).catch(()=>null),now=Date.now();
@@ -228,15 +244,20 @@ async function step(s,w,assign=true){
     if(c.candidate!==signature){c.candidate=signature;c.stableSince=now;return;}
     if(now-c.stableSince<(snap.listUrl?SETTLE:2000))return;
     addPerson(s,snap.person,job.depth);
+    (s.profileChecks||={})[job.owner]={checkedAt:new Date().toISOString()};
     queueComments(s,job,snap);
+    if(job.detailsOnly){w.current=null;log(s,`Updated ${s.nodes[job.owner].name}’s profile details; saved lists kept`);await save(s);return;}
     if(!snap.listUrl){const previous=s.branches[job.owner]||{};s.branches[job.owner]={...previous,status:'hidden',pages:previous.pages||0,profiles:previous.profiles||[],reason:'No visible connection-list link on this profile.',checkedAt:new Date().toISOString()};log(s,`${s.nodes[job.owner].name}: connection list not visible`);w.current=null;await save(s);}
     else {
       const url=listURL(snap.listUrl);if(!url)throw Error('LinkedIn provided an unsupported connection-list link.');
       const previous=s.branches[job.owner]||{};
       s.branches[job.owner]={...previous,status:'collecting',scope:snap.scope,totalLabel:snap.totalLabel,pages:previous.pages||0,profiles:previous.profiles||[],url,seenPages:[]};
       delete s.branches[job.owner].partialSignature;delete s.branches[job.owner].resumeURL;delete s.branches[job.owner].checkedAt;
-      // Follow this list immediately instead of putting it behind every profile.
-      await navigate(s,w,{kind:'list',owner:job.owner,depth:job.depth,url,refresh:Boolean(job.refresh)});
+      const listJob={kind:'list',owner:job.owner,depth:job.depth,url,refresh:Boolean(job.refresh)};
+      const postIndex=s.queue.findIndex(item=>item.kind==='posts'&&item.owner===job.owner);
+      // Inspect this person's posts before a long connection list can starve them.
+      if(postIndex>=0){const [posts]=s.queue.splice(postIndex,1);s.queue.unshift(listJob);await navigate(s,w,posts);}
+      else await navigate(s,w,listJob);
     }
     return;
   }
@@ -327,7 +348,7 @@ async function tick(){
     if(Object.keys(s.nodes).length>=s.config.maxNodes){limit(s);await save(s);return;}
     // Expand observed paths even if the source list was only partially visible.
     // Coverage remains partial; it does not invalidate the edges already seen.
-    s.queue.sort((a,b)=>(a.depth??0)-(b.depth??0));
+    s.queue.sort((a,b)=>(a.depth??0)-(b.depth??0)||({posts:0,profile:1,list:2}[a.kind]??3)-({posts:0,profile:1,list:2}[b.kind]??3));
     for(const [i,w] of workers(s).entries()){
       if(s.status!=='running')break;
       const assign=s.config.delay===0||i===0;
@@ -429,13 +450,19 @@ async function command(message){
     if(Object.keys(s.nodes).length>=config.maxNodes)throw Error('Increase the person limit above the current number of people.');
     await acknowledgeRestriction(s);
     s.config=config;s.engineVersion=5;s.status='running';s.pauseKind=null;s.attentionTabId=null;if(s.workspaceManaged)s.workspaceLeaseUntil=Date.now()+WORKSPACE_LEASE;
-    // Older companions recorded a missing, lazily mounted Activity link as hidden.
-    // Recover that skipped work once, preserving all completed connection checkpoints.
-    const rootComments=s.commentCoverage?.[s.root];
-    if(s.config.comments&&rootComments?.status==='hidden'&&!rootComments.url){
-      queueComments(s,{owner:s.root,depth:0},{activityUrl:activityURL(s.root+'recent-activity/all/',s.root)});
-    }
-    for(const w of workers(s)){if(w.current){w.current.since=Date.now();w.current.candidate=null;w.current.nextActionAt=0;}}
+     for(const w of workers(s)){
+       const c=w.current;if(!c)continue;
+       const person=s.nodes[c.job.owner],comments=s.commentCoverage?.[c.job.owner];
+       const missingDetails=person&&!person.location&&!s.profileChecks?.[person.id];
+       const missingPosts=s.config.comments&&(!comments||comments.status==='queued'||!comments.discoveryVersion&&['hidden','incomplete'].includes(comments.status));
+      if(c.job.kind==='list'&&(missingDetails||missingPosts)){
+        // Resume post/details checks ahead of an old, long-running list without
+        // discarding its exact URL, captured-page signatures, or pacing history.
+        w.current=null;s.queue.unshift({...c.job,replayURL:c.resumeURL||c.job.url});
+        if(missingDetails&&!s.queue.some(job=>job.kind==='profile'&&job.owner===person.id))s.queue.push({kind:'profile',owner:person.id,depth:person.depth,detailsOnly:true});
+        if(missingPosts)queueComments(s,{owner:c.job.owner,depth:c.job.depth},{activityUrl:activityURL(c.job.owner+'recent-activity/all/',c.job.owner)});
+       }else {c.since=Date.now();c.candidate=null;c.nextActionAt=0;}
+     }
     queueUnexplored(s);
     log(s,'Resumed from the saved page and remaining queue');await save(s);await schedule(s);await tick();return {ok:true,status:s.status,reason:s.reason};
   }
