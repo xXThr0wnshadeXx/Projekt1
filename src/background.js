@@ -124,7 +124,8 @@ async function navigate(s,w,job,replayURL=job.replayURL){
 }
 function queueComments(s,job,snap){
   s.commentCoverage||={};
-  if(s.commentCoverage[job.owner]&&!job.refresh)return;
+  if(s.commentCoverage[job.owner]&&!(s.commentCoverage[job.owner].status==='hidden'&&!s.commentCoverage[job.owner].url)&&!job.refresh)return;
+  if(s.queue.some(item=>item.kind==='posts'&&item.owner===job.owner)||workers(s).some(w=>w.current?.job.kind==='posts'&&w.current.job.owner===job.owner))return;
   const url=activityURL(snap.activityUrl,job.owner);
   const previous=s.commentCoverage[job.owner]||{};
   s.commentCoverage[job.owner]={...previous,status:url?'queued':'hidden',posts:previous.posts||[],comments:previous.comments||0,profiles:previous.profiles||[],url,reason:url?'Queued visible post comments.':'No visible post activity link.'};
@@ -210,7 +211,7 @@ async function step(s,w,assign=true){
   if(job.kind==='profile'){
     if(snap.kind!=='profile'||profileURL(snap.url)!==job.owner){if(now-c.since<4000)return;await recover(s,w,'The tab left the expected profile. No data from that page was recorded.');return;}
     // Brief stability check avoids mistaking partially mounted content for a hidden list.
-    const signature=JSON.stringify([snap.person,snap.listUrl]);
+    const signature=JSON.stringify([snap.person,snap.listUrl,snap.activityUrl]);
     if(c.candidate!==signature){c.candidate=signature;c.stableSince=now;return;}
     if(now-c.stableSince<(snap.listUrl?SETTLE:2000))return;
     addPerson(s,snap.person,job.depth);
@@ -244,6 +245,20 @@ async function step(s,w,assign=true){
     // Navigation succeeded before a worker suspension; consume the new page.
     c.advancePending=false;
   }
+  if(c.paginationWaiting){
+    if(snap.paginationState!=='missing'||snap.signature!==c.lastSignature){
+      c.paginationWaiting=false;c.lastSignature=null;c.replaying=true;c.since=now;
+    }else if(!c.paginationRevealedAt){
+      if(now<(s.nextRequestAt||0))return;
+      if(!await permit(s)){await save(s);return;}
+      c.paginationRevealedAt=now;c.since=now;await save(s);
+      await chrome.scripting.executeScript({target:{tabId:w.tabId},func:advanceLinkedIn,args:[job.url,false,true]});
+      return;
+    }else {
+      if(now-c.paginationRevealedAt<1500)return;
+      c.paginationWaiting=false;c.lastSignature=null;c.replaying=true;c.since=now;
+    }
+  }
   if(c.lastSignature===snap.signature){
     if(c.awaitingResults){
       if(now-c.since<UNCHANGED_TIMEOUT)return;
@@ -254,17 +269,7 @@ async function step(s,w,assign=true){
     if(now-c.since>=UNCHANGED_TIMEOUT)await recover(s,w,'Results stopped changing while waiting for the next page.');
     return;
   }
-  if(!snap.isOwn&&!snap.empty&&snap.paginationState==='missing'){
-    if(!c.paginationRevealedAt){
-      if(now<(s.nextRequestAt||0))return;
-      if(!await permit(s)){await save(s);return;}
-      c.paginationRevealedAt=now;c.since=now;await save(s);
-      await chrome.scripting.executeScript({target:{tabId:w.tabId},func:advanceLinkedIn,args:[job.url,false,true]});
-      c.paginationRevealedAt=now;c.since=now;await save(s);return;
-    }
-    if(now-c.paginationRevealedAt<1500)return;
-  }
-  // Require a stable result set and pagination controls before recording a page.
+  // Save stable visible evidence before waiting for a paced pagination probe.
   const candidate=JSON.stringify([snap.signature,snap.hasNext,snap.empty,snap.expectedCount]);
   if(c.candidate!==candidate){c.candidate=candidate;c.stableSince=now;return;}
   if(now-c.stableSince<(!snap.isOwn&&!snap.hasNext?1000:SETTLE))return;
@@ -294,6 +299,7 @@ async function step(s,w,assign=true){
   if(!seen)branch.seenPages.push(snap.signature);
   if(snap.isOwn&&(c.unchangedAdvances||0)>=3){finishBranch(s,w,'incomplete',`${s.nodes[job.owner].name}: no new connections after three paced scroll attempts. Saved progress; the visible list may be incomplete.`);await save(s);return;}
   if(!snap.isOwn&&!snap.empty&&snap.paginationState==='missing'){
+    if(!c.paginationRevealedAt){c.paginationWaiting=true;await save(s);return;}
     finishBranch(s,w,'incomplete',`${s.nodes[job.owner].name}: captured visible people, but could not locate a next-page control. This list may be incomplete.`);await save(s);
   }else if(snap.empty||(!snap.isOwn&&!snap.hasNext)||(snap.isOwn&&branch.expectedCount&&branch.profiles.length>=branch.expectedCount)){
     finishBranch(s,w,branch.scope==='mutuals_only'?'mutuals_only':'exhausted',`${s.nodes[job.owner].name}: end of visible results`);await save(s);
@@ -410,6 +416,12 @@ async function command(message){
     if(Object.keys(s.nodes).length>=config.maxNodes)throw Error('Increase the person limit above the current number of people.');
     await acknowledgeRestriction(s);
     s.config=config;s.engineVersion=5;s.status='running';s.pauseKind=null;s.attentionTabId=null;if(s.workspaceManaged)s.workspaceLeaseUntil=Date.now()+WORKSPACE_LEASE;
+    // Older companions recorded a missing, lazily mounted Activity link as hidden.
+    // Recover that skipped work once, preserving all completed connection checkpoints.
+    const rootComments=s.commentCoverage?.[s.root];
+    if(rootComments?.status==='hidden'&&!rootComments.url){
+      queueComments(s,{owner:s.root,depth:0},{activityUrl:activityURL(s.root+'recent-activity/all/',s.root)});
+    }
     for(const w of workers(s)){if(w.current){w.current.since=Date.now();w.current.candidate=null;w.current.nextActionAt=0;}}
     queueUnexplored(s);
     log(s,'Resumed from the saved page and remaining queue');await save(s);await schedule(s);await tick();return {ok:true,status:s.status,reason:s.reason};

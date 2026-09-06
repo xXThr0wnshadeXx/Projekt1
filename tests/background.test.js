@@ -168,7 +168,7 @@ test('virtualized own lists complete from the union of unique captured profiles'
 test('a person cap midway through an own-list snapshot resumes without losing rows or double counting pages',async t=>{
   const own='https://www.linkedin.com/mynetwork/invite-connect/connections/';
   const people=Array.from({length:14},(_,i)=>person(`p-${i}`));
-  const h=await harness(t);h.snapshots={[root]:profile(person('root'),own),[own]:page(own,people,{isOwn:true,expectedCount:14})};
+  const h=await harness(t);h.snapshots={[root]:profile(person('root'),own),[own]:page(own,people,{isOwn:true,expectedCount:14}),[root+'recent-activity/all/']:{kind:'posts',url:root+'recent-activity/all/',owner:root,cards:[],empty:true}};
   await h.command({type:'START',url:root,config:{depth:1,maxNodes:10}});
   for(let i=0;i<12;i++)await h.tick();
   assert.equal(h.data.orbitNetwork.status,'limit');assert.equal(h.data.orbitNetwork.branches[root].profiles.length,9);
@@ -321,4 +321,34 @@ test('comment collection pauses on restrictions and never consumes a startup exe
   await h.command({type:'START',url:root});for(let i=0;i<10;i++)await h.tick();
   assert.equal(h.requests.length,2);assert.equal(h.data.orbitNetwork.status,'paused');assert.ok(h.data.orbitCollectionPolicy.blocked);
   assert.equal((await h.command({type:'RESUME'})).ok,false);assert.equal(h.requests.length,2);
+});
+
+
+test('missing pagination never delays recording already visible relationships',async t=>{
+  const h=await harness(t),url=list('root');h.snapshots={[root]:profile(person('root'),url),[url]:page(url,[person('a')],{paginationState:'missing'})};
+  await h.command({type:'START',url:root,config:{depth:1}});
+  // Real wall-clock ticks, without the harness jumping to the next permitted action.
+  for(let i=0;i<7;i++)await h.elapse(500);
+  assert.deepEqual(route(h.data.orbitNetwork,a),[root,a]);assert.equal(h.data.orbitNetwork.pages,1);assert.equal(h.requests.length,2);assert.equal(h.advances,0);
+  for(let i=0;i<12;i++)await h.tick();assert.equal(h.data.orbitNetwork.pages,1);assert.equal(h.advances,1);assert.equal(h.data.orbitNetwork.status,'complete');
+});
+test('resume repairs skipped posts once without replaying mutual lists or dropping queued people',async t=>{
+  const s=newState(root,{depth:2});s.status='paused';s.queue=[{kind:'profile',owner:a,depth:1}];s.workers=[{tabId:null,current:null}];
+  s.branches[root]={status:'incomplete',scope:'mutuals_only',pages:1,profiles:[a],url:list('root')};s.nodes[a]={...person('a'),id:a,depth:1};
+  s.commentCoverage={[root]:{status:'hidden',url:null,profiles:[],comments:0,posts:[]}};
+  const h=await harness(t,s),url=root+'recent-activity/all/';
+  h.snapshots={[url]:{kind:'posts',url,owner:root,cards:[],empty:true},[a]:profile(person('a'),null)};
+  await h.command({type:'RESUME'});assert.equal(h.data.orbitNetwork.current.job.kind,'posts');assert.equal(h.data.orbitNetwork.current.job.owner,root);assert.ok(h.data.orbitNetwork.queue.some(job=>job.owner===a));
+  await h.command({type:'PAUSE'});await h.command({type:'RESUME'});
+  assert.equal(h.data.orbitNetwork.queue.filter(job=>job.kind==='posts').length,0);
+  for(let i=0;i<20;i++)await h.tick();
+  assert.equal(h.data.orbitNetwork.status,'complete');assert.equal(h.data.orbitNetwork.commentCoverage[root].status,'exhausted');assert.equal(h.data.orbitNetwork.branches[root].pages,1);assert.equal(h.requests.length,2);
+});
+
+test('partial mutual-only results continue to verified deeper relationships',async t=>{
+  const h=await harness(t),url=list('root');h.snapshots={[root]:{...profile(person('root'),url),scope:'mutuals_only'},[url]:page(url,[person('a')],{paginationState:'missing'}),[a]:profile(person('a'),list('a')),[list('a')]:page(list('a'),[person('b')]),[b]:profile(person('b'),null)};
+  await h.command({type:'START',url:root});for(let i=0;i<45;i++)await h.tick();
+  const s=h.data.orbitNetwork;assert.equal(s.status,'complete');assert.equal(s.branches[root].status,'incomplete');assert.equal(s.branches[root].scope,'mutuals_only');
+  assert.deepEqual(route(s,b),[root,a,b]);assert.ok(!s.log.some(entry=>/Direct-layer check/.test(entry.message)));
+  for(let i=2;i<h.requests.length;i++)assert.ok(h.requests[i]-h.requests[i-1]>=120000);
 });

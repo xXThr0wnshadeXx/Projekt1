@@ -1,15 +1,26 @@
 // These functions run only inside the dedicated LinkedIn collection tab.
 // Keep each function self-contained: chrome.scripting serializes the function.
 export function inspectLinkedIn() {
+  // LinkedIn renders some routes inside its same-origin preload frame.
+  // Prefer the top-level page when present; never inspect advertising frames.
+  let doc=document;
+  if(/^\/in\/[^/]+\/recent-activity\/(?:all|posts)\/?$/.test(location.pathname)&&!doc.querySelector('main,[aria-label="Primary content"]')){
+    for(const frame of doc.querySelectorAll('iframe[src]')){
+      try{const src=new URL(frame.getAttribute('src'),location.href),inner=frame.contentDocument;
+        if(src.origin===location.origin&&src.pathname==='/preload/'&&inner?.body){doc=inner;break;}
+      }catch{/* Cross-origin frames are not collector content. */}
+    }
+  }
+
   const clean=s=>(s||'').replace(/\s+/g,' ').trim();
   const canonical=value=>{try{const u=new URL(value,location.href);return u.hostname==='www.linkedin.com'&&/^\/in\/[^/]+\/?$/.test(u.pathname)?`https://www.linkedin.com${u.pathname.replace(/\/?$/,'/')}`:null;}catch{return null;}};
-  const main=document.querySelector('[role="region"][aria-label="Primary content"]')||document.querySelector('main')||document.body;
-  const text=clean(main.innerText||main.textContent),body=clean(document.body.innerText||document.body.textContent);
+  const main=doc.querySelector('[aria-label="Primary content"]')||doc.querySelector('main')||doc.body;
+  const text=clean(main.innerText||main.textContent),body=clean(doc.body.innerText||doc.body.textContent);
   const url=location.href;
-  const notices=Array.from(document.querySelectorAll('[role="alert"],[role="dialog"],h1,h2,h3')).map(e=>clean(e.innerText||e.textContent)).join(' ');
+  const notices=Array.from(new Set([...document.querySelectorAll('[role="alert"],[role="dialog"],h1,h2,h3'),...doc.querySelectorAll('[role="alert"],[role="dialog"],h1,h2,h3')])).map(e=>clean(e.innerText||e.textContent)).join(' ');
   const restriction=/security verification|verify your identity|unusual activity|temporarily restricted|account (?:has been |is )?restricted|too many requests|rate limit(?:ed| exceeded)?|automated activity|commercial use limit|(?:you(?:'ve| have) reached|you reached)[^.!?]{0,100}(?:search|limit)|(?:reached|exceeded)[^.!?]{0,60}search limit/i;
   if(/\/checkpoint\//.test(location.pathname)||restriction.test(notices)||(body.length<1500&&restriction.test(body)))return {kind:'blocked',url,reason:'LinkedIn is showing a verification, restriction, or search limit. Resolve it in the collection tab before resuming.'};
-  if(/\/(login|uas\/login|authwall)/.test(location.pathname)||document.querySelector('input[name="session_password"]'))return {kind:'blocked',blockType:'login',url,reason:'Sign in to LinkedIn in the collection tab, then resume.'};
+  if(/\/(login|uas\/login|authwall)/.test(location.pathname)||document.querySelector('input[name="session_password"]')||doc.querySelector('input[name="session_password"]'))return {kind:'blocked',blockType:'login',url,reason:'Sign in to LinkedIn in the collection tab, then resume.'};
   if(main.querySelector('[aria-busy="true"],.artdeco-loader,.search-results__loader'))return {kind:'loading',url};
   const links=Array.from(main.querySelectorAll('a[href], [role="link"][href]'));
   if(/^\/in\/[^/]+\/recent-activity\/(?:all|posts)\/?$/.test(location.pathname)){
@@ -34,9 +45,9 @@ export function inspectLinkedIn() {
         const anchors=Array.from(c.querySelectorAll('a[href]')).filter(a=>a.closest(commentSelector)===c&&!a.closest('.comments-comment-item__main-content,.comments-comment-item-content-body'));
         const a=anchors.find(a=>a.matches('.comments-post-meta__actor-link,[aria-label^="View:"]'))||anchors.find(a=>a.closest('h3'))||anchors.find(a=>canonical(a.getAttribute('href')));
         const commenter=canonical(a?.getAttribute('href'));if(!commenter||commenter===author)continue;
-        const name=clean(c.querySelector('.comments-post-meta__name-text,h3')?.textContent||a.textContent).replace(/\s*(?:•\s*)?(?:1st|2nd|3rd\+?)\s*$/,'');
+        const name=clean((c.querySelector('.comments-post-meta__name-text,.comments-comment-meta__description-title')||c.querySelector('h3'))?.textContent||a.textContent).replace(/\s*(?:•\s*)?(?:1st|2nd|3rd\+?)\s*$/,'');
         if(!name||/^linkedin member$/i.test(name))continue;
-        comments.push({commenter:{url:commenter,name,headline:clean(c.querySelector('.comments-post-meta__headline')?.textContent)},author,post,commentId,observedAt:new Date().toISOString()});
+        comments.push({commenter:{url:commenter,name,headline:clean(c.querySelector('.comments-post-meta__headline,.comments-comment-meta__description-subtitle')?.textContent)},author,post,commentId,observedAt:new Date().toISOString()});
       }
       const buttons=Array.from(card.querySelectorAll('button')).filter(e=>visible(e)&&e.closest(cardSelector)===card&&!e.disabled&&e.getAttribute('aria-disabled')!=='true');
       const more=buttons.find(e=>/^(?:load more comments|show more comments|view (?:\d+ )?(?:more )?repl|\d+ repl)/i.test(label(e))&&!/^reply to/i.test(label(e)));
@@ -63,7 +74,7 @@ export function inspectLinkedIn() {
     const activity=links.find(a=>{try{const u=new URL(a.getAttribute('href'),url);return u.origin===location.origin&&u.pathname.startsWith(location.pathname.replace(/\/?$/,'/')+'recent-activity/')&&/\/recent-activity\/(?:all|posts)\/?$/.test(u.pathname);}catch{return false;}});
     const subtitle=main.querySelector('.text-body-medium');
     const locationText=clean(main.querySelector('.text-body-small.inline.t-black--light.break-words,.pv-text-details__left-panel .text-body-small')?.textContent);
-    return {kind:'profile',url,activityUrl:activity?new URL(activity.getAttribute('href'),url).href:null,person:{url:canonical(url),name:clean(title.textContent),headline:clean(subtitle?.textContent),location:locationText,about:sectionText('about',4000),experience:sectionText('experience',6000),education:sectionText('education',4000),skills:sectionText('skills',3000)},listUrl:selected?new URL(selected.getAttribute('href'),url).href:null,scope:candidate?'connections':mutual?'mutuals_only':'hidden',totalLabel:clean(candidate?.textContent)};
+    return {kind:'profile',url,activityUrl:activity?new URL(activity.getAttribute('href'),url).href:canonical(url)+'recent-activity/all/',person:{url:canonical(url),name:clean(title.textContent),headline:clean(subtitle?.textContent),location:locationText,about:sectionText('about',4000),experience:sectionText('experience',6000),education:sectionText('education',4000),skills:sectionText('skills',3000)},listUrl:selected?new URL(selected.getAttribute('href'),url).href:null,scope:candidate?'connections':mutual?'mutuals_only':'hidden',totalLabel:clean(candidate?.textContent)};
   }
   const path=location.pathname.replace(/\/?$/,'/');
   const isOwn=path==='/mynetwork/invite-connect/connections/';
@@ -86,15 +97,16 @@ export function inspectLinkedIn() {
   const paginationState=hasNext?'next':next?'end':'missing';
   const empty=!unique.length&&/no results found|no results|no connections yet|no connections to show/i.test(text);
   const count=isOwn?Number((text.match(/([\d,]+)\s+connections/i)?.[1]||'').replaceAll(',','')):null;
-  return {kind:unique.length||empty?'list':'loading',url,people:unique,hasNext,paginationState,isOwn,empty,expectedCount:count||null,signature:unique.map(p=>p.url).sort().join('|'),pageLabel:clean(main.querySelector('[aria-current="page"],[aria-current="true"]')?.textContent),scrollHeight:document.documentElement.scrollHeight};
+  return {kind:unique.length||empty?'list':'loading',url,people:unique,hasNext,paginationState,isOwn,empty,expectedCount:count||null,signature:unique.map(p=>p.url).sort().join('|'),pageLabel:clean(main.querySelector('[aria-current="page"],[aria-current="true"]')?.textContent),scrollHeight:doc.documentElement.scrollHeight};
 }
 
 export async function advanceLinkedIn(expectedURL,own,scrollOnly=false) {
+  const doc=document;
   const current=new URL(location.href),expected=new URL(expectedURL);
   const path=u=>u.pathname.replace(/\/?$/,'/');
   const owner=u=>{const values=u.searchParams.getAll('connectionOf');if(values.length!==1||!values[0])return null;try{const parsed=JSON.parse(values[0]);if(Array.isArray(parsed)&&parsed.length&&parsed.every(v=>typeof v==='string'&&v.length))return JSON.stringify([...new Set(parsed)].sort());if(typeof parsed==='string'&&parsed.length)return JSON.stringify([parsed]);}catch{}return JSON.stringify([values[0]]);};
   if(current.origin!=='https://www.linkedin.com'||current.origin!==expected.origin||path(current)!==path(expected)||(path(current)==='/search/results/people/'&&(!owner(expected)||owner(current)!==owner(expected))))throw Error('The collection tab changed.');
-  const main=document.querySelector('[role="region"][aria-label="Primary content"]')||document.querySelector('main')||document.body;
+  const main=doc.querySelector('[aria-label="Primary content"]')||doc.querySelector('main')||doc.body;
   const pageRoot=main.closest('main')||main;
   if(own||scrollOnly){
     // One load-triggering action per reservation. Clicking and scrolling together
@@ -105,13 +117,13 @@ export async function advanceLinkedIn(expectedURL,own,scrollOnly=false) {
     // Prefer the scrollable ancestor shared by the most profile links.
     const candidates=new Map();
     for(const profileLink of main.querySelectorAll('a[href*="/in/"]')){
-      for(let container=profileLink.parentElement;container&&container!==document.body;container=container.parentElement){
+      for(let container=profileLink.parentElement;container&&container!==doc.body;container=container.parentElement){
         if(container.scrollHeight>container.clientHeight+20&&/auto|scroll/.test(getComputedStyle(container).overflowY)){
           candidates.set(container,(candidates.get(container)||0)+1);break;
         }
       }
     }
-    const container=[...candidates].sort((a,b)=>b[1]-a[1])[0]?.[0]||document.scrollingElement||document.documentElement;
+    const container=[...candidates].sort((a,b)=>b[1]-a[1])[0]?.[0]||doc.scrollingElement||doc.documentElement;
     const bottom=Math.max(0,container.scrollHeight-container.clientHeight);
     const scroll=top=>container.scrollTo?container.scrollTo({top,behavior:'instant'}):window.scrollTo({top,behavior:'instant'});
     // Re-enter the loading boundary when a virtualized list was already at bottom.
@@ -131,15 +143,28 @@ export async function advanceLinkedIn(expectedURL,own,scrollOnly=false) {
 
 // Only read controls are permitted here: expand comments/replies or scroll posts.
 export function advanceComments(expectedURL,request){
+  // LinkedIn renders some routes inside its same-origin preload frame.
+  // Prefer the top-level page when present; never inspect advertising frames.
+  let doc=document;
+  if(/^\/in\/[^/]+\/recent-activity\/(?:all|posts)\/?$/.test(location.pathname)&&!doc.querySelector('main,[aria-label="Primary content"]')){
+    for(const frame of doc.querySelectorAll('iframe[src]')){
+      try{const src=new URL(frame.getAttribute('src'),location.href),inner=frame.contentDocument;
+        if(src.origin===location.origin&&src.pathname==='/preload/'&&inner?.body){doc=inner;break;}
+      }catch{/* Cross-origin frames are not collector content. */}
+    }
+  }
+
   const current=new URL(location.href),expected=new URL(expectedURL);
   const path=u=>u.pathname.replace(/\/?$/,'/');
   if(current.origin!=='https://www.linkedin.com'||current.origin!==expected.origin||path(current)!==path(expected)||!/^\/in\/[^/]+\/recent-activity\/(?:all|posts)\/$/.test(path(current)))throw Error('The activity owner changed.');
-  const main=document.querySelector('[role="region"][aria-label="Primary content"]')||document.querySelector('main')||document.body;
+  const main=doc.querySelector('[aria-label="Primary content"]')||doc.querySelector('main')||doc.body;
   const selector='[data-urn^="urn:li:activity:"],[data-urn^="urn:li:ugcPost:"]';
   if(request.action==='scroll'){
+    const more=Array.from(main.querySelectorAll('button')).find(e=>/^show more results$/i.test((e.getAttribute('aria-label')||e.textContent||'').trim())&&!e.disabled&&e.getAttribute('aria-disabled')!=='true');
+    if(more){more.click();return 'expanded';}
     let container=main.querySelector(selector)?.parentElement;
-    while(container&&container!==document.body){if(container.scrollHeight>container.clientHeight+20&&/auto|scroll/.test(getComputedStyle(container).overflowY))break;container=container.parentElement;}
-    container=container&&container!==document.body?container:document.scrollingElement||document.documentElement;
+    while(container&&container!==doc.body){if(container.scrollHeight>container.clientHeight+20&&/auto|scroll/.test(getComputedStyle(container).overflowY))break;container=container.parentElement;}
+    container=container&&container!==doc.body?container:doc.scrollingElement||doc.documentElement;
     const top=Math.min(Math.max(0,container.scrollHeight-container.clientHeight),(container.scrollTop||0)+Math.max(100,container.clientHeight*.8));
     if(container.scrollTo)container.scrollTo({top,behavior:'instant'});else window.scrollTo({top,behavior:'instant'});
     return 'scrolled';
