@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createAuthGateway, type AuthSession } from './auth';
 import { GraphViewport } from './components/GraphViewport';
@@ -7,6 +7,14 @@ import type { GraphSnapshot, OpportunityPath, SearchEvent, SearchResult } from '
 import './styles.css';
 
 const auth = createAuthGateway();
+type DiscoveryIntent = {
+  company: string;
+  recruiter: string;
+  location: string;
+  field: string;
+  linkedinUrl: string;
+  instagramUrl: string;
+};
 
 function safeSelectedPathIds(result: SearchResult, snapshot: GraphSnapshot): string[] | null {
   if (result.scopeId !== snapshot.scopeId || result.graphVersion !== snapshot.graphVersion || !Array.isArray(result.events)) return null;
@@ -41,6 +49,7 @@ function peopleForEvent(event: SearchEvent): string[] {
 }
 
 function App() {
+  useScrollReveal();
   const [session, setSession] = useState<AuthSession | null>(null);
   const [showAuth, setShowAuth] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -57,6 +66,7 @@ function App() {
   const [searchResult, setSearchResult] = useState<SearchResult | null>(null);
   const [selectedPaths, setSelectedPaths] = useState<OpportunityPath[]>([]);
   const [activePersonIds, setActivePersonIds] = useState<string[]>([]);
+  const [intentStatus, setIntentStatus] = useState('');
   const replayTimer = useRef<number | null>(null);
 
   useEffect(() => {
@@ -72,6 +82,7 @@ function App() {
     setSelectedPaths([]);
     setSearchResult(null);
     setGraphError('');
+    setIntentStatus('');
   }, [session]);
   useEffect(() => {
     if (!session || !scopeId) return;
@@ -150,6 +161,11 @@ function App() {
       setAuthError(error instanceof Error ? error.message : 'We could not create your workspace.');
     } finally { setBusy(false); }
   }
+  function saveIntent(intent: DiscoveryIntent) {
+    if (!session) { setShowAuth(true); return; }
+    // Discovery persistence will be server-owned once Ben freezes its request contract.
+    setIntentStatus(`Your ${intent.company || intent.field || 'connection'} goal is ready to send to the secure discovery service.`);
+  }
 
   return <main>
     <nav className="nav">
@@ -163,7 +179,7 @@ function App() {
     </nav>
 
     <section id="top" className="hero">
-      <div className="hero-copy">
+      <div className="hero-copy scroll-reveal scroll-reveal--left">
         <p className="eyebrow"><i /> YOUR NETWORK, MADE ACTIONABLE</p>
         <h1>Find your way <em>in.</em></h1>
         <p className="lede">Turn a job post into the strongest, most human path to the person who can help.</p>
@@ -173,11 +189,13 @@ function App() {
         </div>
         <p className="privacy-note">✦ Your network stays private. You choose what to connect.</p>
       </div>
-      <GraphViewport snapshot={snapshot} loading={graphLoading} error={graphError} selectedPaths={selectedPaths} activePersonIds={activePersonIds} />
+      <div className="scroll-reveal scroll-reveal--right"><GraphViewport snapshot={snapshot} loading={graphLoading} error={graphError} selectedPaths={selectedPaths} activePersonIds={activePersonIds} /></div>
     </section>
 
-    <section className="search-panel" aria-labelledby="search-title">
-      <div><p className="eyebrow"><i /> INTRODUCTION SEARCH</p><h2 id="search-title">Search a real, authorized path.</h2><p>The server resolves the goal and selects routes. WarmPath only displays the returned graph facts and selected paths.</p></div>
+    <DiscoveryIntentForm signedIn={Boolean(session)} resetKey={`${session?.actor.id ?? 'signed-out'}:${scopeId}`} onSignIn={() => setShowAuth(true)} onSave={saveIntent} onClear={() => setIntentStatus('')} status={intentStatus} />
+
+    <section className="search-panel scroll-reveal scroll-reveal--rise" aria-labelledby="search-title">
+      <div><p className="eyebrow"><i /> ROUTE SEARCH</p><h2 id="search-title">Explore a supported path.</h2><p>Once discovery has returned an authorized graph, the server resolves your goal and selects routes. WarmPath only displays returned facts and paths.</p></div>
       {session && session.scopes.length > 0 ? <form onSubmit={(event) => void submitSearch(event)}>
         <label>Authorized graph scope<select value={scopeId} onChange={(event) => setScopeId(event.target.value)}>{session.scopes.map((scope) => <option key={scope.id} value={scope.id}>{scope.label}</option>)}</select></label>
         <label>Your goal<input value={goalText} onChange={(event) => setGoalText(event.target.value)} placeholder="e.g. PayPal early talent recruiter" required /></label>
@@ -188,14 +206,14 @@ function App() {
     </section>
 
     <section id="how-it-works" className="steps">
-      <div className="section-heading"><p className="eyebrow"><i /> HOW IT WORKS</p><h2>From opportunity to introduction.</h2></div>
+      <div className="section-heading scroll-reveal scroll-reveal--left"><p className="eyebrow"><i /> HOW IT WORKS</p><h2>From opportunity to introduction.</h2></div>
       <div className="step-grid">
-        <article><b>01</b><div className="icon">⌑</div><h3>Share the opportunity</h3><p>Upload a job post or add a role you’re excited about.</p></article>
-        <article><b>02</b><div className="icon">⌘</div><h3>See the path</h3><p>We weigh your real connections to find the strongest route.</p></article>
-        <article><b>03</b><div className="icon">✦</div><h3>Make the ask</h3><p>Get thoughtful, personalized outreach for every step.</p></article>
+        <article className="scroll-reveal scroll-reveal--rise"><b>01</b><div className="icon">⌑</div><h3>Share the opportunity</h3><p>Upload a job post or add a role you’re excited about.</p></article>
+        <article className="scroll-reveal scroll-reveal--rise scroll-reveal--delay-1"><b>02</b><div className="icon">⌘</div><h3>See the path</h3><p>We weigh your real connections to find the strongest route.</p></article>
+        <article className="scroll-reveal scroll-reveal--rise scroll-reveal--delay-2"><b>03</b><div className="icon">✦</div><h3>Make the ask</h3><p>Get thoughtful, personalized outreach for every step.</p></article>
       </div>
     </section>
-    <section className="promise"><p>“LinkedIn tells you who you know. We tell you the best path to the person who can actually help.”</p></section>
+    <section className="promise scroll-reveal scroll-reveal--pop"><p>“LinkedIn tells you who you know. We tell you the best path to the person who can actually help.”</p></section>
 
     {notice && <div className="toast">{notice}</div>}
     {authError && <div className="toast" role="alert">{authError}</div>}
@@ -214,6 +232,77 @@ function App() {
       </section>
     </div>}
   </main>;
+}
+
+function DiscoveryIntentForm({ signedIn, resetKey, onSignIn, onSave, onClear, status }: { signedIn: boolean; resetKey: string; onSignIn: () => void; onSave: (intent: DiscoveryIntent) => void; onClear: () => void; status: string }) {
+  const emptyIntent = (): DiscoveryIntent => ({ company: '', recruiter: '', location: '', field: '', linkedinUrl: '', instagramUrl: '' });
+  const [intent, setIntent] = useState<DiscoveryIntent>(emptyIntent);
+  const [errors, setErrors] = useState<string[]>([]);
+  useEffect(() => { setIntent(emptyIntent()); setErrors([]); }, [resetKey]);
+  const change = (field: keyof DiscoveryIntent) => (event: ChangeEvent<HTMLInputElement>) => {
+    setIntent((current) => ({ ...current, [field]: event.target.value }));
+    setErrors([]);
+    onClear();
+  };
+  function clear() { setIntent(emptyIntent()); setErrors([]); onClear(); }
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const nextErrors = validateDiscoveryIntent(intent);
+    if (nextErrors.length > 0) { setErrors(nextErrors); return; }
+    onSave(intent);
+  }
+  return <section className="intent-panel scroll-reveal scroll-reveal--rise" aria-labelledby="intent-title">
+    <div className="intent-heading"><p className="eyebrow"><i /> START A CONNECTION QUEST</p><h2 id="intent-title">What do you want to do?</h2><p>Tell us who or what you want to get closer to. We will only look for evidence the secure service is authorized to use.</p></div>
+    <form className="intent-form" onSubmit={(event) => void submit(event)}>
+      <label>Company<input value={intent.company} onChange={change('company')} placeholder="e.g. PayPal" /></label>
+      <label>Recruiter or person<input value={intent.recruiter} onChange={change('recruiter')} placeholder="Name or “early talent recruiter”" /></label>
+      <label>Location<input value={intent.location} onChange={change('location')} placeholder="e.g. San Jose, CA" /></label>
+      <label>Field or role<input value={intent.field} onChange={change('field')} placeholder="e.g. product design internship" /></label>
+      <fieldset className="profile-links"><legend>Optional public profile links</legend><label>LinkedIn profile<input value={intent.linkedinUrl} onChange={change('linkedinUrl')} type="url" placeholder="https://linkedin.com/in/..." /></label><label>Instagram profile<input value={intent.instagramUrl} onChange={change('instagramUrl')} type="url" placeholder="https://instagram.com/..." /></label></fieldset>
+      {signedIn ? <button className="primary intent-submit">Save this connection goal <span>→</span></button> : <button type="button" className="primary intent-submit" onClick={onSignIn}>Sign in to start <span>→</span></button>}
+      <button type="button" className="text-button intent-clear" onClick={clear}>Clear this goal</button>
+      <p className="intent-privacy">Profile links are optional while drafting. Running discovery will require both profile links and a company or person target. Location and role are not sent as discovery filters yet. We do not scrape private networks or keep this draft in your browser.</p>
+      {errors.length > 0 && <div className="intent-errors" role="alert"><strong>Before discovery can start:</strong><ul>{errors.map((error) => <li key={error}>{error}</li>)}</ul></div>}
+      {status && <p className="intent-status" role="status">{status}</p>}
+    </form>
+  </section>;
+}
+
+function validateDiscoveryIntent(intent: DiscoveryIntent): string[] {
+  const errors: string[] = [];
+  const targetProvided = Boolean(intent.company.trim() || intent.recruiter.trim());
+  if (!targetProvided) errors.push('Add a company or recruiter/person target.');
+  const linkedinError = profileUrlError(intent.linkedinUrl, 'linkedin.com', 'LinkedIn');
+  const instagramError = profileUrlError(intent.instagramUrl, 'instagram.com', 'Instagram');
+  if (linkedinError) errors.push(linkedinError);
+  if (instagramError) errors.push(instagramError);
+  return errors;
+}
+
+function profileUrlError(value: string, domain: string, label: string): string | null {
+  if (!value.trim()) return `Add your ${label} profile URL.`;
+  try {
+    const url = new URL(value);
+    const validHost = url.hostname === domain || url.hostname.endsWith(`.${domain}`);
+    const hasProfilePath = url.pathname.split('/').filter(Boolean).length > 0;
+    return url.protocol === 'https:' && validHost && hasProfilePath ? null : `Use a complete https ${label} profile URL.`;
+  } catch { return `Use a complete https ${label} profile URL.`; }
+}
+
+function useScrollReveal() {
+  useEffect(() => {
+    const elements = Array.from(document.querySelectorAll<HTMLElement>('.scroll-reveal'));
+    const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    if (reducedMotion || !('IntersectionObserver' in window)) {
+      elements.forEach((element) => element.classList.add('is-in-view'));
+      return;
+    }
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => entry.target.classList.toggle('is-in-view', entry.isIntersecting));
+    }, { threshold: 0.14, rootMargin: '0px 0px -4% 0px' });
+    elements.forEach((element) => observer.observe(element));
+    return () => observer.disconnect();
+  }, []);
 }
 
 function SearchSummary({ result, selectedPaths, snapshot }: { result: SearchResult; selectedPaths: OpportunityPath[]; snapshot: GraphSnapshot | null }) {
