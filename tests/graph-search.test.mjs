@@ -41,6 +41,16 @@ test('excludes malformed edge, identity and target scores without producing a ro
   invalidIdentity.people.find((person) => person.id === 'target').identityConfidence = 1.1;
   assert.deepEqual(engine.findBestPaths(invalidIdentity, goal, [target('target')], options()).paths, []);
   assert.deepEqual(engine.findBestPaths(snapshot([valid]), goal, [target('target', 0)], options()).paths, []);
+  assert.deepEqual(engine.findBestPaths(snapshot([valid]), goal, [target('target', 1.1)], options()).paths, []);
+});
+
+test('reports no targets with a compact, contiguous event sequence', async (t) => {
+  const { BoundedRouteSearch } = await loadGraph(t);
+  const result = new BoundedRouteSearch().findBestPaths(snapshot([] , ['root']), goal, [], options());
+  assert.equal(result.stats.stop, 'NO_TARGETS');
+  assert.deepEqual(result.paths, []);
+  assert.deepEqual(result.events.map((event) => event.type), ['SEARCH_STARTED', 'SEARCH_COMPLETED']);
+  assert.deepEqual(result.events.map((event) => event.seq), [0, 1]);
 });
 
 test('keeps direction, prunes cycles, and ranks a stronger longer route ahead of a weak direct route', async (t) => {
@@ -65,6 +75,17 @@ test('retains a target reached at the expansion cap and reports an incomplete se
   assert.equal(result.stats.optimalWithinHopLimit, false);
 });
 
+test('reports hop and frontier limits without inventing an exhaustive result', async (t) => {
+  const { BoundedRouteSearch } = await loadGraph(t);
+  const engine = new BoundedRouteSearch();
+  const hopLimited = engine.findBestPaths(snapshot([edge('to-a', 'root', 'a'), edge('to-target', 'a', 'target')]), goal, [target('target')], options({ maxHops: 1 }));
+  assert.deepEqual(hopLimited.paths, []);
+  assert.ok(hopLimited.events.some((event) => event.type === 'PATH_PRUNED' && event.reason === 'HOP_LIMIT'));
+  const frontierLimited = engine.findBestPaths(snapshot([edge('to-a', 'root', 'a'), edge('to-b', 'root', 'b')]), goal, [target('a')], options({ maxFrontier: 1 }));
+  assert.equal(frontierLimited.stats.stop, 'BUDGET_REACHED');
+  assert.equal(frontierLimited.stats.optimalWithinHopLimit, false);
+});
+
 test('reserves terminal events and emits contiguous zero-based sequence numbers after trace trimming', async (t) => {
   const { BoundedRouteSearch } = await loadGraph(t);
   const result = new BoundedRouteSearch().findBestPaths(snapshot([
@@ -86,6 +107,19 @@ test('matches an exhaustive simple-path oracle on a tiny directed graph', async 
   const result = new BoundedRouteSearch().findBestPaths(snapshot(edges), goal, [target('target')], options({ k: 5, maxHops: 3 }));
   const expected = exhaustiveScores(edges, 'root', 'target', 3).map((item) => item.people);
   assert.deepEqual(result.paths.map((path) => path.personIds), expected);
+});
+
+test('orders equal-score routes deterministically', async (t) => {
+  const { BoundedRouteSearch } = await loadGraph(t);
+  const input = snapshot([
+    edge('root-a', 'root', 'a'), edge('a-target', 'a', 'target'),
+    edge('root-b', 'root', 'b'), edge('b-target', 'b', 'target'),
+  ]);
+  const engine = new BoundedRouteSearch();
+  const first = engine.findBestPaths(input, goal, [target('target')], options({ k: 2 }));
+  const second = engine.findBestPaths(input, goal, [target('target')], options({ k: 2 }));
+  assert.deepEqual(first.paths.map((path) => path.personIds), [['root', 'a', 'target'], ['root', 'b', 'target']]);
+  assert.deepEqual(second.paths.map((path) => path.personIds), first.paths.map((path) => path.personIds));
 });
 
 function exhaustiveScores(edges, root, targetId, maxHops) {

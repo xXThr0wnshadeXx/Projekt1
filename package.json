@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "typecheck:graph": "tsc --ignoreConfig --target ES2022 --module NodeNext --moduleResolution NodeNext --strict --noUncheckedIndexedAccess --exactOptionalPropertyTypes --skipLibCheck --noEmit packages/graph/src/index.ts",
+    "test:graph": "node --test tests/graph-search.test.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
