@@ -163,8 +163,12 @@ function App() {
   }
   function saveIntent(intent: DiscoveryIntent) {
     if (!session) { setShowAuth(true); return; }
-    // Discovery persistence will be server-owned once Ben freezes its request contract.
-    setIntentStatus(`Your ${intent.company || intent.field || 'connection'} goal is ready to send to the secure discovery service.`);
+    const routeGoal = [intent.company, intent.recruiter, intent.location, intent.field]
+      .map((value) => value.trim())
+      .filter(Boolean)
+      .join(' ');
+    setGoalText(routeGoal);
+    setIntentStatus('Goal added to Route Search. Connect an authorized source before finding supported paths.');
   }
 
   return <main>
@@ -258,10 +262,10 @@ function DiscoveryIntentForm({ signedIn, resetKey, onSignIn, onSave, onClear, st
       <label>Recruiter or person<input value={intent.recruiter} onChange={change('recruiter')} placeholder="Name or “early talent recruiter”" /></label>
       <label>Location<input value={intent.location} onChange={change('location')} placeholder="e.g. San Jose, CA" /></label>
       <label>Field or role<input value={intent.field} onChange={change('field')} placeholder="e.g. product design internship" /></label>
-      <fieldset className="profile-links"><legend>Optional public profile links</legend><label>LinkedIn profile<input value={intent.linkedinUrl} onChange={change('linkedinUrl')} type="url" placeholder="https://linkedin.com/in/..." /></label><label>Instagram profile<input value={intent.instagramUrl} onChange={change('instagramUrl')} type="url" placeholder="https://instagram.com/..." /></label></fieldset>
+      <fieldset className="profile-links"><legend>Optional profile links — not used for discovery yet</legend><label>LinkedIn profile<input value={intent.linkedinUrl} onChange={change('linkedinUrl')} type="url" placeholder="https://linkedin.com/in/..." /></label><label>Instagram profile<input value={intent.instagramUrl} onChange={change('instagramUrl')} type="url" placeholder="https://instagram.com/..." /></label></fieldset>
       {signedIn ? <button className="primary intent-submit">Save this connection goal <span>→</span></button> : <button type="button" className="primary intent-submit" onClick={onSignIn}>Sign in to start <span>→</span></button>}
       <button type="button" className="text-button intent-clear" onClick={clear}>Clear this goal</button>
-      <p className="intent-privacy">Profile links are optional while drafting. Running discovery will require both profile links and a company or person target. Location and role are not sent as discovery filters yet. We do not scrape private networks or keep this draft in your browser.</p>
+      <p className="intent-privacy">Add a company or person target to prepare Route Search. Profile links are optional, not sent to discovery, and will only support an explicit reviewed export flow when that feature is available. We do not scrape private networks or retain this draft after you leave the page.</p>
       {errors.length > 0 && <div className="intent-errors" role="alert"><strong>Before discovery can start:</strong><ul>{errors.map((error) => <li key={error}>{error}</li>)}</ul></div>}
       {status && <p className="intent-status" role="status">{status}</p>}
     </form>
@@ -272,15 +276,15 @@ function validateDiscoveryIntent(intent: DiscoveryIntent): string[] {
   const errors: string[] = [];
   const targetProvided = Boolean(intent.company.trim() || intent.recruiter.trim());
   if (!targetProvided) errors.push('Add a company or recruiter/person target.');
-  const linkedinError = profileUrlError(intent.linkedinUrl, 'linkedin.com', 'LinkedIn');
-  const instagramError = profileUrlError(intent.instagramUrl, 'instagram.com', 'Instagram');
+  const linkedinError = optionalProfileUrlError(intent.linkedinUrl, 'linkedin.com', 'LinkedIn');
+  const instagramError = optionalProfileUrlError(intent.instagramUrl, 'instagram.com', 'Instagram');
   if (linkedinError) errors.push(linkedinError);
   if (instagramError) errors.push(instagramError);
   return errors;
 }
 
-function profileUrlError(value: string, domain: string, label: string): string | null {
-  if (!value.trim()) return `Add your ${label} profile URL.`;
+function optionalProfileUrlError(value: string, domain: string, label: string): string | null {
+  if (!value.trim()) return null;
   try {
     const url = new URL(value);
     const validHost = url.hostname === domain || url.hostname.endsWith(`.${domain}`);
