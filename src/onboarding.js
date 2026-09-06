@@ -29,3 +29,17 @@ if($('onboarding-form')){
     }
   }catch(error){$('session-status').textContent=error.message;}
 }
+
+// Both entry points will share Google's identity flow once the provider is configured.
+if($('account-heading')){
+  function accountMode(focus=false){
+    const login=location.hash==='#login';
+    $('google-signin').dataset.authIntent=login?'login':'signup';
+    $('account-heading').textContent=login?'Welcome back to Orbit':'Create your Orbit account';
+    $('account-description').textContent=login?'Log in with your Google account to return to your maps.':'Sign up with your Google account, then add your LinkedIn profile.';
+    if(focus){$('get-started').scrollIntoView({block:'center'});$('account-heading').focus({preventScroll:true});}
+  }
+  window.addEventListener('hashchange',()=>accountMode(['#login','#signup'].includes(location.hash)));
+  for(const id of ['login-link','signup-link'])$(id).addEventListener('click',()=>{if(location.hash===$(id).hash)accountMode(true);});
+  accountMode(['#login','#signup'].includes(location.hash));
+}
