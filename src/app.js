@@ -122,7 +122,7 @@ function refreshFilterOptions(){
   set('filter-count',`${matched.toLocaleString()} of ${people.length.toLocaleString()} people visible${active.length?` · ${active.join(' · ')}`:' · no filters applied'}${arranged}`);
 }
 function applyFilters(){closeTreeView();const filters=activeFilters();graph.setFilters(filters,mapArrangement,activeKeywords());refreshFilterOptions();if(selected&&state?.nodes[selected]&&!matchesFilters(state.nodes[selected],filters)){selected=null;graph.focus(null);$('inspector-content').replaceChildren(el('h3','Select a visible person'),el('p','Your filters changed which people are shown.'));}if(view==='directory')renderPeople();}
-function arrangeMap(by){closeTreeView();mapArrangement=by;syncArrangementButtons();applyFilters();toast(by==='location'?'People are grouped by recorded location. Filters and search still work inside the clusters.':'People returned to their observed connection paths.');}
+function arrangeMap(by){closeTreeView();selected=null;graph.focus(null);$('inspector').close();mapArrangement=by;syncArrangementButtons();applyFilters();toast(by==='location'?'People are grouped by their best available location, including recognized school and metro clues.':'People returned to their observed connection paths.');}
 $('filter-toggle').onclick=()=>{const open=$('map-filters').hidden;show('map-filters',open);$('filter-toggle').setAttribute('aria-expanded',String(open));};
 $('arrange-network').onclick=()=>arrangeMap('none');
 $('arrange-location').onclick=()=>arrangeMap('location');

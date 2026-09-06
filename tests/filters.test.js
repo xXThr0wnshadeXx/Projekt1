@@ -17,6 +17,18 @@ test('location clusters keep every person while consolidating an unreadable long
  const points=Array.from({length:30},(_,i)=>({id:String(i),location:`Place ${i}`})),grouped=groupTargets(points,'location');
  assert.equal(grouped.targets.size,30);assert.equal(grouped.totalGroups,30);assert.equal(grouped.labels.length,12);assert.equal(grouped.labels.at(-1).name,'Other locations');assert.equal(grouped.labels.at(-1).count,19);
 });
+test('locations normalize metro variants and infer a known college location only when needed',()=>{
+ assert.equal(locationOf({location:'Greater Sacramento'}),'sacramento area');
+ assert.equal(locationOf({location:'Folsom, California, United States'}),'sacramento area');
+ assert.equal(locationLabelOf({location:'Greater Sacramento'}),'Sacramento Area');
+ assert.equal(locationOf({education:'Student at UC Berkeley'}),'san francisco bay area');
+ assert.equal(locationOf({location:'United States',headline:'Biology student at UCLA'}),'los angeles area');
+ assert.equal(locationLabelOf({education:'University of California, Los Angeles'}),'Los Angeles Area');
+ assert.equal(locationMatches({education:'UCLA'},'LA'),true);
+ assert.equal(locationMatches({location:'Los Angeles, California'},'ucla'),true);
+ // A meaningful recorded home location wins over a different college clue.
+ assert.equal(locationOf({location:'New York',education:'UC Berkeley'}),'new york');
+});
 test('facet search is fuzzy and one person can belong to several useful sectors',()=>{
  const person={depth:2,location:'San Francisco Bay Area',headline:'Biomedical software engineer',education:'San Jose State University',skills:['genomics','machine learning']};
  assert.deepEqual(fieldsOf(person),['Healthcare & life sciences','Technology','Education & research']);
@@ -37,6 +49,13 @@ test('degree and alias-aware keyword filters combine without losing the root',()
  assert.equal(matchesFilters(sjsu,{first:true,second:true,extended:false,keywords:['SJSU'],keywordOnly:true}),true);assert.equal(matchesFilters({...sjsu,depth:3},{extended:false}),false);assert.equal(matchesFilters({...sjsu,depth:0},{first:false,second:false,extended:false}),true);
  assert.equal(matchesFilters({...sjsu,depth:5},{extended:true,maxDepth:4}),false);assert.equal(matchesFilters({...sjsu,depth:5},{extended:true,maxDepth:6}),true);
  const grouped=groupTargets([sjsu,{id:'x',depth:2,headline:'Designer'}],'keyword',['SJSU']);assert.deepEqual(grouped.labels.map(label=>label.name),['Matches: SJSU','No keyword match']);
+});
+
+test('short location aliases expand as whole words without contaminating unrelated searches',async()=>{
+ const {queryExpansions}=await import('../src/search.js');
+ assert.ok(queryExpansions('LA').includes('los angeles'));
+ assert.ok(queryExpansions('UCLA').includes('los angeles'));
+ assert.equal(queryExpansions('Clara').includes('los angeles'),false);
 });
 
 test('full LinkedIn URLs find people reached through comment links',async()=>{

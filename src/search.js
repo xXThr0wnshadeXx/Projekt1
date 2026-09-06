@@ -4,7 +4,7 @@ const aliasGroups=[
   ['sjsu','san jose state','san jose state university'],
   ['cal poly','calpoly','cpslo','california polytechnic state university','california polytechnic state university san luis obispo'],
   ['ucb','uc berkeley','university of california berkeley','cal berkeley'],
-  ['ucla','university of california los angeles'],['ucsd','uc san diego','university of california san diego'],
+  ['la','los angeles','greater los angeles','los angeles metropolitan area','ucla','uc los angeles','university of california los angeles'],['ucsd','uc san diego','university of california san diego'],
   ['ucsb','uc santa barbara','university of california santa barbara'],['ucd','uc davis','university of california davis'],
   ['uci','uc irvine','university of california irvine'],['ucr','uc riverside','university of california riverside'],
   ['ucsc','uc santa cruz','university of california santa cruz'],['usc','university of southern california'],
@@ -13,7 +13,7 @@ const aliasGroups=[
   ['bio','biology','biological sciences'],['premed','pre med','pre medical'],['biotech','biotechnology'],['med school','medical school'],
   ['bme','biomedical engineering'],['biochem','biochemistry'],['neuro','neuroscience'],['ph','public health'],
   ['fintech','financial technology'],['vc','venture capital'],['pm','product manager','product management'],
-  ['sf','san francisco'],['sfba','san francisco bay area'],['nyc','new york city']
+  ['sf','san francisco'],['sfba','bay area','san francisco bay area'],['sac','sacramento','greater sacramento','sacramento metropolitan area'],['nyc','new york city']
 ];
 const searchableFields=['name','headline','location','about','experience','education','skills','keywords'];
 
@@ -22,7 +22,10 @@ function words(value){return normalizeSearch(value).split(' ').filter(Boolean);}
 function acronym(value){const keep=words(value).filter(word=>!stopWords.has(word));return keep.length>=2&&keep.length<=8?keep.map(word=>word[0]).join(''):'';}
 export function queryExpansions(query){
   const q=normalizeSearch(query),out=new Set(q?[q]:[]);if(!q)return [];
-  for(const group of aliasGroups)if(group.some(alias=>q===alias||q.includes(alias)))for(const alias of group)out.add(alias);
+  // Short aliases such as LA, SF and AI must be whole tokens. Substring matching
+  // made searches such as "Clara" accidentally expand to Los Angeles.
+  const padded=` ${q} `;
+  for(const group of aliasGroups)if(group.some(alias=>q===alias||(alias.length>3&&padded.includes(` ${alias} `))))for(const alias of group)out.add(alias);
   return [...out].slice(0,20);
 }
 export function buildKeywords(person){

@@ -1,8 +1,27 @@
 import {normalizeSearch,queryExpansions,scorePerson} from './search.js';
 // Categories are display estimates, never asserted profile facts.
 const fields=[['Healthcare & life sciences',/\b(healthcare|health care|health sciences?|medicine|medical|med school|pre[- ]?med(?:ical)?|physician|doctor|nurs(?:e|ing)|clinical|hospital|pharma(?:cy|ceutical)?|dent(?:al|istry|ist)|public health|life sciences?|bio|biology|biological|biochemistry|biotech(?:nology)?|biomedical|neuroscience|genetics?|genomics?|epidemiology|immunology|microbiology|physiology|anatomy)\b/i],['Technology',/\b(software|developer|programmer|data scientist|engineering|engineer|technology|cybersecurity|IT|machine learning|artificial intelligence)\b/i],['Finance',/\b(finance|financial|banking|investor|investment|accountant|accounting)\b/i],['Education & research',/\b(student|professor|teacher|education|research|university|academic)\b/i],['Design & creative',/\b(design|designer|creative|artist|writer|ux|ui)\b/i],['Marketing & sales',/\b(marketing|sales|brand|advertising|communications)\b/i],['Operations & people',/\b(operations|recruiter|recruiting|human resources|logistics|supply chain)\b/i],['Legal',/\b(lawyer|legal|attorney|law)\b/i]];
-export function locationOf(p){return p.location?.trim().replace(/\s+/g,' ').toLowerCase()||'Not specified';}
-export function locationLabelOf(p){const clean=p.location?.trim().replace(/\s+/g,' ');return clean||'Not specified';}
+const locationRules=[
+ ['sacramento area','Sacramento Area',/\b(greater sacramento|sacramento(?: metropolitan)? area|sacramento|folsom|el dorado hills|roseville|rocklin|uc davis|university of california davis|sacramento state|sac state)\b/],
+ ['san francisco bay area','San Francisco Bay Area',/\b(sfba|san francisco bay area|bay area|san francisco|san mateo|oakland|berkeley|uc berkeley|university of california berkeley|cal berkeley|san jose|sjsu|san jose state(?: university)?|santa clara|palo alto|fremont|cupertino|mountain view)\b/],
+ ['los angeles area','Los Angeles Area',/\b(greater los angeles|los angeles(?: metropolitan)? area|los angeles|ucla|uc los angeles|university of california los angeles|usc|university of southern california|pasadena|long beach|santa monica|westwood)\b/],
+ ['san diego area','San Diego Area',/\b(san diego|ucsd|uc san diego|university of california san diego|la jolla)\b/]
+];
+const genericLocations=/^(united states(?: of america)?|usa|us|california|ca)$/;
+function cleanLocation(value){return String(value||'').trim().replace(/\s+/g,' ');}
+function ruleFor(value){const normalized=normalizeSearch(value);return locationRules.find(([, ,pattern])=>pattern.test(normalized));}
+function locationInfo(p){
+ const explicit=cleanLocation(p.location),explicitNormalized=normalizeSearch(explicit),explicitRule=ruleFor(explicit);
+ if(explicitRule)return {key:explicitRule[0],label:explicitRule[1],search:[explicit,explicitRule[1]].join(' '),inferred:false};
+ if(explicitNormalized&&!genericLocations.test(explicitNormalized))return {key:explicitNormalized,label:explicit,search:explicit,inferred:false};
+ // Only infer a place when LinkedIn did not provide a useful location. Known
+ // schools and city clues are evidence; arbitrary biography words are not.
+ const clues=[p.headline,p.education,p.experience,p.about,p.keywords].flat().filter(Boolean).join(' '),inferredRule=ruleFor(clues);
+ if(inferredRule)return {key:inferredRule[0],label:inferredRule[1],search:[explicit,clues,inferredRule[1]].join(' '),inferred:true};
+ return {key:'Not specified',label:'Not specified',search:explicit||clues,inferred:false};
+}
+export function locationOf(p){return locationInfo(p).key;}
+export function locationLabelOf(p){return locationInfo(p).label;}
 export function fieldsOf(p){
  const text=[p.headline,p.about,p.experience,p.education,p.skills,p.keywords].flat().filter(Boolean).join(' '),out=[];
  for(const value of [p.industry,p.field]){const clean=String(value||'').trim();if(clean&&!out.some(item=>normalizeSearch(item)===normalizeSearch(clean)))out.push(clean);}
@@ -22,7 +41,7 @@ function fuzzyTextMatch(value,query,threshold=62){
  if(queryExpansions(query).some(term=>text.includes(term)||term.includes(text)))return true;
  return scorePerson({name:value,headline:value,location:value,education:value,experience:value,skills:value},query).score>=threshold;
 }
-export function locationMatches(p,query=''){return fuzzyTextMatch(locationOf(p),query,58);}
+export function locationMatches(p,query=''){const info=locationInfo(p);return fuzzyTextMatch([info.key,info.label,info.search].join(' '),query,58);}
 export function fieldMatches(p,query=''){
  if(!query)return true;const categories=fieldsOf(p),source=[...categories,p.industry,p.field,p.headline,p.about,p.education,p.experience,p.skills].flat().filter(Boolean).join(' ');
  return categories.some(value=>fuzzyTextMatch(value,query,58))||fuzzyTextMatch(source,query,68);
@@ -43,7 +62,9 @@ export function groupTargets(points,by,keywords=[]){
  // A long tail of one-person locations makes the map unreadable. Keep the
  // strongest clusters and place every remaining person in one honest catch-all.
  if(by==='location'&&ordered.length>12){const kept=ordered.slice(0,11),rest=ordered.slice(11).flatMap(group=>group.members);ordered=[...kept,{name:'Other locations',members:rest}];}
- const columns=Math.max(1,Math.ceil(Math.sqrt(ordered.length*1.55))),rows=Math.ceil(ordered.length/columns),maxSize=Math.max(1,...ordered.map(group=>group.members.length)),cellX=Math.max(260,Math.sqrt(maxSize)*30+130),cellY=Math.max(220,Math.sqrt(maxSize)*27+115),targets=new Map(),labels=[];
- ordered.forEach(({name,members},i)=>{const cx=(i%columns-(columns-1)/2)*cellX,cy=(Math.floor(i/columns)-(rows-1)/2)*cellY,sorted=[...members].sort((a,b)=>a.id.localeCompare(b.id));sorted.forEach((p,j)=>{const r=14*Math.sqrt(j),angle=j*2.3999632297;targets.set(p.id,{x:cx+Math.cos(angle)*r,y:cy+Math.sin(angle)*r});});const radius=Math.max(28,14*Math.sqrt(Math.max(0,sorted.length-1))+18);labels.push({name,count:sorted.length,x:cx,y:cy-radius-28});});
+ const columns=Math.max(1,Math.ceil(Math.sqrt(ordered.length*1.55))),rows=Math.ceil(ordered.length/columns),targets=new Map(),labels=[];
+ const metrics=ordered.map(group=>{const radius=Math.max(32,18*Math.sqrt(Math.max(0,group.members.length-1))+22);return {radius,width:Math.max(radius*2+54,Math.min(370,group.name.length*8+90)),height:radius*2+90};});
+ const columnWidths=Array.from({length:columns},(_,column)=>Math.max(220,...metrics.filter((_,i)=>i%columns===column).map(item=>item.width))),rowHeights=Array.from({length:rows},(_,row)=>Math.max(190,...metrics.slice(row*columns,(row+1)*columns).map(item=>item.height))),totalWidth=columnWidths.reduce((a,b)=>a+b,0)+(columns-1)*55,totalHeight=rowHeights.reduce((a,b)=>a+b,0)+(rows-1)*55;
+ ordered.forEach(({name,members},i)=>{const column=i%columns,row=Math.floor(i/columns),cx=-totalWidth/2+columnWidths.slice(0,column).reduce((a,b)=>a+b,0)+column*55+columnWidths[column]/2,cy=-totalHeight/2+rowHeights.slice(0,row).reduce((a,b)=>a+b,0)+row*55+rowHeights[row]/2,sorted=[...members].sort((a,b)=>a.id.localeCompare(b.id));sorted.forEach((p,j)=>{const r=18*Math.sqrt(j),angle=j*2.3999632297;targets.set(p.id,{x:cx+Math.cos(angle)*r,y:cy+Math.sin(angle)*r});});labels.push({name,count:sorted.length,x:cx,y:cy-metrics[i].radius-31});});
  return {targets,labels,totalGroups:groups.size};
 }
