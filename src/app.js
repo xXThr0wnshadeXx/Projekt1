@@ -60,13 +60,13 @@ async function refresh(){
     collectionState=next;refreshMaps().catch(()=>{});library.queue(next);if(libraryMode)return;state=next;if(selected&&!state?.nodes[selected])selected=null;render();
   }finally{refreshing=false;}
 }
-$('setup-form').onsubmit=async e=>{e.preventDefault();try{if(!profileURL($('profile-url').value))throw Error('Paste a LinkedIn person profile URL beginning with https://www.linkedin.com/in/.');const settings=config();if(!hasCollector())throw Error('Install the Chrome companion below, then click Connect companion to collect from LinkedIn.');await send({type:'START',url:$('profile-url').value,config:settings});await refresh();}catch(error){toast(error.message);}};
+$('setup-form').onsubmit=async e=>{e.preventDefault();try{if(!profileURL($('profile-url').value))throw Error('Paste a LinkedIn person profile URL beginning with https://www.linkedin.com/in/.');const settings=config();if(!hasCollector())throw Error('Install the Chrome companion below, then click Connect companion to collect from LinkedIn.');await send({type:'START',url:$('profile-url').value,config:settings});await refresh();openWorkspaceSettings(false);}catch(error){toast(error.message);}};
 $('pause').onclick=async()=>{try{await send({type:'PAUSE'});await refresh();}catch(e){toast(e.message);}};
 $('resume').onclick=async()=>{try{await send({type:'RESUME',config:config()});await refresh();}catch(e){toast(e.message);}};
 $('show-tab').onclick=async()=>{try{await send({type:'SHOW_TAB'});}catch(e){toast(e.message);}};
 $('clear-button').onclick=async()=>{if(!confirm('Clear this browser’s collection checkpoint? Unsaved discoveries will be lost. People already saved to the database will remain.'))return;try{if(hasCollector())await send({type:'CLEAR'});else localStorage.removeItem(KEY);selected=null;$('inspector-content').replaceChildren(el('h3','Every person has a path.'),el('p','Select someone in your map to explore their connections.'));await refresh();}catch(e){toast(e.message);}};
 for(const name of ['graph','directory','coverage'])$(`tab-${name}`).onclick=()=>switchView(name);
-$('search').oninput=()=>{graph.search($('search').value);if(view==='directory')renderPeople();};$('fit').onclick=()=>graph.fit();$('zoom-in').onclick=()=>graph.zoom(1.08);$('zoom-out').onclick=()=>graph.zoom(1/1.08);
+$('search').oninput=()=>{graph.search($('search').value);if(view==='directory')renderPeople();};$('fit').onclick=()=>graph.fit();$('zoom-in').onclick=()=>{graph.zoomTarget=null;graph.zoom(1.08);};$('zoom-out').onclick=()=>{graph.zoomTarget=null;graph.zoom(1/1.08);};
 if(EXTENSION){set('connection-mode','CHROME COLLECTOR CONNECTED');chrome.storage.onChanged.addListener((changes,area)=>{if(area==='local'&&changes[KEY])refresh().catch(e=>toast(e.message));});}else{set('connection-mode','COMPANION NOT CONNECTED');show('install-note',true);}
 await refresh();await refreshMaps().catch(()=>{});if(state){$('profile-url').value=state.root;$('max-nodes').value=state.config.maxNodes;$('depth').value=state.config.depth;$('delay').value=Math.max(120,state.config.delay||120);}
 
@@ -76,7 +76,7 @@ if(!EXTENSION)connectCompanion(true);
 setInterval(()=>{if((EXTENSION||bridgeConnected)&&document.visibilityState==='visible')refresh().catch(()=>{bridgeConnected=false;set('connection-mode','COMPANION DISCONNECTED');show('install-note',true);render();});},500);
 setInterval(()=>{if(document.visibilityState==='visible')renderLive();},1000);
 
-if($('scroll-zoom'))$('scroll-zoom').onchange=e=>{graph.scrollZoom=e.target.checked;};
+if($('scroll-zoom'))$('scroll-zoom').onchange=e=>{graph.scrollZoom=e.target.checked;if(!e.target.checked)graph.zoomTarget=null;};
 graph.onZoom=scale=>{if($('zoom-level'))set('zoom-level',`${Math.round(scale*100)}%`);};
 graph.onZoom(graph.scale);
 
@@ -115,3 +115,11 @@ $('new-map').onclick=()=>changeMap('NEW_MAP');
 $('map-switcher').onchange=e=>changeMap(e.target.value?'SWITCH_MAP':'NEW_MAP',e.target.value);
 $('cancel-build').onclick=async()=>{try{await send({type:'CANCEL'});await refresh();await refreshMaps();toast('Build cancelled. Your discovered people are kept.');}catch(e){toast(e.message);}};
 $('filter-lines').onchange=e=>{graph.showAllConnections=e.target.checked;graph.draw();};
+
+function openWorkspaceSettings(settings){
+ $('map-settings').hidden=!settings;document.querySelector('.main-panel').hidden=settings;document.querySelector('.inspector').hidden=settings;
+ $('settings-tab').setAttribute('aria-pressed',String(settings));$('workspace-tab').setAttribute('aria-pressed',String(!settings));
+ if(!settings)graph.resize();
+}
+$('workspace-tab').onclick=()=>openWorkspaceSettings(false);
+$('settings-tab').onclick=()=>openWorkspaceSettings(true);

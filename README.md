@@ -342,3 +342,11 @@ in the Chrome profile, independently of the shared database library.
 Filtered views reduce connection-line clutter by default. **Show all connections**
 restores the full visible edge set. Labels avoid overlapping where possible.
 Reload the updated companion to enable map switching and cancellation.
+
+### Workspace and settings
+
+The **Map workspace** tab focuses on the graph, people, and filters. Use
+**Map settings** for saved maps, starting profiles, collection options, and
+build controls. Starting a build returns to the workspace automatically.
+Optional scroll zoom now eases toward the pointer in small increments and
+settles smoothly; reduced-motion mode applies changes immediately.

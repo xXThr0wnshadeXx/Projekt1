@@ -1,10 +1,10 @@
 import {matchesFilters,groupTargets,springProgress,locationOf,fieldOf} from './filters.js';
 export class NetworkGraph {
   constructor(canvas,onSelect){
-    this.canvas=canvas;this.ctx=canvas.getContext('2d');this.onSelect=onSelect;this.points=[];this.edges=[];this.positions=new Map();this.showAllConnections=false;this.filters={};this.groupBy="none";this.groupLabels=[];this.motion=null;this.scale=1;this.offset={x:0,y:0};this.selected=null;this.query='';this.path=new Set();this.autoFit=true;this.scrollZoom=false;this.frame=null;this.childCounts=new Map();this.directCount=0;this.reducedMotion=globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches||false;
+    this.canvas=canvas;this.ctx=canvas.getContext('2d');this.onSelect=onSelect;this.points=[];this.edges=[];this.positions=new Map();this.showAllConnections=false;this.filters={};this.groupBy="none";this.groupLabels=[];this.motion=null;this.scale=1;this.offset={x:0,y:0};this.selected=null;this.query='';this.path=new Set();this.autoFit=true;this.scrollZoom=false;this.zoomTarget=null;this.zoomTime=null;this.frame=null;this.childCounts=new Map();this.directCount=0;this.reducedMotion=globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches||false;
     this.observer=new ResizeObserver(()=>this.resize());this.observer.observe(canvas.parentElement);
-    canvas.addEventListener('wheel',e=>{if(!this.scrollZoom)return;e.preventDefault();const pixels=e.deltaY*(e.deltaMode===1?16:e.deltaMode===2?this.h:1);this.zoom(Math.exp(-Math.max(-40,Math.min(40,pixels))*.001),e.offsetX,e.offsetY);},{passive:false});
-    canvas.addEventListener('pointerdown',e=>{this.drag={x:e.clientX,y:e.clientY,ox:this.offset.x,oy:this.offset.y,moved:false};canvas.setPointerCapture(e.pointerId);});
+    canvas.addEventListener('wheel',e=>{if(!this.scrollZoom)return;e.preventDefault();const pixels=e.deltaY*(e.deltaMode===1?16:e.deltaMode===2?this.h:1);this.queueZoom(Math.exp(-Math.max(-60,Math.min(60,pixels))*.0007),e.offsetX,e.offsetY);},{passive:false});
+    canvas.addEventListener('pointerdown',e=>{this.zoomTarget=null;this.drag={x:e.clientX,y:e.clientY,ox:this.offset.x,oy:this.offset.y,moved:false};canvas.setPointerCapture(e.pointerId);});
     canvas.addEventListener('pointermove',e=>{if(!this.drag)return;const dx=e.clientX-this.drag.x,dy=e.clientY-this.drag.y;if(Math.hypot(dx,dy)>3){this.drag.moved=true;this.autoFit=false;}this.offset={x:this.drag.ox+dx,y:this.drag.oy+dy};this.draw();});
     canvas.addEventListener('pointerup',e=>{if(this.drag&&!this.drag.moved){const r=canvas.getBoundingClientRect(),x=(e.clientX-r.left-this.w/2-this.offset.x)/this.scale,y=(e.clientY-r.top-this.h/2-this.offset.y)/this.scale;let near=null,dist=Infinity;for(const p of this.points){if(!this.isVisible(p)||p.bornAt>performance.now())continue;const d=Math.hypot(p.x-x,p.y-y);if(d<Math.max(9/this.scale,p.r+4)&&d<dist){near=p;dist=d;}}if(near)this.onSelect(near.id);}this.drag=null;});
     canvas.addEventListener('pointercancel',()=>this.drag=null);
@@ -12,7 +12,7 @@ export class NetworkGraph {
   resize(){const r=this.canvas.parentElement.getBoundingClientRect();this.w=r.width;this.h=r.height;const dpr=window.devicePixelRatio||1;this.canvas.width=Math.round(r.width*dpr);this.canvas.height=Math.round(r.height*dpr);this.ctx.setTransform(dpr,0,0,dpr,0,0);if(this.autoFit)this.fit();else this.draw();}
   setData(state){
     this.state=state;
-    if(!state||this.dataId!==state.id){this.points=[];this.edges=[];this.positions.clear();this.motion=null;this.groupLabels=[];this.childCounts.clear();this.directCount=0;this.dataId=state?.id;this.graphRevision=null;this.autoFit=true;this.lastRevealed=null;}
+    if(!state||this.dataId!==state.id){this.points=[];this.edges=[];this.positions.clear();this.zoomTarget=null;this.motion=null;this.groupLabels=[];this.childCounts.clear();this.directCount=0;this.dataId=state?.id;this.graphRevision=null;this.autoFit=true;this.lastRevealed=null;}
     if(!state){this.draw();return;}
     if(state.graphRevision!==undefined&&this.graphRevision===state.graphRevision)return;
     this.graphRevision=state.graphRevision;
@@ -31,8 +31,20 @@ export class NetworkGraph {
     for(const p of nodes){const point=this.positions.get(p.id);Object.assign(point,p);point.r=p.depth===0?9:p.depth===1?4.2:2.8;}
     this.layout();if(this.autoFit)this.fit();else this.draw();
   }
-  fit(){this.autoFit=true;if(!this.points.length||!this.w||!this.h){this.draw();return;}let ex=100,ey=100;for(const p of this.points){if(!this.isVisible(p))continue;ex=Math.max(ex,Math.abs(p.tx??p.x)+80);ey=Math.max(ey,Math.abs(p.ty??p.y)+80);}for(const label of this.groupLabels){ex=Math.max(ex,Math.abs(label.x)+100);ey=Math.max(ey,Math.abs(label.y)+30);}this.scale=Math.max(.01,Math.min((this.w-65)/(ex*2),(this.h-100)/(ey*2),1.8));this.offset={x:0,y:0};this.autoFit=false;this.onZoom?.(this.scale);this.draw();}
+  fit(){this.zoomTarget=null;this.autoFit=true;if(!this.points.length||!this.w||!this.h){this.draw();return;}let ex=100,ey=100;for(const p of this.points){if(!this.isVisible(p))continue;ex=Math.max(ex,Math.abs(p.tx??p.x)+80);ey=Math.max(ey,Math.abs(p.ty??p.y)+80);}for(const label of this.groupLabels){ex=Math.max(ex,Math.abs(label.x)+100);ey=Math.max(ey,Math.abs(label.y)+30);}this.scale=Math.max(.01,Math.min((this.w-65)/(ex*2),(this.h-100)/(ey*2),1.8));this.offset={x:0,y:0};this.autoFit=false;this.onZoom?.(this.scale);this.draw();}
   zoom(factor,x=this.w/2,y=this.h/2){this.autoFit=false;const old=this.scale;this.scale=Math.max(.01,Math.min(12,this.scale*factor));const ratio=this.scale/old;this.offset={x:x-this.w/2-(x-this.w/2-this.offset.x)*ratio,y:y-this.h/2-(y-this.h/2-this.offset.y)*ratio};this.onZoom?.(this.scale);this.draw();}
+  queueZoom(factor,x=this.w/2,y=this.h/2){
+    if(this.reducedMotion){this.zoom(factor,x,y);return;}
+    this.zoomTarget={scale:Math.max(.01,Math.min(12,(this.zoomTarget?.scale??this.scale)*factor)),x,y};
+    this.zoomTime=performance.now();this.draw();
+  }
+  advanceZoom(now){
+    if(!this.zoomTarget)return false;
+    const target=this.zoomTarget,dt=Math.max(0,Math.min(64,now-this.zoomTime));this.zoomTime=now;
+    const next=this.scale+(target.scale-this.scale)*(1-Math.exp(-dt/85));
+    if(Math.abs(target.scale-next)<Math.max(.00001,target.scale*.0005)){this.zoom(target.scale/this.scale,target.x,target.y);this.zoomTarget=null;return false;}
+    this.zoom(next/this.scale,target.x,target.y);return true;
+  }
   isVisible(p){return matchesFilters(p,this.filters);}
   setFilters(filters,by='none'){this.filters=filters;this.groupBy=by;this.layout();this.draw();}
   layout(){
@@ -50,8 +62,8 @@ export class NetworkGraph {
   search(q){q=q.toLowerCase();if(this.query===q)return;this.query=q;this.draw();}
   draw(){if(this.frame!==null)return;this.frame=requestAnimationFrame(now=>{this.frame=null;this.paint(now);});}
   paint(now){
-    const ctx=this.ctx;if(!ctx||!this.w||!this.h)return;ctx.clearRect(0,0,this.w,this.h);ctx.save();ctx.translate(this.w/2+this.offset.x,this.h/2+this.offset.y);ctx.scale(this.scale,this.scale);
-    let animating=this.advanceMotion(now),latest=null,visible=0;
+    const ctx=this.ctx;if(!ctx||!this.w||!this.h)return;const zooming=this.advanceZoom(now);ctx.clearRect(0,0,this.w,this.h);ctx.save();ctx.translate(this.w/2+this.offset.x,this.h/2+this.offset.y);ctx.scale(this.scale,this.scale);
+    let animating=this.advanceMotion(now)||zooming,latest=null,visible=0;
     for(const label of this.groupLabels){ctx.font=`${14/this.scale}px Arial,sans-serif`;ctx.textAlign="center";ctx.fillStyle="#d3d0c0";ctx.fillText(`${label.name} · ${label.count}`,label.x,label.y);}
     // Batch ordinary edges into one canvas stroke, keeping highlighted paths separate.
     for(const chosen of [false,true]){ctx.strokeStyle=chosen?'#ead779':this.selected?'#303129':'#4c5044';ctx.lineWidth=(chosen?1.6:.55)/this.scale;ctx.beginPath();for(const e of this.edges){const a=this.positions.get(e.source),b=this.positions.get(e.target);if(!a||!b||!this.isVisible(a)||!this.isVisible(b)||a.bornAt>now||b.bornAt>now)continue;if(!this.showAllConnections&&(this.groupBy!=='none'||this.filters.location||this.filters.field)&&!this.path.has(a.id)&&!this.path.has(b.id)){if(this.selected){if(a.id!==this.selected&&b.id!==this.selected)continue;}else if(this.groupBy==='none'||(this.groupBy==='location'?locationOf(a)!==locationOf(b):fieldOf(a)!==fieldOf(b)))continue;}if((this.path.has(a.id)&&this.path.has(b.id))!==chosen)continue;ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);}ctx.stroke();}
